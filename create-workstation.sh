@@ -4,6 +4,12 @@
 # Provisions a Google Cloud Workstation preloaded with Claude Code
 # and a clone of a private GitHub repo.
 #
+# Auth precedence for Claude Code:
+#   1. CLAUDE_CODE_OAUTH_TOKEN  (preferred — uses Claude Pro/Max/Team subscription)
+#   2. ANTHROPIC_API_KEY        (fallback — pay-as-you-go API billing)
+# Only one is injected into the workstation; if both are set, the API key wins
+# inside Claude Code, which would silently bypass the user's subscription.
+#
 # Idempotent: safe to re-run. Each step checks for existence first.
 #
 # Usage:
@@ -86,22 +92,61 @@ docker buildx build --platform linux/amd64 -t "${IMAGE_URI}" --push .
 # =============================================================================
 # 4. Secret Manager
 # =============================================================================
-ensure_secret() {
-    local name="$1" prompt="$2"
-    if gcloud secrets describe "${name}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
-        log "Secret '${name}' already exists (use 'gcloud secrets versions add' to rotate)"
-        return
-    fi
-    read -rsp "${prompt}: " value; echo
-    [[ -z "${value}" ]] && die "Empty value for ${name}"
-    printf '%s' "${value}" | gcloud secrets create "${name}" \
+secret_exists() {
+    gcloud secrets describe "$1" --project="${PROJECT_ID}" >/dev/null 2>&1
+}
+
+create_secret_from_stdin() {
+    local name="$1"
+    gcloud secrets create "${name}" \
         --replication-policy=automatic \
         --data-file=- \
         --project="${PROJECT_ID}"
 }
 
-ensure_secret "anthropic-api-key" "Enter ANTHROPIC_API_KEY"
-ensure_secret "github-pat"        "Enter GitHub PAT (fine-grained, repo-scoped)"
+ensure_secret_prompt() {
+    local name="$1" prompt="$2"
+    if secret_exists "${name}"; then
+        log "Secret '${name}' already exists (use 'gcloud secrets versions add' to rotate)"
+        return
+    fi
+    read -rsp "${prompt}: " value; echo
+    [[ -z "${value}" ]] && die "Empty value for ${name}"
+    printf '%s' "${value}" | create_secret_from_stdin "${name}"
+}
+
+# --- Claude auth: prefer OAuth token (Pro/Max/Team), fall back to API key ---
+CLAUDE_AUTH_MODE=""   # "oauth" | "apikey"
+
+if secret_exists "claude-code-oauth-token"; then
+    log "Found existing 'claude-code-oauth-token' secret — using Claude subscription auth."
+    CLAUDE_AUTH_MODE="oauth"
+elif secret_exists "anthropic-api-key"; then
+    log "Found existing 'anthropic-api-key' secret — using API key auth."
+    CLAUDE_AUTH_MODE="apikey"
+else
+    cat <<'EOF'
+
+Choose Claude Code authentication:
+  1) Claude Pro/Max/Team OAuth token  (recommended for subscribers — uses your plan)
+  2) Anthropic API key                (pay-as-you-go API billing)
+
+To generate an OAuth token: run `claude setup-token` locally, authorize in
+the browser, and copy the printed sk-ant-oat01-... token. Tokens are valid
+for ~1 year and can be rotated with `gcloud secrets versions add`.
+EOF
+    read -rp "Enter choice [1/2]: " choice
+    case "${choice}" in
+        1)  ensure_secret_prompt "claude-code-oauth-token" \
+                "Paste CLAUDE_CODE_OAUTH_TOKEN (sk-ant-oat01-...)"
+            CLAUDE_AUTH_MODE="oauth" ;;
+        2)  ensure_secret_prompt "anthropic-api-key" "Enter ANTHROPIC_API_KEY"
+            CLAUDE_AUTH_MODE="apikey" ;;
+        *)  die "Invalid choice: ${choice}" ;;
+    esac
+fi
+
+ensure_secret_prompt "github-pat" "Enter GitHub PAT (fine-grained, repo-scoped)"
 
 # =============================================================================
 # 5. Service account + IAM
@@ -114,7 +159,13 @@ if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT_EMAIL}" \
         --project="${PROJECT_ID}"
 fi
 
-for secret in anthropic-api-key github-pat; do
+if [[ "${CLAUDE_AUTH_MODE}" == "oauth" ]]; then
+    CLAUDE_SECRETS=("claude-code-oauth-token")
+else
+    CLAUDE_SECRETS=("anthropic-api-key")
+fi
+
+for secret in "${CLAUDE_SECRETS[@]}" github-pat; do
     gcloud secrets add-iam-policy-binding "${secret}" \
         --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
         --role="roles/secretmanager.secretAccessor" \
@@ -138,15 +189,26 @@ fi
 #    Only admins can read the config, so this is acceptable for dev environments.
 # =============================================================================
 log "Reading secret values to inject as env..."
-ANTHROPIC_KEY_VAL=$(gcloud secrets versions access latest --secret=anthropic-api-key --project="${PROJECT_ID}")
 GITHUB_PAT_VAL=$(gcloud secrets versions access latest --secret=github-pat --project="${PROJECT_ID}")
+[[ "${GITHUB_PAT_VAL}" == *","* ]] && die "GitHub PAT contains a comma"
 
-# --container-env is comma-separated; PATs and API keys never contain commas,
-# but we sanity-check anyway.
-[[ "${ANTHROPIC_KEY_VAL}" == *","* ]] && die "ANTHROPIC_API_KEY contains a comma"
-[[ "${GITHUB_PAT_VAL}"    == *","* ]] && die "GitHub PAT contains a comma"
+if [[ "${CLAUDE_AUTH_MODE}" == "oauth" ]]; then
+    CLAUDE_AUTH_VAL=$(gcloud secrets versions access latest \
+        --secret=claude-code-oauth-token --project="${PROJECT_ID}")
+    [[ "${CLAUDE_AUTH_VAL}" == *","* ]] && die "OAuth token contains a comma"
+    CLAUDE_ENV_PAIR="CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_AUTH_VAL}"
+    log "Injecting CLAUDE_CODE_OAUTH_TOKEN (subscription auth)."
+else
+    CLAUDE_AUTH_VAL=$(gcloud secrets versions access latest \
+        --secret=anthropic-api-key --project="${PROJECT_ID}")
+    [[ "${CLAUDE_AUTH_VAL}" == *","* ]] && die "ANTHROPIC_API_KEY contains a comma"
+    CLAUDE_ENV_PAIR="ANTHROPIC_API_KEY=${CLAUDE_AUTH_VAL}"
+    log "Injecting ANTHROPIC_API_KEY (API billing)."
+fi
 
-CONTAINER_ENV="ANTHROPIC_API_KEY=${ANTHROPIC_KEY_VAL}"
+# Intentionally inject only one Claude auth var. Setting both would cause
+# the API key to override the OAuth token and silently bypass the subscription.
+CONTAINER_ENV="${CLAUDE_ENV_PAIR}"
 CONTAINER_ENV+=",GITHUB_TOKEN=${GITHUB_PAT_VAL}"
 CONTAINER_ENV+=",GITHUB_REPO_URL=${GITHUB_REPO_URL}"
 CONTAINER_ENV+=",GIT_USER_NAME=${GIT_USER_NAME}"
