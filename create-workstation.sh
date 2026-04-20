@@ -242,10 +242,15 @@ log "Auth mode: ${CLAUDE_AUTH_MODE} (Claude secret: ${CLAUDE_SECRET_NAME}, GitHu
 log "Ensuring workstations config '${CONFIG_NAME}'..."
 if gcloud workstations configs describe "${CONFIG_NAME}" \
         --cluster="${CLUSTER_NAME}" --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
-    log "Config exists — updating image & env..."
+    log "Config exists — updating image, env, and service account..."
+    # --service-account is included on UPDATE too so that re-running this
+    # script reconciles drift. Without it, a config originally created
+    # without an SA would silently keep using the default Compute Engine SA,
+    # which can't write container output logs.
     gcloud workstations configs update "${CONFIG_NAME}" \
         --cluster="${CLUSTER_NAME}" --region="${REGION}" --project="${PROJECT_ID}" \
         --container-custom-image="${IMAGE_URI}" \
+        --service-account="${SERVICE_ACCOUNT_EMAIL}" \
         --container-env="${CONTAINER_ENV}"
 else
     gcloud workstations configs create "${CONFIG_NAME}" \
