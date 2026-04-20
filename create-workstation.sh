@@ -227,7 +227,7 @@ else
         --cluster="${CLUSTER_NAME}" --region="${REGION}" --project="${PROJECT_ID}" \
         --machine-type="${MACHINE_TYPE}" \
         --pd-disk-size="${DISK_SIZE_GB}" \
-        --pd-disk-type="pd-standard" \
+        --pd-disk-type="pd-balanced" \
         --container-custom-image="${IMAGE_URI}" \
         --service-account="${SERVICE_ACCOUNT_EMAIL}" \
         --container-env="${CONTAINER_ENV}"
