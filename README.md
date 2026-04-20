@@ -15,6 +15,15 @@ and a private GitHub repo cloned and ready to go.
 - `docker` with buildx (for cross-arch builds on macOS)
 - A GCP project with billing enabled
 - A GitHub fine-grained PAT scoped to the target repo with Contents: Read & write
+- **Claude Code auth**, one of:
+  - **Claude Pro/Max/Team OAuth token** (recommended — uses your subscription).
+    Generate locally with `claude setup-token`, authorize in the browser, copy
+    the `sk-ant-oat01-...` value. Valid ~1 year.
+  - **Anthropic API key** (pay-as-you-go). Create in the Anthropic Console.
+
+The script prompts on first run to choose. Only one is stored and injected —
+setting both in the workstation would cause the API key to override the OAuth
+token and silently bypass your subscription.
 
 ## One-time setup
 
@@ -31,8 +40,9 @@ chmod +x create-workstation.sh entrypoint.sh
 ```
 
 First run takes ~20 minutes (the cluster provisioning is the slow part).
-You'll be prompted for your `ANTHROPIC_API_KEY` and GitHub PAT — these go
-straight into Secret Manager, not your shell history.
+You'll be prompted to choose OAuth token vs API key, then for the value and
+your GitHub PAT — these go straight into Secret Manager, not your shell
+history.
 
 Subsequent runs skip everything that already exists and finish in under a
 minute. Re-run after rotating a secret to pick up the new value in the
@@ -51,12 +61,25 @@ gcloud workstations stop  NAME --cluster=... --config=... --region=...
 Open the printed browser IDE URL, launch a terminal, `cd ~/workspace`, run
 `claude`.
 
-## Rotating the GitHub PAT
+## Rotating credentials
 
 ```bash
+# Rotate GitHub PAT
 echo -n 'ghp_newvalue' | gcloud secrets versions add github-pat \
     --data-file=- --project=$PROJECT_ID
+
+# Rotate Claude OAuth token (after running `claude setup-token` locally)
+echo -n 'sk-ant-oat01-newvalue' | gcloud secrets versions add claude-code-oauth-token \
+    --data-file=- --project=$PROJECT_ID
+
 ./create-workstation.sh    # re-reads latest version into the config
+```
+
+To switch auth modes (OAuth ↔ API key), delete the old secret first:
+
+```bash
+gcloud secrets delete anthropic-api-key --project=$PROJECT_ID
+./create-workstation.sh    # will prompt for OAuth token
 ```
 
 ## Cost notes
