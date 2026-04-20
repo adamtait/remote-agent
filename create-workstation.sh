@@ -189,6 +189,19 @@ gcloud artifacts repositories add-iam-policy-binding "${REPO_NAME}" \
     --role="roles/artifactregistry.reader" \
     --project="${PROJECT_ID}" --condition=None >/dev/null
 
+# Container stdout/stderr only flows to Cloud Logging if the workstation SA
+# can write logs and metrics. Without these, `gcloud logging read` for the
+# workstation returns nothing — making any boot-time failure invisible.
+# These are project-scoped because logging/monitoring are project-wide
+# services with no resource-level binding for this role.
+log "Granting logWriter and metricWriter on project..."
+for role in roles/logging.logWriter roles/monitoring.metricWriter; do
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+        --role="${role}" \
+        --condition=None >/dev/null
+done
+
 # =============================================================================
 # 6. Workstations cluster (~20 min first time)
 # =============================================================================
@@ -284,6 +297,13 @@ cat <<EOF
   Once the IDE loads, open a terminal and run:
       cd ~/workspace
       claude
+
+  SSH to the workstation:
+  gcloud workstations ssh ${WORKSTATION_NAME} \\
+    --cluster=${CLUSTER_NAME} \\
+    --config=claude-dev-config \\
+    --region=${REGION} \\
+    --project=${PROJECT_ID}
 
   Stop the workstation (to save cost):
       gcloud workstations stop ${WORKSTATION_NAME} \\
