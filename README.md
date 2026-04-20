@@ -1,7 +1,26 @@
-# Claude Code on Google Cloud Workstations
+# Claude Code on Google Cloud Workstations (v2.1)
 
 Provisions a browser-accessible dev environment with Claude Code preinstalled
 and a private GitHub repo cloned and ready to go.
+
+## What's new in v2.1
+
+**Zero secrets in the workstation config.** All credentials — both Claude
+and GitHub — live only in Secret Manager. The container resolves them at
+runtime via its attached service account:
+
+- **Claude API key** uses an `apiKeyHelper` script. Claude Code caches the
+  result for ~5 minutes, so rotating propagates within that window with no
+  restart.
+- **Claude OAuth** is fetched at each container boot and written to
+  `/etc/profile.d/claude-auth.sh`. Rotation → `workstations stop/start`.
+- **GitHub PAT** uses a custom `credential.helper` script that calls
+  `gcloud secrets versions access` on every git operation. Rotations are
+  picked up immediately on the next push/pull/clone, no restart.
+
+The `--container-env` block now contains only pointers
+(`CLAUDE_AUTH_SECRET_NAME`, `GITHUB_PAT_SECRET_NAME`, `GCP_PROJECT_ID`,
+`GITHUB_REPO_URL`, `GIT_USER_NAME`, `GIT_USER_EMAIL`) — no sensitive values.
 
 ## Files
 
@@ -63,24 +82,57 @@ Open the printed browser IDE URL, launch a terminal, `cd ~/workspace`, run
 
 ## Rotating credentials
 
+All rotations happen via Secret Manager — no need to re-run the script.
+
 ```bash
-# Rotate GitHub PAT
-echo -n 'ghp_newvalue' | gcloud secrets versions add github-pat \
+# Claude API key — auto-picked up within ~5 min, no restart
+echo -n 'sk-ant-newvalue' | gcloud secrets versions add anthropic-api-key \
     --data-file=- --project=$PROJECT_ID
 
-# Rotate Claude OAuth token (after running `claude setup-token` locally)
+# Claude OAuth token — picked up on next `workstations start`
 echo -n 'sk-ant-oat01-newvalue' | gcloud secrets versions add claude-code-oauth-token \
     --data-file=- --project=$PROJECT_ID
+gcloud workstations stop NAME  --cluster=... --config=... --region=...
+gcloud workstations start NAME --cluster=... --config=... --region=...
 
-./create-workstation.sh    # re-reads latest version into the config
+# GitHub PAT — picked up on next git operation, no restart
+echo -n 'ghp_newvalue' | gcloud secrets versions add github-pat \
+    --data-file=- --project=$PROJECT_ID
 ```
 
-To switch auth modes (OAuth ↔ API key), delete the old secret first:
+To switch Claude auth modes (OAuth ↔ API key), delete the old secret first
+and re-run the script:
 
 ```bash
 gcloud secrets delete anthropic-api-key --project=$PROJECT_ID
 ./create-workstation.sh    # will prompt for OAuth token
+gcloud workstations stop NAME ... && gcloud workstations start NAME ...
 ```
+
+## How auth actually works at runtime
+
+**Claude API key mode.** At every container boot, `entrypoint.sh` writes
+`/usr/local/bin/claude-apikey-helper.sh` (a one-liner that shells out to
+`gcloud secrets versions access latest --secret=anthropic-api-key`) and adds
+`"apiKeyHelper": "/usr/local/bin/claude-apikey-helper.sh"` to
+`~/.claude/settings.json`. Claude Code calls this script on startup and then
+every ~5 minutes, so rotating the secret is transparent.
+
+**Claude OAuth mode.** At every container boot, `entrypoint.sh` fetches the
+token from Secret Manager and writes it to `/etc/profile.d/claude-auth.sh`
+as `export CLAUDE_CODE_OAUTH_TOKEN=...`. The code-oss terminal is a login
+shell so it picks this up automatically. Because `apiKeyHelper` conflicts
+with OAuth tokens in Claude Code, the entrypoint also removes any stale
+`apiKeyHelper` entry from `settings.json` when running in this mode.
+
+**GitHub PAT.** At every container boot, `entrypoint.sh` writes
+`/usr/local/bin/git-credential-gcp-secret`, a script implementing git's
+credential helper protocol. On each git operation against `github.com`,
+git invokes the helper, which fetches the current PAT from Secret Manager
+and prints `username=oauth2\npassword=<token>` to stdout. The helper
+ignores other hosts and never persists credentials. `~/.gitconfig` (on
+the persistent home disk) points at this helper via
+`credential.helper = /usr/local/bin/git-credential-gcp-secret`.
 
 ## Cost notes
 
@@ -91,8 +143,19 @@ gcloud secrets delete anthropic-api-key --project=$PROJECT_ID
 
 ## Security notes
 
-Secrets are injected as container env vars via `--container-env`. Only
-principals with `workstations.configs.get` can read the config, so this is
-acceptable for dev environments. For production/shared environments, replace
-the env-var injection with a startup-script fetch from the metadata server
-and Secret Manager REST API.
+The workstation config carries zero secret values — only secret names and
+non-sensitive metadata. Anyone with `workstations.configs.get` can read the
+config and learn *which* secrets are in use, but cannot read the secret
+values themselves; that requires `secretmanager.secretAccessor`, granted
+only to the workstation's service account.
+
+In API-key mode, the Claude key is fetched into memory by `apiKeyHelper`
+on demand and never touches disk. In OAuth mode, the token is written to
+`/etc/profile.d/claude-auth.sh` (mode 0644) because exporting a value into
+login shells requires a file the shell can read; this is equivalent in
+exposure to an env var. The GitHub PAT is fetched per-operation by the git
+credential helper and never persisted.
+
+To audit credential access, look at Secret Manager's data access audit
+logs — every fetch from `apiKeyHelper`, the OAuth boot fetch, and every
+git operation will appear there.

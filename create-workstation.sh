@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 #
-# create-workstation.sh
+# create-workstation.sh  (v2.1)
 # Provisions a Google Cloud Workstation preloaded with Claude Code
 # and a clone of a private GitHub repo.
 #
-# Auth precedence for Claude Code:
-#   1. CLAUDE_CODE_OAUTH_TOKEN  (preferred — uses Claude Pro/Max/Team subscription)
-#   2. ANTHROPIC_API_KEY        (fallback — pay-as-you-go API billing)
-# Only one is injected into the workstation; if both are set, the API key wins
-# inside Claude Code, which would silently bypass the user's subscription.
+# Auth model (v2.1 — zero secrets in workstation config):
+#   - All credentials are fetched at runtime from Secret Manager via the
+#     workstation VM's attached service account. The config carries only
+#     pointers (secret names) and non-sensitive metadata.
+#   - Claude API key:  apiKeyHelper script, ~5 min cache, no restart needed.
+#   - Claude OAuth:    fetched at every container boot, exported to shell.
+#                      Picked up on `workstations stop/start`.
+#   - GitHub PAT:      git credential.helper, fetched per git operation.
+#                      Rotations are picked up immediately, no restart.
+#   - Preference:      CLAUDE_CODE_OAUTH_TOKEN (Pro/Max/Team subscription)
+#                      over ANTHROPIC_API_KEY (pay-as-you-go).
 #
 # Idempotent: safe to re-run. Each step checks for existence first.
 #
@@ -172,6 +178,17 @@ for secret in "${CLAUDE_SECRETS[@]}" github-pat; do
         --project="${PROJECT_ID}" --condition=None >/dev/null
 done
 
+# Workstation VMs pull the custom container image as this SA at boot.
+# Without artifactregistry.reader the VM gets 403 from us-*-docker.pkg.dev
+# and the workstation never finishes provisioning ("config is degraded").
+# Repo-scoped grant is least-privilege; the SA can only read this one repo.
+log "Granting artifactregistry.reader on '${REPO_NAME}'..."
+gcloud artifacts repositories add-iam-policy-binding "${REPO_NAME}" \
+    --location="${REGION}" \
+    --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+    --role="roles/artifactregistry.reader" \
+    --project="${PROJECT_ID}" --condition=None >/dev/null
+
 # =============================================================================
 # 6. Workstations cluster (~20 min first time)
 # =============================================================================
@@ -185,34 +202,29 @@ fi
 
 # =============================================================================
 # 7. Workstations config
-#    Secrets are fetched here and injected as container env vars.
-#    Only admins can read the config, so this is acceptable for dev environments.
+#    ZERO secrets in the config. The container fetches everything at runtime
+#    via the SA + Secret Manager:
+#      - Claude API key:  apiKeyHelper script, ~5 min cache, no restart needed
+#      - Claude OAuth:    fetched at boot, picked up on workstations start
+#      - GitHub PAT:      git credential.helper, fetched per git operation
 # =============================================================================
-log "Reading secret values to inject as env..."
-GITHUB_PAT_VAL=$(gcloud secrets versions access latest --secret=github-pat --project="${PROJECT_ID}")
-[[ "${GITHUB_PAT_VAL}" == *","* ]] && die "GitHub PAT contains a comma"
-
 if [[ "${CLAUDE_AUTH_MODE}" == "oauth" ]]; then
-    CLAUDE_AUTH_VAL=$(gcloud secrets versions access latest \
-        --secret=claude-code-oauth-token --project="${PROJECT_ID}")
-    [[ "${CLAUDE_AUTH_VAL}" == *","* ]] && die "OAuth token contains a comma"
-    CLAUDE_ENV_PAIR="CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_AUTH_VAL}"
-    log "Injecting CLAUDE_CODE_OAUTH_TOKEN (subscription auth)."
+    CLAUDE_SECRET_NAME="claude-code-oauth-token"
 else
-    CLAUDE_AUTH_VAL=$(gcloud secrets versions access latest \
-        --secret=anthropic-api-key --project="${PROJECT_ID}")
-    [[ "${CLAUDE_AUTH_VAL}" == *","* ]] && die "ANTHROPIC_API_KEY contains a comma"
-    CLAUDE_ENV_PAIR="ANTHROPIC_API_KEY=${CLAUDE_AUTH_VAL}"
-    log "Injecting ANTHROPIC_API_KEY (API billing)."
+    CLAUDE_SECRET_NAME="anthropic-api-key"
 fi
 
-# Intentionally inject only one Claude auth var. Setting both would cause
-# the API key to override the OAuth token and silently bypass the subscription.
-CONTAINER_ENV="${CLAUDE_ENV_PAIR}"
-CONTAINER_ENV+=",GITHUB_TOKEN=${GITHUB_PAT_VAL}"
+GITHUB_PAT_SECRET_NAME="github-pat"
+
+CONTAINER_ENV="CLAUDE_AUTH_MODE=${CLAUDE_AUTH_MODE}"
+CONTAINER_ENV+=",CLAUDE_AUTH_SECRET_NAME=${CLAUDE_SECRET_NAME}"
+CONTAINER_ENV+=",GITHUB_PAT_SECRET_NAME=${GITHUB_PAT_SECRET_NAME}"
+CONTAINER_ENV+=",GCP_PROJECT_ID=${PROJECT_ID}"
 CONTAINER_ENV+=",GITHUB_REPO_URL=${GITHUB_REPO_URL}"
 CONTAINER_ENV+=",GIT_USER_NAME=${GIT_USER_NAME}"
 CONTAINER_ENV+=",GIT_USER_EMAIL=${GIT_USER_EMAIL}"
+
+log "Auth mode: ${CLAUDE_AUTH_MODE} (Claude secret: ${CLAUDE_SECRET_NAME}, GitHub secret: ${GITHUB_PAT_SECRET_NAME})"
 
 log "Ensuring workstations config '${CONFIG_NAME}'..."
 if gcloud workstations configs describe "${CONFIG_NAME}" \
