@@ -31,6 +31,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 RUN npm install -g @anthropic-ai/claude-code \
     && npm cache clean --force
 
+# --- Sanity check: entrypoint relies on gcloud being present for runtime
+#     Secret Manager access. The code-oss base image ships with gcloud, but
+#     fail the build loudly if that ever changes.
+RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && exit 1)
+
 # --- Our startup script -----------------------------------------------------
 # Numbered 200 so it runs after the base image's own 100-series scripts.
 COPY entrypoint.sh /etc/workstation-startup.d/200_claude-setup.sh
