@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+#
+# create-workstation.sh
+# Provisions a Google Cloud Workstation preloaded with Claude Code
+# and a clone of a private GitHub repo.
+#
+# Idempotent: safe to re-run. Each step checks for existence first.
+#
+# Usage:
+#   PROJECT_ID=my-proj GITHUB_REPO_URL=https://github.com/org/repo.git \
+#     ./create-workstation.sh
+#
+set -euo pipefail
+
+# =============================================================================
+# Configuration (override via env vars)
+# =============================================================================
+PROJECT_ID="${PROJECT_ID:?Set PROJECT_ID}"
+REGION="${REGION:-us-central1}"
+
+CLUSTER_NAME="${CLUSTER_NAME:-claude-dev-cluster}"
+CONFIG_NAME="${CONFIG_NAME:-claude-dev-config}"
+WORKSTATION_NAME="${WORKSTATION_NAME:-claude-dev-$(whoami | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')}"
+
+REPO_NAME="${REPO_NAME:-claude-workstation-images}"
+IMAGE_NAME="${IMAGE_NAME:-claude-code-workstation}"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+
+SERVICE_ACCOUNT_NAME="${SERVICE_ACCOUNT_NAME:-claude-workstation-sa}"
+MACHINE_TYPE="${MACHINE_TYPE:-e2-standard-4}"
+DISK_SIZE_GB="${DISK_SIZE_GB:-50}"
+
+GITHUB_REPO_URL="${GITHUB_REPO_URL:?Set GITHUB_REPO_URL (e.g. https://github.com/org/repo.git)}"
+GIT_USER_NAME="${GIT_USER_NAME:-$(git config --global user.name 2>/dev/null || echo Developer)}"
+GIT_USER_EMAIL="${GIT_USER_EMAIL:-$(git config --global user.email 2>/dev/null || echo dev@example.com)}"
+
+IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+SERVICE_ACCOUNT_EMAIL="${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# =============================================================================
+# Helpers
+# =============================================================================
+log()  { printf '\033[1;34m[%(%H:%M:%S)T]\033[0m %s\n' -1 "$*"; }
+warn() { printf '\033[1;33m[%(%H:%M:%S)T] WARN:\033[0m %s\n' -1 "$*"; }
+die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
+
+require_cmd gcloud
+require_cmd docker
+gcloud config set project "${PROJECT_ID}" >/dev/null
+
+# =============================================================================
+# 1. Enable APIs
+# =============================================================================
+log "Enabling required APIs..."
+gcloud services enable \
+    workstations.googleapis.com \
+    artifactregistry.googleapis.com \
+    secretmanager.googleapis.com \
+    iam.googleapis.com \
+    --project="${PROJECT_ID}" --quiet
+
+# =============================================================================
+# 2. Artifact Registry repo
+# =============================================================================
+log "Ensuring Artifact Registry repo '${REPO_NAME}'..."
+if ! gcloud artifacts repositories describe "${REPO_NAME}" \
+        --location="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud artifacts repositories create "${REPO_NAME}" \
+        --repository-format=docker \
+        --location="${REGION}" \
+        --description="Claude Code workstation images" \
+        --project="${PROJECT_ID}"
+fi
+
+# =============================================================================
+# 3. Build & push image
+# =============================================================================
+log "Building image ${IMAGE_URI}..."
+gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+# Build for linux/amd64 explicitly (Workstations run amd64; macOS default is arm64)
+docker buildx build --platform linux/amd64 -t "${IMAGE_URI}" --push .
+
+# =============================================================================
+# 4. Secret Manager
+# =============================================================================
+ensure_secret() {
+    local name="$1" prompt="$2"
+    if gcloud secrets describe "${name}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+        log "Secret '${name}' already exists (use 'gcloud secrets versions add' to rotate)"
+        return
+    fi
+    read -rsp "${prompt}: " value; echo
+    [[ -z "${value}" ]] && die "Empty value for ${name}"
+    printf '%s' "${value}" | gcloud secrets create "${name}" \
+        --replication-policy=automatic \
+        --data-file=- \
+        --project="${PROJECT_ID}"
+}
+
+ensure_secret "anthropic-api-key" "Enter ANTHROPIC_API_KEY"
+ensure_secret "github-pat"        "Enter GitHub PAT (fine-grained, repo-scoped)"
+
+# =============================================================================
+# 5. Service account + IAM
+# =============================================================================
+log "Ensuring service account '${SERVICE_ACCOUNT_EMAIL}'..."
+if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT_EMAIL}" \
+        --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud iam service-accounts create "${SERVICE_ACCOUNT_NAME}" \
+        --display-name="Claude Workstation SA" \
+        --project="${PROJECT_ID}"
+fi
+
+for secret in anthropic-api-key github-pat; do
+    gcloud secrets add-iam-policy-binding "${secret}" \
+        --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+        --role="roles/secretmanager.secretAccessor" \
+        --project="${PROJECT_ID}" --condition=None >/dev/null
+done
+
+# =============================================================================
+# 6. Workstations cluster (~20 min first time)
+# =============================================================================
+log "Ensuring workstations cluster '${CLUSTER_NAME}'..."
+if ! gcloud workstations clusters describe "${CLUSTER_NAME}" \
+        --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    warn "Creating cluster — this takes ~20 minutes on first run."
+    gcloud workstations clusters create "${CLUSTER_NAME}" \
+        --region="${REGION}" --project="${PROJECT_ID}"
+fi
+
+# =============================================================================
+# 7. Workstations config
+#    Secrets are fetched here and injected as container env vars.
+#    Only admins can read the config, so this is acceptable for dev environments.
+# =============================================================================
+log "Reading secret values to inject as env..."
+ANTHROPIC_KEY_VAL=$(gcloud secrets versions access latest --secret=anthropic-api-key --project="${PROJECT_ID}")
+GITHUB_PAT_VAL=$(gcloud secrets versions access latest --secret=github-pat --project="${PROJECT_ID}")
+
+# --container-env is comma-separated; PATs and API keys never contain commas,
+# but we sanity-check anyway.
+[[ "${ANTHROPIC_KEY_VAL}" == *","* ]] && die "ANTHROPIC_API_KEY contains a comma"
+[[ "${GITHUB_PAT_VAL}"    == *","* ]] && die "GitHub PAT contains a comma"
+
+CONTAINER_ENV="ANTHROPIC_API_KEY=${ANTHROPIC_KEY_VAL}"
+CONTAINER_ENV+=",GITHUB_TOKEN=${GITHUB_PAT_VAL}"
+CONTAINER_ENV+=",GITHUB_REPO_URL=${GITHUB_REPO_URL}"
+CONTAINER_ENV+=",GIT_USER_NAME=${GIT_USER_NAME}"
+CONTAINER_ENV+=",GIT_USER_EMAIL=${GIT_USER_EMAIL}"
+
+log "Ensuring workstations config '${CONFIG_NAME}'..."
+if gcloud workstations configs describe "${CONFIG_NAME}" \
+        --cluster="${CLUSTER_NAME}" --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    log "Config exists — updating image & env..."
+    gcloud workstations configs update "${CONFIG_NAME}" \
+        --cluster="${CLUSTER_NAME}" --region="${REGION}" --project="${PROJECT_ID}" \
+        --container-custom-image="${IMAGE_URI}" \
+        --container-env="${CONTAINER_ENV}"
+else
+    gcloud workstations configs create "${CONFIG_NAME}" \
+        --cluster="${CLUSTER_NAME}" --region="${REGION}" --project="${PROJECT_ID}" \
+        --machine-type="${MACHINE_TYPE}" \
+        --pd-disk-size="${DISK_SIZE_GB}" \
+        --pd-disk-type="pd-standard" \
+        --container-custom-image="${IMAGE_URI}" \
+        --service-account="${SERVICE_ACCOUNT_EMAIL}" \
+        --container-env="${CONTAINER_ENV}"
+fi
+
+# =============================================================================
+# 8. Create + start workstation
+# =============================================================================
+log "Ensuring workstation '${WORKSTATION_NAME}'..."
+if ! gcloud workstations describe "${WORKSTATION_NAME}" \
+        --cluster="${CLUSTER_NAME}" --config="${CONFIG_NAME}" \
+        --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud workstations create "${WORKSTATION_NAME}" \
+        --cluster="${CLUSTER_NAME}" --config="${CONFIG_NAME}" \
+        --region="${REGION}" --project="${PROJECT_ID}"
+fi
+
+log "Starting workstation..."
+gcloud workstations start "${WORKSTATION_NAME}" \
+    --cluster="${CLUSTER_NAME}" --config="${CONFIG_NAME}" \
+    --region="${REGION}" --project="${PROJECT_ID}"
+
+# =============================================================================
+# 9. Output access info
+# =============================================================================
+HOSTNAME=$(gcloud workstations describe "${WORKSTATION_NAME}" \
+    --cluster="${CLUSTER_NAME}" --config="${CONFIG_NAME}" \
+    --region="${REGION}" --project="${PROJECT_ID}" \
+    --format="value(host)")
+
+cat <<EOF
+
+================================================================
+  Claude Code workstation is ready
+================================================================
+  Browser IDE  : https://80-${HOSTNAME}
+  Workstation  : ${WORKSTATION_NAME}
+  Cluster      : ${CLUSTER_NAME}
+  Config       : ${CONFIG_NAME}
+  Region       : ${REGION}
+
+  Once the IDE loads, open a terminal and run:
+      cd ~/workspace
+      claude
+
+  Stop the workstation (to save cost):
+      gcloud workstations stop ${WORKSTATION_NAME} \\
+        --cluster=${CLUSTER_NAME} --config=${CONFIG_NAME} \\
+        --region=${REGION} --project=${PROJECT_ID}
+
+  Rotate a secret:
+      echo -n 'new-value' | gcloud secrets versions add SECRET_NAME \\
+        --data-file=- --project=${PROJECT_ID}
+      # then re-run this script to pick up the new version
+================================================================
+EOF
