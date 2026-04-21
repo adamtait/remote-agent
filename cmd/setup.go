@@ -22,7 +22,7 @@ func readFlags(cmd *cobra.Command, names ...string) map[string]bool {
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Scaffold ws config files (.workstation.yaml and ~/.config/ws/config.yaml)",
+	Short: "Scaffold ws config files (.ws.yaml and ~/.config/ws.yaml)",
 	Long: `Interactive setup: probes the environment for defaults (gcloud project/region,
 git user, git origin) and prompts for each required field. Writes both
 project- and user-level config files unless --project-only or --global-only
@@ -79,8 +79,8 @@ var setupTemplateCmd = &cobra.Command{
 // prevents the two subcommands' help text from drifting.
 func addSharedSetupFlags(c *cobra.Command) {
 	c.Flags().Bool("force", false, "overwrite existing config files")
-	c.Flags().Bool("project-only", false, "scaffold only .workstation.yaml")
-	c.Flags().Bool("global-only", false, "scaffold only ~/.config/ws/config.yaml")
+	c.Flags().Bool("project-only", false, "scaffold only .ws.yaml")
+	c.Flags().Bool("global-only", false, "scaffold only ~/.config/ws.yaml")
 }
 
 func init() {

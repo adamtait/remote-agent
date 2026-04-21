@@ -16,7 +16,7 @@ func GlobalConfigPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("unable to determine home directory: %w", err)
 	}
-	return filepath.Join(home, ".config", "ws", "config.yaml"), nil
+	return filepath.Join(home, ".config", "ws.yaml"), nil
 }
 
 // LoadGlobalConfig reads and parses the global config file.

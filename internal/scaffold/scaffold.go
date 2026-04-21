@@ -119,11 +119,11 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 
 	fmt.Fprintln(opts.Stdout)
 	if writeProject {
-		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Cwd, ".workstation.yaml")+":")
+		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Cwd, ".ws.yaml")+":")
 		fmt.Fprintln(opts.Stdout, indent(project.marshal(), "  "))
 	}
 	if writeGlobal {
-		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Home, ".config", "ws", "config.yaml")+":")
+		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Home, ".config", "ws.yaml")+":")
 		fmt.Fprintln(opts.Stdout, indent(global.marshal(), "  "))
 	}
 
@@ -137,12 +137,12 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	}
 
 	if writeProject {
-		if err := WriteAtomic(filepath.Join(opts.Cwd, ".workstation.yaml"), []byte(project.marshal()), opts.Force); err != nil {
+		if err := WriteAtomic(filepath.Join(opts.Cwd, ".ws.yaml"), []byte(project.marshal()), opts.Force); err != nil {
 			return err
 		}
 	}
 	if writeGlobal {
-		if err := WriteAtomic(filepath.Join(opts.Home, ".config", "ws", "config.yaml"), []byte(global.marshal()), opts.Force); err != nil {
+		if err := WriteAtomic(filepath.Join(opts.Home, ".config", "ws.yaml"), []byte(global.marshal()), opts.Force); err != nil {
 			return err
 		}
 	}
@@ -165,14 +165,14 @@ func TemplateScaffold(opts TemplateOptions) error {
 	}
 
 	if !opts.GlobalOnly {
-		path := filepath.Join(opts.Cwd, ".workstation.yaml")
+		path := filepath.Join(opts.Cwd, ".ws.yaml")
 		if err := WriteAtomic(path, []byte(RenderProjectTemplate(pv)), opts.Force); err != nil {
 			return err
 		}
 		fmt.Fprintln(opts.Stdout, "Wrote "+path)
 	}
 	if !opts.ProjectOnly {
-		path := filepath.Join(opts.Home, ".config", "ws", "config.yaml")
+		path := filepath.Join(opts.Home, ".config", "ws.yaml")
 		if err := WriteAtomic(path, []byte(RenderGlobalTemplate(pv)), opts.Force); err != nil {
 			return err
 		}

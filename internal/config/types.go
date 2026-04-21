@@ -1,6 +1,6 @@
 package config
 
-// ProjectConfig is unmarshalled from .workstation.yaml.
+// ProjectConfig is unmarshalled from .ws.yaml.
 type ProjectConfig struct {
 	ProjectID     string `yaml:"project_id"`
 	Region        string `yaml:"region"`
@@ -11,7 +11,7 @@ type ProjectConfig struct {
 	DiskSizeGB    int    `yaml:"disk_size_gb"`
 }
 
-// GlobalDefaults is the defaults section of ~/.config/ws/config.yaml.
+// GlobalDefaults is the defaults section of ~/.config/ws.yaml.
 type GlobalDefaults struct {
 	Region       string `yaml:"region"`
 	GitUserName  string `yaml:"git_user_name"`
@@ -26,7 +26,7 @@ type GlobalProjectOverride struct {
 	RepoName           string `yaml:"repo_name"`
 }
 
-// GlobalConfig is unmarshalled from ~/.config/ws/config.yaml.
+// GlobalConfig is unmarshalled from ~/.config/ws.yaml.
 type GlobalConfig struct {
 	Defaults GlobalDefaults                   `yaml:"defaults"`
 	Projects map[string]GlobalProjectOverride `yaml:"projects"`
@@ -48,5 +48,5 @@ type Config struct {
 	ImageTag           string
 	RepoName           string
 	WorkstationName    string // <project_id>-<username>, sanitized, ≤63 chars
-	ProjectConfigPath  string // absolute path to the .workstation.yaml that was found
+	ProjectConfigPath  string // absolute path to the .ws.yaml that was found
 }

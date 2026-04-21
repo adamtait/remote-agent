@@ -11,7 +11,7 @@ import (
 
 func TestFindProjectConfig_FoundInCurrentDir(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, ".workstation.yaml")
+	cfgPath := filepath.Join(dir, ".ws.yaml")
 	if err := os.WriteFile(cfgPath, []byte("project_id: test\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestFindProjectConfig_FoundInParent(t *testing.T) {
 	if err := os.MkdirAll(sub, 0755); err != nil {
 		t.Fatal(err)
 	}
-	cfgPath := filepath.Join(root, ".workstation.yaml")
+	cfgPath := filepath.Join(root, ".ws.yaml")
 	if err := os.WriteFile(cfgPath, []byte("project_id: test\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestFindProjectConfig_StopsAtHome(t *testing.T) {
 	if err := os.MkdirAll(sub, 0755); err != nil {
 		t.Fatal(err)
 	}
-	// no .workstation.yaml anywhere
+	// no .ws.yaml anywhere
 	_, err := config.FindProjectConfig(sub, home)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -60,6 +60,6 @@ func TestFindProjectConfig_NotFoundReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	_, err := config.FindProjectConfig(dir, filepath.Dir(dir))
 	if err == nil {
-		t.Fatal("expected error for missing .workstation.yaml, got nil")
+		t.Fatal("expected error for missing .ws.yaml, got nil")
 	}
 }
