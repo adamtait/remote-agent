@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adamtait/remote-agent/cws/cmd"
+	"github.com/adamtait/remote-agent/cmd"
 )
 
 func TestSetupTemplate_WritesFiles(t *testing.T) {

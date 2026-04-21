@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adamtait/remote-agent/cws/internal/config"
+	"github.com/adamtait/remote-agent/internal/config"
 )
 
 func TestMerge_HardcodedDefaults(t *testing.T) {

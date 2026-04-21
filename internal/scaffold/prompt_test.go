@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adamtait/remote-agent/cws/internal/scaffold"
+	"github.com/adamtait/remote-agent/internal/scaffold"
 )
 
 func TestPrompt_ReturnsInput(t *testing.T) {

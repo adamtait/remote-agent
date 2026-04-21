@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/adamtait/remote-agent/cws/internal/gcloud"
-	"github.com/adamtait/remote-agent/cws/internal/scaffold"
+	"github.com/adamtait/remote-agent/internal/gcloud"
+	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

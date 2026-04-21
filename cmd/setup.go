@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/adamtait/remote-agent/cws/internal/scaffold"
+	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 
