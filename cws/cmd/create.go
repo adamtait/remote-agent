@@ -232,26 +232,11 @@ func runCreate(cmd *cobra.Command, args []string) error {
   Config       : %s
   Region       : %s
 
-  Once the IDE loads, open a terminal and run:
-      cd ~/workspace
-      claude
+  SSH:
+    cws connect %s
 
-  SSH to the workstation:
-  gcloud workstations ssh %s \
-    --cluster=%s \
-    --config=%s \
-    --region=%s \
-    --project=%s
-
-  Stop the workstation (to save cost):
-      gcloud workstations stop %s \
-        --cluster=%s --config=%s \
-        --region=%s --project=%s
-
-  Rotate a secret:
-      echo -n 'new-value' | gcloud secrets versions add SECRET_NAME \
-        --data-file=- --project=%s
-      # then re-run this script to pick up the new version
+  Stop (save cost):
+    cws stop %s
 ================================================================
 `,
 		info.Host,
@@ -259,9 +244,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		cfg.ClusterName,
 		cfg.ConfigName,
 		cfg.Region,
-		cfg.WorkstationName, cfg.ClusterName, cfg.ConfigName, cfg.Region, cfg.ProjectID,
-		cfg.WorkstationName, cfg.ClusterName, cfg.ConfigName, cfg.Region, cfg.ProjectID,
-		cfg.ProjectID,
+		cfg.WorkstationName,
+		cfg.WorkstationName,
 	)
 
 	return nil
@@ -290,7 +274,7 @@ for ~1 year and can be rotated with ` + "`gcloud secrets versions add`" + `.
 `)
 
 	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Print("Enter choice [1/2]: ")
+	fmt.Fprint(os.Stderr, "Enter choice [1/2]: ")
 	var choice string
 	if scanner.Scan() {
 		choice = strings.TrimSpace(scanner.Text())
@@ -320,14 +304,14 @@ func ensureSecret(r gcloud.Runner, projectID, name, prompt string) error {
 		return nil
 	}
 
-	fmt.Printf("%s: ", prompt)
+	fmt.Fprintf(os.Stderr, "%s: ", prompt)
 	value, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println() // newline after hidden input
+	fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return fmt.Errorf("reading secret value: %w", err)
 	}
-	if len(value) == 0 {
-		return fmt.Errorf("empty value for secret %s", name)
+	if len(strings.TrimSpace(string(value))) == 0 {
+		return fmt.Errorf("secret value cannot be empty")
 	}
 
 	f, err := os.CreateTemp("", "cws-secret-*")
