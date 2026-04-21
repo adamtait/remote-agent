@@ -24,7 +24,7 @@ The `--container-env` block now contains only pointers
 
 ## Files
 
-- `main.go` / `cmd/` / `internal/` — `cws` CLI (idempotent provisioning)
+- `main.go` / `cmd/` / `internal/` — `ws` CLI (idempotent provisioning)
 - `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
 - `Dockerfile` — custom image: code-oss + Node 20 + gh + Claude Code
 - `entrypoint.sh` — runs at container boot; sets up git, clones the repo
@@ -37,7 +37,7 @@ The `--container-env` block now contains only pointers
 - A GitHub fine-grained PAT scoped to the target repo with Contents: Read & write
 - If your Google Workspace/Cloud org enforces a session-length / reauth
   policy, the `reauth.googleapis.com` API must be enabled in the workstation
-  project. `cws create` enables it automatically; otherwise
+  project. `ws create` enables it automatically; otherwise
   gcloud's OAuth token refresh (e.g. during `gcloud workstations ssh`) will
   fail with `PERMISSION_DENIED: Reauth API has not been used...`.
 - **Claude Code auth**, one of:
@@ -52,20 +52,20 @@ token and silently bypass your subscription.
 
 ## One-time setup
 
-Build and install the `cws` CLI, then scaffold a project config and run
-`cws create`:
+Build and install the `ws` CLI, then scaffold a project config and run
+`ws create`:
 
 ```bash
-make install                # installs cws to ~/.local/bin
-cws setup                   # writes .workstation.yaml + ~/.config/cws/config.yaml
-cws create                  # provisions the workstation
+make install                # installs ws to ~/.local/bin
+ws setup                   # writes .workstation.yaml + ~/.config/ws/config.yaml
+ws create                  # provisions the workstation
 ```
 
-`cws setup` probes gcloud/git for defaults and prompts for each required
+`ws setup` probes gcloud/git for defaults and prompts for each required
 field. `project_id` and `github_repo_url` can also be supplied via env vars
 (`PROJECT_ID`, `GITHUB_REPO_URL`) as a fallback.
 
-First run of `cws create` takes ~20 minutes (the cluster provisioning is the
+First run of `ws create` takes ~20 minutes (the cluster provisioning is the
 slow part). You'll be prompted to choose OAuth token vs API key, then for
 the value and your GitHub PAT — these go straight into Secret Manager, not
 your shell history.
@@ -77,12 +77,12 @@ workstation config.
 ## Day-to-day
 
 ```bash
-cws list           # list workstations
-cws url            # print the browser IDE URL
-cws connect        # SSH into the workstation
-cws logs           # tail workstation logs
-cws stop           # stop (save $)
-cws delete         # delete the workstation
+ws list           # list workstations
+ws url            # print the browser IDE URL
+ws connect        # SSH into the workstation
+ws logs           # tail workstation logs
+ws stop           # stop (save $)
+ws delete         # delete the workstation
 ```
 
 Each targeted command accepts an optional name argument; otherwise the
@@ -93,7 +93,7 @@ Open the printed browser IDE URL, launch a terminal, `cd ~/workspace`, run
 
 ## Rotating credentials
 
-All rotations happen via Secret Manager — no need to re-run `cws create`.
+All rotations happen via Secret Manager — no need to re-run `ws create`.
 
 ```bash
 # Claude API key — auto-picked up within ~5 min, no restart
@@ -103,8 +103,8 @@ echo -n 'sk-ant-newvalue' | gcloud secrets versions add anthropic-api-key \
 # Claude OAuth token — picked up on next `workstations start`
 echo -n 'sk-ant-oat01-newvalue' | gcloud secrets versions add claude-code-oauth-token \
     --data-file=- --project=$PROJECT_ID
-cws stop
-cws create    # starts the workstation back up
+ws stop
+ws create    # starts the workstation back up
 
 # GitHub PAT — picked up on next git operation, no restart
 echo -n 'ghp_newvalue' | gcloud secrets versions add github-pat \
@@ -112,12 +112,12 @@ echo -n 'ghp_newvalue' | gcloud secrets versions add github-pat \
 ```
 
 To switch Claude auth modes (OAuth ↔ API key), delete the old secret first
-and re-run `cws create`:
+and re-run `ws create`:
 
 ```bash
 gcloud secrets delete anthropic-api-key --project=$PROJECT_ID
-cws create                 # will prompt for OAuth token
-cws stop && cws create     # restart so the container picks up the new mode
+ws create                 # will prompt for OAuth token
+ws stop && ws create     # restart so the container picks up the new mode
 ```
 
 ## How auth actually works at runtime
