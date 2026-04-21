@@ -70,6 +70,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		"artifactregistry.googleapis.com",
 		"secretmanager.googleapis.com",
 		"iam.googleapis.com",
+		// Required when the org enforces a session-length/reauth policy:
+		// gcloud calls this during OAuth token refresh; if disabled the API
+		// returns SERVICE_DISABLED and unrelated commands (e.g. ssh) fail.
+		"reauth.googleapis.com",
 		"--project", cfg.ProjectID, "--quiet"); err != nil {
 		return fmt.Errorf("enabling APIs: %w", err)
 	}
