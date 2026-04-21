@@ -18,7 +18,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "cws",
+	Use:           "ws",
 	Short:         "Manage Google Cloud Workstations with Claude Code",
 	SilenceErrors: true, // cmd.Execute/ExecuteWithIO print errors explicitly
 	SilenceUsage:  true, // don't dump --help on runtime errors
