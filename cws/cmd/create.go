@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -324,24 +325,17 @@ func ensureSecret(r gcloud.Runner, projectID, name, prompt string) error {
 	if len(strings.TrimSpace(string(value))) == 0 {
 		return fmt.Errorf("secret value cannot be empty")
 	}
+	// Best-effort scrub: only clears the backing array we still hold; Go's GC may have copied it.
+	defer func() {
+		for i := range value {
+			value[i] = 0
+		}
+	}()
 
-	f, err := os.CreateTemp("", "cws-secret-*")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	defer os.Remove(f.Name())
-
-	if _, err := f.Write(value); err != nil {
-		f.Close()
-		return fmt.Errorf("writing secret to temp file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	if err := r.Run("secrets", "create", name,
+	if err := r.RunWithStdin(bytes.NewReader(value),
+		"secrets", "create", name,
 		"--replication-policy=automatic",
-		"--data-file="+f.Name(),
+		"--data-file=-",
 		"--project", projectID); err != nil {
 		return fmt.Errorf("creating secret %s: %w", name, err)
 	}

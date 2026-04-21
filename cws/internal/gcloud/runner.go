@@ -2,6 +2,7 @@ package gcloud
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 )
@@ -10,6 +11,9 @@ import (
 type Runner interface {
 	// Run executes gcloud with args, streaming stdout/stderr to the terminal.
 	Run(args ...string) error
+	// RunWithStdin executes gcloud with args, piping stdin into the process.
+	// stdout/stderr stream to the terminal.
+	RunWithStdin(stdin io.Reader, args ...string) error
 	// Output executes gcloud with args and returns stdout bytes. Stderr streams to terminal.
 	Output(args ...string) ([]byte, error)
 	// Check executes gcloud with args, discarding all output. Returns true if exit code is 0.
@@ -24,6 +28,14 @@ func (r RealRunner) Run(args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+func (r RealRunner) RunWithStdin(stdin io.Reader, args ...string) error {
+	cmd := exec.Command("gcloud", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = stdin
 	return cmd.Run()
 }
 
