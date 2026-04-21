@@ -1,6 +1,7 @@
 package gcloud_test
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -17,6 +18,11 @@ type fakeRunner struct {
 func (f *fakeRunner) key(args []string) string { return strings.Join(args, " ") }
 
 func (f *fakeRunner) Run(args ...string) error {
+	f.calls = append(f.calls, args)
+	return nil
+}
+
+func (f *fakeRunner) RunWithStdin(_ io.Reader, args ...string) error {
 	f.calls = append(f.calls, args)
 	return nil
 }
