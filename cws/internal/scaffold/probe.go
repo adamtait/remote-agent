@@ -45,6 +45,8 @@ func (p *StaticProber) HasGcloudAuth() bool           { return p.HasAuth_ }
 func (p *StaticProber) HasDocker() bool               { return p.HasDocker_ }
 func (p *StaticProber) BillingEnabled(id string) bool { return p.Billing[id] }
 
+var _ Prober = (*StaticProber)(nil)
+
 // RealProber shells out to gcloud/git/docker via the system PATH. All probes
 // are best-effort: any error or non-zero exit yields the zero value.
 type RealProber struct{}
@@ -86,6 +88,8 @@ func (r RealProber) BillingEnabled(projectID string) bool {
 		"--format=value(billingEnabled)")
 	return strings.EqualFold(out, "true")
 }
+
+var _ Prober = RealProber{}
 
 // GcloudRegionWithFallback returns the probed region, or "us-central1" if empty.
 func GcloudRegionWithFallback(p Prober) string {
