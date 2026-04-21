@@ -65,6 +65,7 @@ command -v gcloud >/dev/null 2>&1 || {
 rm -f "${OAUTH_PROFILE_PATH}"
 rm -f "${APIKEY_HELPER_PATH}"
 sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/environment
+sed -i '/^GH_TOKEN=/d' /etc/environment
 
 case "${CLAUDE_AUTH_MODE}" in
     apikey)
@@ -202,6 +203,22 @@ if ! printf 'protocol=https\nhost=github.com\n\n' \
         | "${GIT_HELPER_PATH}" get | grep -q '^password='; then
     log "WARNING: git credential helper returned no password. Check SA permissions."
 fi
+
+# Export GH_TOKEN so the gh CLI authenticates without a separate `gh auth login`.
+# Uses the same PAT already stored in Secret Manager.
+log "Fetching GH_TOKEN from Secret Manager..."
+GH_PAT=$(gcloud secrets versions access latest \
+    --secret="${GITHUB_PAT_SECRET_NAME}" \
+    --project="${GCP_PROJECT_ID}" 2>/dev/null || true)
+
+sed -i '/^GH_TOKEN=/d' /etc/environment
+if [[ -n "${GH_PAT}" ]]; then
+    echo "GH_TOKEN=${GH_PAT}" >> /etc/environment
+    log "GH_TOKEN written to /etc/environment."
+else
+    log "WARNING: GH_TOKEN fetch failed. Check SA permissions."
+fi
+unset GH_PAT
 
 # =============================================================================
 # First-boot-ish setup below this line. Each step has its own idempotence
