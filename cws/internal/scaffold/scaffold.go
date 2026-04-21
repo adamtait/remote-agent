@@ -77,6 +77,12 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		if err != nil {
 			return err
 		}
+		if normalized := NormalizeGithubRepoURL(repoURL); normalized != repoURL {
+			if opts.Stderr != nil {
+				fmt.Fprintf(opts.Stderr, "Converting SSH URL to HTTPS (workstation uses PAT auth): %s → %s\n", repoURL, normalized)
+			}
+			repoURL = normalized
+		}
 		project.GithubRepoURL = repoURL
 
 		if opts.Advanced {

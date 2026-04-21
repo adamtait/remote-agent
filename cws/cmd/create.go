@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/adamtait/remote-agent/cws/internal/gcloud"
+	"github.com/adamtait/remote-agent/cws/internal/scaffold"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -38,6 +39,14 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 	if cfg.GithubRepoURL == "" {
 		return fmt.Errorf("github_repo_url is required: set it in .workstation.yaml or GITHUB_REPO_URL env var")
+	}
+	// The workstation image ships HTTPS-only credentials (PAT via git helper) —
+	// no SSH keys, no known_hosts. Rewrite SSH URLs so the clone inside the
+	// container doesn't die with "Host key verification failed".
+	if normalized := scaffold.NormalizeGithubRepoURL(cfg.GithubRepoURL); normalized != cfg.GithubRepoURL {
+		fmt.Printf("\033[1;33mWARN:\033[0m rewriting SSH github_repo_url to HTTPS for container clone: %s → %s\n",
+			cfg.GithubRepoURL, normalized)
+		cfg.GithubRepoURL = normalized
 	}
 	if cfg.GitUserName == "" {
 		cfg.GitUserName = "Developer"
