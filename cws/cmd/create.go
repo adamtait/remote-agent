@@ -61,7 +61,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	serviceAccountEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com",
 		cfg.ServiceAccountName, cfg.ProjectID)
 
-	// d) Helper for step logging
 	logStep := func(msg string) { fmt.Printf("\033[1;34m==>\033[0m %s\n", msg) }
 
 	// Step 1 — Enable APIs
