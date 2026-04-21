@@ -34,6 +34,11 @@ The `--container-env` block now contains only pointers
 - `docker` with buildx (for cross-arch builds on macOS)
 - A GCP project with billing enabled
 - A GitHub fine-grained PAT scoped to the target repo with Contents: Read & write
+- If your Google Workspace/Cloud org enforces a session-length / reauth
+  policy, the `reauth.googleapis.com` API must be enabled in the workstation
+  project. `create-workstation.sh` enables it automatically; otherwise
+  gcloud's OAuth token refresh (e.g. during `gcloud workstations ssh`) will
+  fail with `PERMISSION_DENIED: Reauth API has not been used...`.
 - **Claude Code auth**, one of:
   - **Claude Pro/Max/Team OAuth token** (recommended — uses your subscription).
     Generate locally with `claude setup-token`, authorize in the browser, copy
