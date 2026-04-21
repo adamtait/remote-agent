@@ -14,13 +14,17 @@ runtime via its attached service account:
   restart.
 - **Claude OAuth** is fetched at each container boot and written to
   `/etc/profile.d/claude-auth.sh`. Rotation → `workstations stop/start`.
+  In OAuth mode, the entrypoint also seeds `~/.claude.json` from a second
+  secret holding the `oauthAccount` block so interactive `claude` skips the
+  browser-based onboarding wizard (which can't complete on a headless VM).
 - **GitHub PAT** uses a custom `credential.helper` script that calls
   `gcloud secrets versions access` on every git operation. Rotations are
   picked up immediately on the next push/pull/clone, no restart.
 
 The `--container-env` block now contains only pointers
-(`CLAUDE_AUTH_SECRET_NAME`, `GITHUB_PAT_SECRET_NAME`, `GCP_PROJECT_ID`,
-`GITHUB_REPO_URL`, `GIT_USER_NAME`, `GIT_USER_EMAIL`) — no sensitive values.
+(`CLAUDE_AUTH_SECRET_NAME`, `CLAUDE_OAUTH_ACCOUNT_SECRET_NAME` (OAuth only),
+`GITHUB_PAT_SECRET_NAME`, `GCP_PROJECT_ID`, `GITHUB_REPO_URL`,
+`GIT_USER_NAME`, `GIT_USER_EMAIL`) — no sensitive values.
 
 ## Files
 
@@ -42,7 +46,9 @@ The `--container-env` block now contains only pointers
 - **Claude Code auth**, one of:
   - **Claude Pro/Max/Team OAuth token** (recommended — uses your subscription).
     Generate locally with `claude setup-token`, authorize in the browser, copy
-    the `sk-ant-oat01-...` value. Valid ~1 year.
+    the `sk-ant-oat01-...` value. Valid ~1 year. OAuth mode also needs the
+    `oauthAccount` block from your laptop's `~/.claude.json` (see below) so
+    the headless VM can skip the onboarding wizard.
   - **Anthropic API key** (pay-as-you-go). Create in the Anthropic Console.
 
 The script prompts on first run to choose. Only one is stored and injected —
@@ -129,6 +135,39 @@ as `export CLAUDE_CODE_OAUTH_TOKEN=...`. The code-oss terminal is a login
 shell so it picks this up automatically. Because `apiKeyHelper` conflicts
 with OAuth tokens in Claude Code, the entrypoint also removes any stale
 `apiKeyHelper` entry from `settings.json` when running in this mode.
+
+In OAuth mode the entrypoint also pre-seeds `/home/user/.claude.json` with
+`hasCompletedOnboarding: true`, `lastOnboardingVersion` (from
+`claude --version`), and an `oauthAccount` block fetched from a second
+Secret Manager secret. Without this, interactive `claude` launches a
+browser-based onboarding wizard that can't complete on a headless VM —
+even though the OAuth token itself is valid and `claude -p` works. The
+seed is merged into any existing `~/.claude.json` so project state
+(trusted dirs, MCP servers, etc.) is preserved across boots.
+
+### Populating the oauthAccount secret (one-time, per user)
+
+On a machine where `claude` has already completed interactive login
+(typically your laptop), extract the account metadata:
+
+```bash
+jq '.oauthAccount' ~/.claude.json
+# => {"accountUuid":"...","emailAddress":"...","organizationUuid":"..."}
+```
+
+Store that JSON verbatim as a Secret Manager secret:
+
+```bash
+jq '.oauthAccount' ~/.claude.json | \
+    gcloud secrets create claude-oauth-account \
+        --data-file=- --project=$PROJECT_ID
+```
+
+Then make sure the workstation config sets
+`CLAUDE_OAUTH_ACCOUNT_SECRET_NAME=claude-oauth-account` in `--container-env`
+and the workstation service account has `secretmanager.secretAccessor` on
+the secret. Rotating this secret is picked up on the next
+`workstations stop/start`, same as the OAuth token.
 
 **GitHub PAT.** At every container boot, `entrypoint.sh` writes
 `/usr/local/bin/git-credential-gcp-secret`, a script implementing git's
