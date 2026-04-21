@@ -25,6 +25,12 @@ Shared flags on both subcommands:
 | `--project-only`  | false    | Only scaffold `.workstation.yaml`                    |
 | `--global-only`   | false    | Only scaffold `~/.config/cws/config.yaml`            |
 
+`cws setup` only (not `setup template`):
+
+| Flag          | Default | Meaning                                                    |
+|---------------|---------|------------------------------------------------------------|
+| `--advanced`  | false   | Also prompt for cluster/config/machine/disk fields         |
+
 `--project-only` and `--global-only` are mutually exclusive; using both is a
 usage error.
 
@@ -61,8 +67,10 @@ from tests. `cmd/setup.go` only wires flags, I/O, and a `Prober` implementation.
    - `gcloud auth list --filter=status:ACTIVE --format=value(account)` returns
      non-empty
    - `docker --version` exits 0
-   - After `project_id` is known: `gcloud beta billing projects describe <id>
-     --format=value(billingEnabled)` returns `True`
+
+   A billing check (`gcloud beta billing projects describe <id>
+   --format=value(billingEnabled)` returns `True`) runs *after* the user
+   supplies `project_id` in step 3, same warn-only semantics.
 
 2. **Probe for defaults.** All probes best-effort — missing tool or empty
    output means no default, not a failure:
@@ -109,8 +117,8 @@ the user can see both the placeholder and the source.
 # Required fields have no default; uncomment and fill them in.
 # Optional fields show the default cws will apply if left unset.
 
-project_id: my-gcp-project        # REQUIRED — probed: <probed or 'none'>
-github_repo_url: https://...      # REQUIRED — probed: <probed or 'none'>
+project_id: my-gcp-project        # REQUIRED — probed: <value or "(none — set manually)">
+github_repo_url: https://...      # REQUIRED — probed: <value or "(none — set manually)">
 
 # region: us-central1             # optional; falls back to global default, then us-central1
 # cluster_name: claude-dev-cluster
