@@ -65,3 +65,23 @@ func TestRenderGlobalTemplate_NoProbesStillRenders(t *testing.T) {
 		t.Errorf("RenderGlobalTemplate missing 'defaults:'\ngot:\n%s", got)
 	}
 }
+
+func TestRenderGlobalTemplate_EmptyProbesDoNotMangleEnDash(t *testing.T) {
+	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{})
+	// The placeholder sentinel uses a literal en-dash (U+2014). Ensure we
+	// didn't %q-escape it into \u2014.
+	if strings.Contains(got, `\u2014`) {
+		t.Errorf("template contains escaped en-dash \\u2014:\n%s", got)
+	}
+	if !strings.Contains(got, "(none — set manually)") {
+		t.Errorf("template missing literal placeholder with en-dash:\n%s", got)
+	}
+}
+
+func TestRenderGlobalTemplate_QuotesGitIdentity(t *testing.T) {
+	pv := scaffold.ProbedValues{GitUserName: "Alice Example"}
+	got := scaffold.RenderGlobalTemplate(pv)
+	if !strings.Contains(got, `"Alice Example"`) {
+		t.Errorf("expected quoted git_user_name, got:\n%s", got)
+	}
+}

@@ -63,8 +63,8 @@ func RenderGlobalTemplate(pv ProbedValues) string {
 
 defaults:
   # region: %s
-  # git_user_name:  %q
-  # git_user_email: %q
+  # git_user_name:  %s
+  # git_user_email: %s
 
 # projects:
 #   my-gcp-project:
@@ -72,8 +72,18 @@ defaults:
 #     image_name:           claude-code-workstation
 #     image_tag:            latest
 #     repo_name:            claude-workstation-images
-`, firstNonEmpty(pv.Region, "us-central1"), probedOr(pv.GitUserName), probedOr(pv.GitUserEmail))
+`, firstNonEmpty(pv.Region, "us-central1"), quoteOrPlaceholder(pv.GitUserName), quoteOrPlaceholder(pv.GitUserEmail))
 	return b.String()
+}
+
+// quoteOrPlaceholder returns Go-quoted v for YAML-safe output when v is
+// non-empty; otherwise it returns the unquoted probedNone sentinel (so the
+// en-dash isn't mangled into \u2014).
+func quoteOrPlaceholder(v string) string {
+	if v == "" {
+		return probedNone
+	}
+	return fmt.Sprintf("%q", v)
 }
 
 func firstNonEmpty(values ...string) string {
