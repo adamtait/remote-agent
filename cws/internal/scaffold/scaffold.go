@@ -69,7 +69,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		}
 		project.ProjectID = projectID
 
-		if !opts.Prober.BillingEnabled(projectID) {
+		if !opts.Prober.BillingEnabled(projectID) && opts.Stderr != nil {
 			fmt.Fprintf(opts.Stderr, "WARN: could not confirm billing is enabled on %s (cws create will fail otherwise)\n", projectID)
 		}
 
@@ -125,7 +125,8 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	if err != nil {
 		return err
 	}
-	if strings.ToLower(strings.TrimSpace(confirm)) == "n" {
+	answer := strings.ToLower(strings.TrimSpace(confirm))
+	if answer == "n" || answer == "no" {
 		return fmt.Errorf("cancelled by user")
 	}
 
@@ -175,6 +176,9 @@ func TemplateScaffold(opts TemplateOptions) error {
 }
 
 func warnPrereqs(out io.Writer, p Prober) {
+	if out == nil {
+		return
+	}
 	if !p.HasGcloud() {
 		fmt.Fprintln(out, "WARN: gcloud CLI not found on PATH — cws create will fail until installed")
 	} else if !p.HasGcloudAuth() {

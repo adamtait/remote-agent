@@ -3,6 +3,7 @@ package scaffold_test
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,7 +127,7 @@ func TestInteractiveScaffold_ProjectOnlySkipsGlobal(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cwd, ".workstation.yaml")); err != nil {
 		t.Errorf("project file not written: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".config", "cws", "config.yaml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".config", "cws", "config.yaml")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("global file was written despite --project-only")
 	}
 }
@@ -139,6 +140,52 @@ func TestInteractiveScaffold_MutuallyExclusiveFlags(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for mutually exclusive flags")
+	}
+}
+
+func TestInteractiveScaffold_NoCancelsOnProceed(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	stdin := strings.NewReader(strings.Join([]string{
+		"my-proj-123",
+		"https://github.com/a/b.git",
+		"us-central1",
+		"Alice",
+		"alice@example.com",
+		"no",
+	}, "\n") + "\n")
+	var stdout, stderr bytes.Buffer
+	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
+		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
+		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
+	})
+	if err == nil {
+		t.Fatal("expected cancellation error, got nil")
+	}
+	if _, statErr := os.Stat(filepath.Join(cwd, ".workstation.yaml")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Error("project file should not exist after cancel")
+	}
+}
+
+func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
+	// Guard against a future caller forgetting to pipe Stderr.
+	cwd := t.TempDir()
+	home := t.TempDir()
+	stdin := strings.NewReader(strings.Join([]string{
+		"my-proj-123",
+		"https://github.com/a/b.git",
+		"us-central1",
+		"Alice",
+		"alice@example.com",
+		"y",
+	}, "\n") + "\n")
+	var stdout bytes.Buffer
+	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
+		Stdin: stdin, Stdout: &stdout, Stderr: nil,
+		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error with nil Stderr: %v", err)
 	}
 }
 
