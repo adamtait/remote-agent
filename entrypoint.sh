@@ -22,7 +22,6 @@ set -euo pipefail
 USER_NAME="user"
 USER_HOME="/home/${USER_NAME}"
 WORKSPACE_DIR="${USER_HOME}/workspace"
-MARKER="${USER_HOME}/.claude-workstation-setup-done"
 
 APIKEY_HELPER_PATH="/usr/local/bin/claude-apikey-helper.sh"
 OAUTH_PROFILE_PATH="/etc/profile.d/claude-auth.sh"
@@ -30,16 +29,23 @@ GIT_HELPER_PATH="/usr/local/bin/git-credential-gcp-secret"
 CLAUDE_SETTINGS_DIR="${USER_HOME}/.claude"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_DIR}/settings.json"
 
+CLAUDE_LOG_PATH="/var/log/claude-setup.log"
+
 log() {
-    local msg="[claude-setup] $*"
+    local msg="[claude-setup] $(date -u +%H:%M:%S) $*"
     echo "${msg}"
-    # Also write to syslog. The host VM's logging agent ships /var/log/syslog
-    # to Cloud Logging, so this surfaces in `gcloud logging read` even though
-    # the parent /google/scripts/entrypoint.sh doesn't ship startup-d stdout.
-    # Without this, every failure in this script is invisible to anyone
-    # debugging from outside the workstation.
-    command -v logger >/dev/null 2>&1 && logger -t claude-setup "${msg}" || true
+    # Append to a dedicated log file inside the container. Workstations'
+    # parent entrypoint redirects our stdout, and COS host VMs don't run
+    # a conventional syslog daemon — so a file we can SSH in and read
+    # is the most reliable debugging surface. Use append so we can see
+    # multiple boots if anything weird is happening.
+    echo "${msg}" >> "${CLAUDE_LOG_PATH}" 2>/dev/null || true
 }
+
+# Ensure the log file exists and is readable by user so they can
+# inspect it without sudo. Truncation happens only once per boot.
+: > "${CLAUDE_LOG_PATH}" 2>/dev/null || true
+chmod 0644 "${CLAUDE_LOG_PATH}" 2>/dev/null || true
 
 # =============================================================================
 # Claude auth — runs EVERY boot so rotations are picked up.
@@ -190,14 +196,14 @@ if ! printf 'protocol=https\nhost=github.com\n\n' \
 fi
 
 # =============================================================================
-# First-boot-only setup below this line.
+# First-boot-ish setup below this line. Each step has its own idempotence
+# check — we intentionally do NOT use a single "already ran" marker file,
+# because a marker on the persistent home disk survives workstation recreation
+# and blocks legitimate reruns (e.g. if a previous clone failed partway).
 # =============================================================================
-if [[ -f "${MARKER}" ]]; then
-    log "First-boot setup already done — skipping git config and repo clone."
-    exit 0
-fi
 
-# ---- Git config (first boot only — persistent disk preserves ~/.gitconfig) -
+# ---- Git config (persistent disk preserves ~/.gitconfig, so this is a
+#      no-op after the first write, but safe to reapply every boot) -----------
 log "Configuring git to use the credential helper..."
 sudo -u "${USER_NAME}" bash <<EOF
 set -euo pipefail
@@ -215,20 +221,21 @@ git config --global pull.rebase false
 rm -f "${USER_HOME}/.git-credentials"
 EOF
 
-# ---- Clone repo -----------------------------------------------------------
+# ---- Clone repo (idempotent — skipped if workspace is already a git repo) --
 if [[ -n "${GITHUB_REPO_URL:-}" ]]; then
     if [[ -d "${WORKSPACE_DIR}/.git" ]]; then
         log "Workspace already a git repo — skipping clone."
     else
         log "Cloning ${GITHUB_REPO_URL} into ${WORKSPACE_DIR}..."
-        sudo -u "${USER_NAME}" git clone "${GITHUB_REPO_URL}" "${WORKSPACE_DIR}" \
-            || log "WARNING: clone failed — check PAT scopes and repo URL."
+        if sudo -u "${USER_NAME}" git clone "${GITHUB_REPO_URL}" "${WORKSPACE_DIR}" \
+                2> >(while read -r line; do log "git: ${line}"; done); then
+            log "Clone succeeded."
+        else
+            log "ERROR: clone failed — check PAT scopes, repo URL, and git helper."
+        fi
     fi
 else
     log "GITHUB_REPO_URL not set — skipping clone."
 fi
 
-# ---- Mark done ------------------------------------------------------------
-touch "${MARKER}"
-chown "${USER_NAME}:${USER_NAME}" "${MARKER}"
-log "First-boot setup complete."
+log "Entrypoint complete."
