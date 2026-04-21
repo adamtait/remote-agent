@@ -26,7 +26,6 @@ func init() {
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
-	// a) Apply env var fallbacks
 	if cfg.ProjectID == "" {
 		cfg.ProjectID = os.Getenv("PROJECT_ID")
 	}
@@ -45,11 +44,18 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if cfg.GitUserEmail == "" {
 		cfg.GitUserEmail = "dev@example.com"
 	}
+	for field, val := range map[string]string{
+		"git_user_name":    cfg.GitUserName,
+		"git_user_email":   cfg.GitUserEmail,
+		"github_repo_url":  cfg.GithubRepoURL,
+	} {
+		if strings.ContainsAny(val, ",=") {
+			return fmt.Errorf("%s must not contain ',' or '=' (gcloud --container-env limitation): %q", field, val)
+		}
+	}
 
-	// b) Create runner
 	r := gcloud.RealRunner{}
 
-	// c) Compute derived values
 	imageURI := fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
 		cfg.Region, cfg.ProjectID, cfg.RepoName, cfg.ImageName, cfg.ImageTag)
 	serviceAccountEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com",
@@ -156,7 +162,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 7 — Workstations config
-	logStep(fmt.Sprintf("Ensuring workstations config '%s'...", cfg.ConfigName))
+	logStep(fmt.Sprintf("Ensuring workstations config '%s' (auth: %s)...", cfg.ConfigName, claudeAuthMode))
 	containerEnv := strings.Join([]string{
 		"CLAUDE_AUTH_MODE=" + claudeAuthMode,
 		"CLAUDE_AUTH_SECRET_NAME=" + claudeSecretName,
@@ -166,8 +172,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		"GIT_USER_NAME=" + cfg.GitUserName,
 		"GIT_USER_EMAIL=" + cfg.GitUserEmail,
 	}, ",")
-
-	fmt.Printf("Auth mode: %s (Claude secret: %s, GitHub secret: github-pat)\n", claudeAuthMode, claudeSecretName)
 
 	configExists := r.Check("workstations", "configs", "describe", cfg.ConfigName,
 		"--cluster", cfg.ClusterName, "--region", cfg.Region, "--project", cfg.ProjectID)
@@ -207,17 +211,21 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("creating workstation: %w", err)
 		}
 	}
-
-	logStep("Starting workstation...")
-	if err := r.Run("workstations", "start", cfg.WorkstationName,
-		"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
-		"--region", cfg.Region, "--project", cfg.ProjectID); err != nil {
-		return fmt.Errorf("starting workstation: %w", err)
+	wsInfo, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, cfg.WorkstationName)
+	if err != nil {
+		return fmt.Errorf("describing workstation: %w", err)
+	}
+	if wsInfo.State != "STATE_RUNNING" && wsInfo.State != "STATE_STARTING" {
+		logStep("Starting workstation...")
+		if err := r.Run("workstations", "start", cfg.WorkstationName,
+			"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
+			"--region", cfg.Region, "--project", cfg.ProjectID); err != nil {
+			return fmt.Errorf("starting workstation: %w", err)
+		}
 	}
 
 	// Step 9 — Print access info
-	wsClient := gcloud.NewClient(r)
-	info, err := wsClient.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, cfg.WorkstationName)
+	info, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, cfg.WorkstationName)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
 	}
