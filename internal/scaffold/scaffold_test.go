@@ -51,7 +51,7 @@ func TestInteractiveScaffold_WritesBothFiles(t *testing.T) {
 	}
 
 	// Global file
-	global, err := os.ReadFile(filepath.Join(home, ".config", "ws.yaml"))
+	global, err := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestInteractiveScaffold_ProjectOnlySkipsGlobal(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cwd, ".ws.yaml")); err != nil {
 		t.Errorf("project file not written: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".config", "ws.yaml")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(home, ".config", "ws", "config.yaml")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("global file was written despite --project-only")
 	}
 }
@@ -233,7 +233,7 @@ func TestTemplateScaffold_WritesBothFiles(t *testing.T) {
 	if !strings.Contains(string(proj), "probed: probed-proj") {
 		t.Errorf("template missing probed project id:\n%s", proj)
 	}
-	global, _ := os.ReadFile(filepath.Join(home, ".config", "ws.yaml"))
+	global, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
 	if !strings.Contains(string(global), "europe-west1") {
 		t.Errorf("global template missing region:\n%s", global)
 	}

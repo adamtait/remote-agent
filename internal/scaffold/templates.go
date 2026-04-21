@@ -54,7 +54,7 @@ github_repo_url: %s   # REQUIRED — probed: %s
 	return b.String()
 }
 
-// RenderGlobalTemplate returns a commented ~/.config/ws.yaml with
+// RenderGlobalTemplate returns a commented ~/.config/ws/config.yaml with
 // defaults and projects sections.
 func RenderGlobalTemplate(pv ProbedValues) string {
 	var b strings.Builder
