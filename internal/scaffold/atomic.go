@@ -25,7 +25,7 @@ func WriteAtomic(path string, data []byte, force bool) error {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
 
-	tmp, err := os.CreateTemp(dir, ".cws-scaffold-*")
+	tmp, err := os.CreateTemp(dir, ".ws-scaffold-*")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}

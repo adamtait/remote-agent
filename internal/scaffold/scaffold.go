@@ -123,7 +123,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		fmt.Fprintln(opts.Stdout, indent(project.marshal(), "  "))
 	}
 	if writeGlobal {
-		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Home, ".config", "cws", "config.yaml")+":")
+		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Home, ".config", "ws", "config.yaml")+":")
 		fmt.Fprintln(opts.Stdout, indent(global.marshal(), "  "))
 	}
 
@@ -142,7 +142,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		}
 	}
 	if writeGlobal {
-		if err := WriteAtomic(filepath.Join(opts.Home, ".config", "cws", "config.yaml"), []byte(global.marshal()), opts.Force); err != nil {
+		if err := WriteAtomic(filepath.Join(opts.Home, ".config", "ws", "config.yaml"), []byte(global.marshal()), opts.Force); err != nil {
 			return err
 		}
 	}
@@ -172,7 +172,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 		fmt.Fprintln(opts.Stdout, "Wrote "+path)
 	}
 	if !opts.ProjectOnly {
-		path := filepath.Join(opts.Home, ".config", "cws", "config.yaml")
+		path := filepath.Join(opts.Home, ".config", "ws", "config.yaml")
 		if err := WriteAtomic(path, []byte(RenderGlobalTemplate(pv)), opts.Force); err != nil {
 			return err
 		}
