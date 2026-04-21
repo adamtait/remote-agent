@@ -2,6 +2,7 @@
 package scaffold
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ func WriteAtomic(path string, data []byte, force bool) error {
 		if !force {
 			return fmt.Errorf("%s already exists; re-run with --force to overwrite", path)
 		}
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("stat %s: %w", path, err)
 	}
 
