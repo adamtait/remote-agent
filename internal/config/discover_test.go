@@ -1,4 +1,4 @@
-// cws/internal/config/discover_test.go
+// ws/internal/config/discover_test.go
 package config_test
 
 import (

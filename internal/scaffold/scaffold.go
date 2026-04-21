@@ -1,4 +1,4 @@
-// cws/internal/scaffold/scaffold.go
+// ws/internal/scaffold/scaffold.go
 package scaffold
 
 import (
@@ -70,7 +70,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		project.ProjectID = projectID
 
 		if !opts.Prober.BillingEnabled(projectID) && opts.Stderr != nil {
-			fmt.Fprintf(opts.Stderr, "WARN: could not confirm billing is enabled on %s (cws create will fail otherwise)\n", projectID)
+			fmt.Fprintf(opts.Stderr, "WARN: could not confirm billing is enabled on %s (ws create will fail otherwise)\n", projectID)
 		}
 
 		repoURL, err := Prompt(stdin, opts.Stdout, "github_repo_url", pv.GithubRepoURL, ValidateGithubRepoURL)
@@ -123,7 +123,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		fmt.Fprintln(opts.Stdout, indent(project.marshal(), "  "))
 	}
 	if writeGlobal {
-		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Home, ".config", "cws", "config.yaml")+":")
+		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Home, ".config", "ws", "config.yaml")+":")
 		fmt.Fprintln(opts.Stdout, indent(global.marshal(), "  "))
 	}
 
@@ -142,12 +142,12 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		}
 	}
 	if writeGlobal {
-		if err := WriteAtomic(filepath.Join(opts.Home, ".config", "cws", "config.yaml"), []byte(global.marshal()), opts.Force); err != nil {
+		if err := WriteAtomic(filepath.Join(opts.Home, ".config", "ws", "config.yaml"), []byte(global.marshal()), opts.Force); err != nil {
 			return err
 		}
 	}
 
-	fmt.Fprintln(opts.Stdout, "Run 'cws create' to provision the workstation.")
+	fmt.Fprintln(opts.Stdout, "Run 'ws create' to provision the workstation.")
 	return nil
 }
 
@@ -172,7 +172,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 		fmt.Fprintln(opts.Stdout, "Wrote "+path)
 	}
 	if !opts.ProjectOnly {
-		path := filepath.Join(opts.Home, ".config", "cws", "config.yaml")
+		path := filepath.Join(opts.Home, ".config", "ws", "config.yaml")
 		if err := WriteAtomic(path, []byte(RenderGlobalTemplate(pv)), opts.Force); err != nil {
 			return err
 		}
@@ -186,12 +186,12 @@ func warnPrereqs(out io.Writer, p Prober) {
 		return
 	}
 	if !p.HasGcloud() {
-		fmt.Fprintln(out, "WARN: gcloud CLI not found on PATH — cws create will fail until installed")
+		fmt.Fprintln(out, "WARN: gcloud CLI not found on PATH — ws create will fail until installed")
 	} else if !p.HasGcloudAuth() {
-		fmt.Fprintln(out, "WARN: no active gcloud credentials — run 'gcloud auth login' before 'cws create'")
+		fmt.Fprintln(out, "WARN: no active gcloud credentials — run 'gcloud auth login' before 'ws create'")
 	}
 	if !p.HasDocker() {
-		fmt.Fprintln(out, "WARN: docker not found on PATH — cws create needs it to build the workstation image")
+		fmt.Fprintln(out, "WARN: docker not found on PATH — ws create needs it to build the workstation image")
 	}
 }
 

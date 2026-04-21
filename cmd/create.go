@@ -265,10 +265,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
   Region       : %s
 
   SSH:
-    cws connect %s
+    ws connect %s
 
   Stop (save cost):
-    cws stop %s
+    ws stop %s
 ================================================================
 `,
 		info.Host,

@@ -1,4 +1,4 @@
-// cws/internal/config/discover.go
+// ws/internal/config/discover.go
 package config
 
 import (

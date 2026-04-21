@@ -1,4 +1,4 @@
-// cws/internal/config/merge_test.go
+// ws/internal/config/merge_test.go
 package config_test
 
 import (

@@ -1,4 +1,4 @@
-// cws/internal/config/merge.go
+// ws/internal/config/merge.go
 package config
 
 import (

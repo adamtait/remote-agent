@@ -1,4 +1,4 @@
-// cws/cmd/setup_test.go
+// ws/cmd/setup_test.go
 package cmd_test
 
 import (
@@ -33,7 +33,7 @@ func TestSetupTemplate_WritesFiles(t *testing.T) {
 	if _, err := os.Stat(projectPath); err != nil {
 		t.Fatalf("expected %s to exist: %v", projectPath, err)
 	}
-	globalPath := filepath.Join(home, ".config", "cws", "config.yaml")
+	globalPath := filepath.Join(home, ".config", "ws", "config.yaml")
 	if _, err := os.Stat(globalPath); err != nil {
 		t.Fatalf("expected %s to exist: %v", globalPath, err)
 	}

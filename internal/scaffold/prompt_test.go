@@ -1,4 +1,4 @@
-// cws/internal/scaffold/prompt_test.go
+// ws/internal/scaffold/prompt_test.go
 package scaffold_test
 
 import (
