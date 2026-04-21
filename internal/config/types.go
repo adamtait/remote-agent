@@ -1,6 +1,6 @@
 package config
 
-// ProjectConfig is unmarshalled from .workstation.yaml.
+// ProjectConfig is unmarshalled from .ws.yaml.
 type ProjectConfig struct {
 	ProjectID     string `yaml:"project_id"`
 	Region        string `yaml:"region"`
@@ -48,5 +48,5 @@ type Config struct {
 	ImageTag           string
 	RepoName           string
 	WorkstationName    string // <project_id>-<username>, sanitized, ≤63 chars
-	ProjectConfigPath  string // absolute path to the .workstation.yaml that was found
+	ProjectConfigPath  string // absolute path to the .ws.yaml that was found
 }

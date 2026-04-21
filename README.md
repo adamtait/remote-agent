@@ -63,7 +63,7 @@ Build and install the `ws` CLI, then scaffold a project config and run
 
 ```bash
 make install                # installs ws to ~/.local/bin
-ws setup                   # writes .workstation.yaml + ~/.config/ws/config.yaml
+ws setup                   # writes .ws.yaml + ~/.config/ws/config.yaml
 ws create                  # provisions the workstation
 ```
 

@@ -119,7 +119,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 
 	fmt.Fprintln(opts.Stdout)
 	if writeProject {
-		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Cwd, ".workstation.yaml")+":")
+		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Cwd, ".ws.yaml")+":")
 		fmt.Fprintln(opts.Stdout, indent(project.marshal(), "  "))
 	}
 	if writeGlobal {
@@ -137,7 +137,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	}
 
 	if writeProject {
-		if err := WriteAtomic(filepath.Join(opts.Cwd, ".workstation.yaml"), []byte(project.marshal()), opts.Force); err != nil {
+		if err := WriteAtomic(filepath.Join(opts.Cwd, ".ws.yaml"), []byte(project.marshal()), opts.Force); err != nil {
 			return err
 		}
 	}
@@ -165,7 +165,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 	}
 
 	if !opts.GlobalOnly {
-		path := filepath.Join(opts.Cwd, ".workstation.yaml")
+		path := filepath.Join(opts.Cwd, ".ws.yaml")
 		if err := WriteAtomic(path, []byte(RenderProjectTemplate(pv)), opts.Force); err != nil {
 			return err
 		}

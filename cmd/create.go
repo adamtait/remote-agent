@@ -19,7 +19,7 @@ var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Provision a Google Cloud Workstation with Claude Code",
 	Long: `Idempotent: safe to re-run. Each step checks for existence first.
-Requires .workstation.yaml in the project root with project_id and github_repo_url set.`,
+Requires .ws.yaml in the project root with project_id and github_repo_url set.`,
 	RunE: runCreate,
 }
 
@@ -35,10 +35,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		cfg.GithubRepoURL = os.Getenv("GITHUB_REPO_URL")
 	}
 	if cfg.ProjectID == "" {
-		return fmt.Errorf("project_id is required: set it in .workstation.yaml or PROJECT_ID env var")
+		return fmt.Errorf("project_id is required: set it in .ws.yaml or PROJECT_ID env var")
 	}
 	if cfg.GithubRepoURL == "" {
-		return fmt.Errorf("github_repo_url is required: set it in .workstation.yaml or GITHUB_REPO_URL env var")
+		return fmt.Errorf("github_repo_url is required: set it in .ws.yaml or GITHUB_REPO_URL env var")
 	}
 	// The workstation image ships HTTPS-only credentials (PAT via git helper) —
 	// no SSH keys, no known_hosts. Rewrite SSH URLs so the clone inside the

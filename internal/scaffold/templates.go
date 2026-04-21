@@ -25,7 +25,7 @@ func probedOr(v string) string {
 	return v
 }
 
-// RenderProjectTemplate returns a commented .workstation.yaml with required
+// RenderProjectTemplate returns a commented .ws.yaml with required
 // fields filled from probes (or placeholders) and optional fields commented.
 func RenderProjectTemplate(pv ProbedValues) string {
 	projectID := pv.ProjectID

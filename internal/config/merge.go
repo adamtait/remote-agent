@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LoadProjectConfig reads and parses a .workstation.yaml file.
+// LoadProjectConfig reads and parses a .ws.yaml file.
 func LoadProjectConfig(path string) (*ProjectConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
