@@ -80,14 +80,16 @@ Every boot (workstation VM)
 ## Components
 
 1. **`entrypoint.sh`** — new `seed_claude_onboarding()` helper invoked at the
-   end of the `oauth)` branch.
-2. **`create-workstation.sh`** — new `--claude-oauth-account-secret NAME`
-   flag, plumbed as env var `CLAUDE_OAUTH_ACCOUNT_SECRET_NAME` on the
-   workstation config. Mirrors `--claude-auth-secret`.
-3. **`README.md`** — short operator section:
+   end of the `oauth)` branch. This is the only code change in scope.
+2. **`README.md`** — short operator section:
    - one-time laptop `jq` snippet
    - `gcloud secrets create claude-oauth-account --data-file=-`
-   - new flag on `create-workstation.sh`
+   - note the `CLAUDE_OAUTH_ACCOUNT_SECRET_NAME` env var the workstation
+     config must set
+
+Plumbing the new env var onto the workstation config is handled by the Go
+tool in `cws/` and is out of scope for this plan. `create-workstation.sh`
+is being replaced and is not touched.
 
 No new standalone scripts shipped in the image.
 
@@ -148,26 +150,27 @@ No new runtime dependencies.
 
 1. **Schema decision** — separate secret for account metadata. Document the
    JSON shape in README.
-2. **Extend `create-workstation.sh`** — add `--claude-oauth-account-secret
-   NAME`. Fail fast if `CLAUDE_AUTH_MODE=oauth` and flag is missing. Set
-   `CLAUDE_OAUTH_ACCOUNT_SECRET_NAME` on the workstation config.
-3. **`seed_claude_onboarding()` in `entrypoint.sh`** — new function, called
+2. **`seed_claude_onboarding()` in `entrypoint.sh`** — new function, called
    at the end of the `oauth)` branch. Guarded by
    `[[ -n "${CLAUDE_OAUTH_ACCOUNT_SECRET_NAME:-}" ]]`; logs a WARNING and
    continues if unset, so pre-existing workstations keep working on image
    rebuild.
-4. **Merge vs create** — mirror the existing settings.json pattern at
+3. **Merge vs create** — mirror the existing settings.json pattern at
    entrypoint.sh:94-108. File missing → write fresh. File exists + `jq`
    present → merge. Else warn.
-5. **Atomic write** — `tmp=$(sudo -u user mktemp)`, render with `jq`,
+4. **Atomic write** — `tmp=$(sudo -u user mktemp)`, render with `jq`,
    `sudo -u user mv` into place. Explicit chown, `chmod 600`.
-6. **Smoke test** — `sudo -u user bash -c 'claude -p "respond OK" | grep -q
+5. **Smoke test** — `sudo -u user bash -c 'claude -p "respond OK" | grep -q
    OK'`. Log WARNING on failure, do not exit; a failed smoke test is
    diagnostic, not fatal (token fetch already succeeded upstream).
-7. **README update** — laptop extraction snippet, `gcloud secrets create`,
-   new flag usage.
-8. **Manual test** — rebuild image, recreate workstation, SSH in, run
-   `claude` interactively, confirm no wizard. Run `/status` to confirm
+6. **README update** — laptop extraction snippet, `gcloud secrets create`,
+   note the new env var (`CLAUDE_OAUTH_ACCOUNT_SECRET_NAME`) that the
+   workstation config must set.
+7. **Coordinate with `cws/`** — the Go tool owns plumbing the env var onto
+   the workstation config. Out of scope for this plan; flagged as a
+   handoff.
+8. **Manual test** — rebuild image, recreate workstation via `cws`, SSH in,
+   run `claude` interactively, confirm no wizard. Run `/status` to confirm
    subscription-based auth.
 
 ## Edge cases
