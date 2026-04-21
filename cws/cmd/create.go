@@ -71,12 +71,23 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		"artifactregistry.googleapis.com",
 		"secretmanager.googleapis.com",
 		"iam.googleapis.com",
-		// Required when the org enforces a session-length/reauth policy:
-		// gcloud calls this during OAuth token refresh; if disabled the API
-		// returns SERVICE_DISABLED and unrelated commands (e.g. ssh) fail.
-		"reauth.googleapis.com",
 		"--project", cfg.ProjectID, "--quiet"); err != nil {
 		return fmt.Errorf("enabling APIs: %w", err)
+	}
+
+	// reauth.googleapis.com is only enableable by orgs that have been
+	// allowlisted for it; on other projects Service Usage rejects it with
+	// "not available to this consumer". It's only needed when the caller's
+	// org enforces a session-length/reauth policy — gcloud calls it during
+	// OAuth token refresh, and commands like `gcloud workstations ssh` fail
+	// with SERVICE_DISABLED if that policy is on and the API is off. Try
+	// best-effort; surface a warning but don't block the rest of setup.
+	if err := r.Run("services", "enable", "reauth.googleapis.com",
+		"--project", cfg.ProjectID, "--quiet"); err != nil {
+		fmt.Printf("\033[1;33mWARN:\033[0m could not enable reauth.googleapis.com (%v).\n"+
+			"      This is only required if your org enforces a session/reauth policy.\n"+
+			"      If `gcloud workstations ssh` later fails with SERVICE_DISABLED for\n"+
+			"      reauth.googleapis.com, ask an org admin to enable it.\n", err)
 	}
 
 	// Step 2 — Artifact Registry repo
