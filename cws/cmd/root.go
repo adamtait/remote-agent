@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/adamtait/remote-agent/cws/internal/config"
 	"github.com/adamtait/remote-agent/cws/internal/gcloud"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -16,8 +18,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "cws",
-	Short: "Manage Google Cloud Workstations with Claude Code",
+	Use:           "cws",
+	Short:         "Manage Google Cloud Workstations with Claude Code",
+	SilenceErrors: true, // cmd.Execute/ExecuteWithIO print errors explicitly
+	SilenceUsage:  true, // don't dump --help on runtime errors
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -58,5 +62,34 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// ExecuteWithIO runs the root command with injectable IO and argv, returning
+// an exit code. Used by tests; production still calls Execute().
+//
+// Flag values are reset to their declared defaults across the entire command
+// tree before Execute, so repeated invocations (as in tests) can't leak flag
+// state from a previous run.
+func ExecuteWithIO(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
+	resetFlagsRecursive(rootCmd)
+	rootCmd.SetIn(stdin)
+	rootCmd.SetOut(stdout)
+	rootCmd.SetErr(stderr)
+	rootCmd.SetArgs(args)
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func resetFlagsRecursive(c *cobra.Command) {
+	c.Flags().VisitAll(func(f *pflag.Flag) {
+		_ = f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
+	for _, child := range c.Commands() {
+		resetFlagsRecursive(child)
 	}
 }
