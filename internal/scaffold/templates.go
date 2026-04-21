@@ -38,9 +38,9 @@ func RenderProjectTemplate(pv ProbedValues) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `# cws project config — committed to the repo root
+	fmt.Fprintf(&b, `# ws project config — committed to the repo root
 # Required fields have no default; uncomment and fill them in.
-# Optional fields show the default cws will apply if left unset.
+# Optional fields show the default ws will apply if left unset.
 
 project_id: %s        # REQUIRED — probed: %s
 github_repo_url: %s   # REQUIRED — probed: %s
@@ -54,11 +54,11 @@ github_repo_url: %s   # REQUIRED — probed: %s
 	return b.String()
 }
 
-// RenderGlobalTemplate returns a commented ~/.config/cws/config.yaml with
+// RenderGlobalTemplate returns a commented ~/.config/ws/config.yaml with
 // defaults and projects sections.
 func RenderGlobalTemplate(pv ProbedValues) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, `# cws global config — user-wide defaults and per-project overrides
+	fmt.Fprintf(&b, `# ws global config — user-wide defaults and per-project overrides
 # All fields optional; uncomment what you want to set.
 
 defaults:
