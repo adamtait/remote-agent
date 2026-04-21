@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adamtait/remote-agent/cws/internal/scaffold"
+	"github.com/adamtait/remote-agent/internal/scaffold"
 )
 
 func TestInteractiveScaffold_WritesBothFiles(t *testing.T) {

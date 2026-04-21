@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adamtait/remote-agent/cws/internal/config"
-	"github.com/adamtait/remote-agent/cws/internal/gcloud"
+	"github.com/adamtait/remote-agent/internal/config"
+	"github.com/adamtait/remote-agent/internal/gcloud"
 )
 
 // testRunner is a minimal fake for resolve tests.

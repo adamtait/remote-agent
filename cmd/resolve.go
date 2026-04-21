@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/adamtait/remote-agent/cws/internal/config"
-	"github.com/adamtait/remote-agent/cws/internal/gcloud"
+	"github.com/adamtait/remote-agent/internal/config"
+	"github.com/adamtait/remote-agent/internal/gcloud"
 )
 
 // resolveWorkstationName returns the workstation name to target.
