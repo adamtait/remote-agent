@@ -1,4 +1,4 @@
-// cws/internal/scaffold/scaffold_test.go
+// ws/internal/scaffold/scaffold_test.go
 package scaffold_test
 
 import (

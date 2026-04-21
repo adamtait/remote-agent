@@ -1,4 +1,4 @@
-// cws/cmd/setup.go
+// ws/cmd/setup.go
 package cmd
 
 import (

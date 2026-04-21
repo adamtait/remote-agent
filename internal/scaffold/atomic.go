@@ -1,4 +1,4 @@
-// Package scaffold builds cws config files from probed + prompted values.
+// Package scaffold builds ws config files from probed + prompted values.
 package scaffold
 
 import (

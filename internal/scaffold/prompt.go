@@ -1,4 +1,4 @@
-// cws/internal/scaffold/prompt.go
+// ws/internal/scaffold/prompt.go
 package scaffold
 
 import (

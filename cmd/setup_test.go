@@ -1,4 +1,4 @@
-// cws/cmd/setup_test.go
+// ws/cmd/setup_test.go
 package cmd_test
 
 import (

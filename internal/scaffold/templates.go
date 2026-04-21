@@ -1,4 +1,4 @@
-// cws/internal/scaffold/templates.go
+// ws/internal/scaffold/templates.go
 package scaffold
 
 import (

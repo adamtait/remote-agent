@@ -11,7 +11,7 @@ type ProjectConfig struct {
 	DiskSizeGB    int    `yaml:"disk_size_gb"`
 }
 
-// GlobalDefaults is the defaults section of ~/.config/cws/config.yaml.
+// GlobalDefaults is the defaults section of ~/.config/ws/config.yaml.
 type GlobalDefaults struct {
 	Region       string `yaml:"region"`
 	GitUserName  string `yaml:"git_user_name"`
@@ -26,7 +26,7 @@ type GlobalProjectOverride struct {
 	RepoName           string `yaml:"repo_name"`
 }
 
-// GlobalConfig is unmarshalled from ~/.config/cws/config.yaml.
+// GlobalConfig is unmarshalled from ~/.config/ws/config.yaml.
 type GlobalConfig struct {
 	Defaults GlobalDefaults                   `yaml:"defaults"`
 	Projects map[string]GlobalProjectOverride `yaml:"projects"`

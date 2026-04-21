@@ -1,4 +1,4 @@
-// cws/internal/config/global.go
+// ws/internal/config/global.go
 package config
 
 import (
