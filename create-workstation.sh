@@ -66,11 +66,18 @@ gcloud config set project "${PROJECT_ID}" >/dev/null
 # 1. Enable APIs
 # =============================================================================
 log "Enabling required APIs..."
+# reauth.googleapis.com is required when the caller's org enforces a Google
+# Cloud session-length / reauth policy: gcloud calls it during end-user OAuth
+# token refresh (e.g. before `gcloud workstations ssh`). If the API is disabled
+# in the quota project, google.auth raises RefreshError with SERVICE_DISABLED
+# and the command fails — even though the failure has nothing to do with the
+# target command itself.
 gcloud services enable \
     workstations.googleapis.com \
     artifactregistry.googleapis.com \
     secretmanager.googleapis.com \
     iam.googleapis.com \
+    reauth.googleapis.com \
     --project="${PROJECT_ID}" --quiet
 
 # =============================================================================
