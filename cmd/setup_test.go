@@ -33,7 +33,7 @@ func TestSetupTemplate_WritesFiles(t *testing.T) {
 	if _, err := os.Stat(projectPath); err != nil {
 		t.Fatalf("expected %s to exist: %v", projectPath, err)
 	}
-	globalPath := filepath.Join(home, ".config", "ws", "config.yaml")
+	globalPath := filepath.Join(home, ".config", "ws.yaml")
 	if _, err := os.Stat(globalPath); err != nil {
 		t.Fatalf("expected %s to exist: %v", globalPath, err)
 	}
