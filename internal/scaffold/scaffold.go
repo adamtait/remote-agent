@@ -70,7 +70,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		project.ProjectID = projectID
 
 		if !opts.Prober.BillingEnabled(projectID) && opts.Stderr != nil {
-			fmt.Fprintf(opts.Stderr, "WARN: could not confirm billing is enabled on %s (cws create will fail otherwise)\n", projectID)
+			fmt.Fprintf(opts.Stderr, "WARN: could not confirm billing is enabled on %s (ws create will fail otherwise)\n", projectID)
 		}
 
 		repoURL, err := Prompt(stdin, opts.Stdout, "github_repo_url", pv.GithubRepoURL, ValidateGithubRepoURL)
@@ -147,7 +147,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		}
 	}
 
-	fmt.Fprintln(opts.Stdout, "Run 'cws create' to provision the workstation.")
+	fmt.Fprintln(opts.Stdout, "Run 'ws create' to provision the workstation.")
 	return nil
 }
 
@@ -186,12 +186,12 @@ func warnPrereqs(out io.Writer, p Prober) {
 		return
 	}
 	if !p.HasGcloud() {
-		fmt.Fprintln(out, "WARN: gcloud CLI not found on PATH — cws create will fail until installed")
+		fmt.Fprintln(out, "WARN: gcloud CLI not found on PATH — ws create will fail until installed")
 	} else if !p.HasGcloudAuth() {
-		fmt.Fprintln(out, "WARN: no active gcloud credentials — run 'gcloud auth login' before 'cws create'")
+		fmt.Fprintln(out, "WARN: no active gcloud credentials — run 'gcloud auth login' before 'ws create'")
 	}
 	if !p.HasDocker() {
-		fmt.Fprintln(out, "WARN: docker not found on PATH — cws create needs it to build the workstation image")
+		fmt.Fprintln(out, "WARN: docker not found on PATH — ws create needs it to build the workstation image")
 	}
 }
 
