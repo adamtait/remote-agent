@@ -54,7 +54,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	r := gcloud.RealRunner{}
+	r := runner
 
 	imageURI := fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
 		cfg.Region, cfg.ProjectID, cfg.RepoName, cfg.ImageName, cfg.ImageTag)

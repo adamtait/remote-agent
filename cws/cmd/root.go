@@ -12,6 +12,7 @@ import (
 var (
 	cfg    *config.Config
 	client *gcloud.Client
+	runner gcloud.Runner
 )
 
 var rootCmd = &cobra.Command{
@@ -47,7 +48,8 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 		cfg.ProjectConfigPath = projectCfgPath
-		client = gcloud.NewClient(gcloud.RealRunner{})
+		runner = gcloud.RealRunner{}
+		client = gcloud.NewClient(runner)
 		return nil
 	},
 }

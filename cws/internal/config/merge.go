@@ -3,6 +3,7 @@ package config
 
 import (
 	"os"
+	"os/user"
 	"regexp"
 	"strings"
 
@@ -83,8 +84,13 @@ func Merge(project *ProjectConfig, global *GlobalConfig) (*Config, error) {
 		}
 	}
 
-	// Derive username for workstation name
-	username := os.Getenv("USER")
+	// Derive username for workstation name; os/user.Current is more reliable than $USER.
+	var username string
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		username = u.Username
+	} else {
+		username = os.Getenv("USER")
+	}
 	if username == "" {
 		username = "user"
 	}
