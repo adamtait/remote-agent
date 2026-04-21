@@ -36,7 +36,7 @@ var deleteCmd = &cobra.Command{
 				return fmt.Errorf("no input received")
 			}
 			if strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
-				fmt.Println("Aborted.")
+				fmt.Fprintln(os.Stderr, "Aborted.")
 				return nil
 			}
 		}
