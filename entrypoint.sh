@@ -248,6 +248,17 @@ EOF
 
 # ---- Clone repo (idempotent — skipped if workspace is already a git repo) --
 if [[ -n "${GITHUB_REPO_URL:-}" ]]; then
+    # The container has HTTPS credentials only (PAT via the git credential
+    # helper installed above) — no SSH keys, no known_hosts. If the URL is the
+    # SSH form `git@github.com:owner/repo(.git)?`, rewrite it to HTTPS so the
+    # clone uses the PAT instead of dying with "Host key verification failed".
+    if [[ "${GITHUB_REPO_URL}" =~ ^git@github\.com:(.+)$ ]]; then
+        path="${BASH_REMATCH[1]%.git}"
+        rewritten="https://github.com/${path}.git"
+        log "Rewriting SSH github URL to HTTPS: ${GITHUB_REPO_URL} → ${rewritten}"
+        GITHUB_REPO_URL="${rewritten}"
+    fi
+
     if [[ -d "${WORKSPACE_DIR}/.git" ]]; then
         log "Workspace already a git repo — skipping clone."
     else

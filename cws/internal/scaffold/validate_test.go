@@ -65,3 +65,28 @@ func TestValidateGithubRepoURL(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeGithubRepoURL(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "ssh with .git", input: "git@github.com:owner/repo.git", want: "https://github.com/owner/repo.git"},
+		{name: "ssh without .git", input: "git@github.com:owner/repo", want: "https://github.com/owner/repo.git"},
+		{name: "ssh hyphenated names", input: "git@github.com:my-org/my-repo.git", want: "https://github.com/my-org/my-repo.git"},
+		{name: "https passthrough", input: "https://github.com/owner/repo.git", want: "https://github.com/owner/repo.git"},
+		{name: "https without .git passthrough", input: "https://github.com/owner/repo", want: "https://github.com/owner/repo"},
+		{name: "empty passthrough", input: "", want: ""},
+		{name: "non-github ssh passthrough", input: "git@gitlab.com:owner/repo.git", want: "git@gitlab.com:owner/repo.git"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := scaffold.NormalizeGithubRepoURL(tc.input)
+			if got != tc.want {
+				t.Errorf("NormalizeGithubRepoURL(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
