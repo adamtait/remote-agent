@@ -29,6 +29,8 @@ GIT_HELPER_PATH="/usr/local/bin/git-credential-gcp-secret"
 CLAUDE_SETTINGS_DIR="${USER_HOME}/.claude"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_DIR}/settings.json"
 
+CLAUDE_CONFIG_PATH="${USER_HOME}/.claude.json"
+
 CLAUDE_LOG_PATH="/var/log/claude-setup.log"
 
 log() {
@@ -40,6 +42,77 @@ log() {
     # is the most reliable debugging surface. Use append so we can see
     # multiple boots if anything weird is happening.
     echo "${msg}" >> "${CLAUDE_LOG_PATH}" 2>/dev/null || true
+}
+
+# Pre-seed ~/.claude.json so interactive `claude` skips the browser-based
+# onboarding wizard. Headless VMs can't complete that flow even though the
+# OAuth token itself works. Requires oauthAccount metadata stored as a JSON
+# blob in Secret Manager (operator copies it from a machine where `claude`
+# has already completed interactive login).
+seed_claude_onboarding() {
+    local token="$1"
+    if [[ -z "${CLAUDE_OAUTH_ACCOUNT_SECRET_NAME:-}" ]]; then
+        log "WARNING: CLAUDE_OAUTH_ACCOUNT_SECRET_NAME not set; interactive claude will show the onboarding wizard."
+        return 0
+    fi
+
+    log "Fetching oauthAccount metadata from Secret Manager..."
+    local acct
+    acct=$(gcloud secrets versions access latest \
+        --secret="${CLAUDE_OAUTH_ACCOUNT_SECRET_NAME}" \
+        --project="${GCP_PROJECT_ID}" 2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
+
+    if [[ -z "${acct}" ]]; then
+        log "WARNING: oauthAccount fetch returned empty; skipping onboarding seed."
+        return 0
+    fi
+
+    if ! jq -e '.accountUuid and .emailAddress and .organizationUuid' \
+            >/dev/null 2>&1 <<<"${acct}"; then
+        log "WARNING: oauthAccount JSON missing required fields; skipping onboarding seed."
+        return 0
+    fi
+
+    local version
+    version=$(sudo -u "${USER_NAME}" claude --version 2>/dev/null | awk '{print $1}' || true)
+    if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+        log "WARNING: could not parse claude --version ('${version}'); proceeding without lastOnboardingVersion."
+        version=""
+    fi
+
+    local tmp
+    tmp=$(mktemp)
+    if [[ -f "${CLAUDE_CONFIG_PATH}" ]]; then
+        # Merge: preserve any other keys Claude Code writes (project state,
+        # trusted dirs, MCP servers, etc.).
+        jq --argjson acct "${acct}" --arg ver "${version}" '
+            .hasCompletedOnboarding = true
+            | (if $ver != "" then .lastOnboardingVersion = $ver else . end)
+            | .oauthAccount = $acct
+        ' "${CLAUDE_CONFIG_PATH}" > "${tmp}" || { rm -f "${tmp}"; log "ERROR: jq merge failed; leaving ${CLAUDE_CONFIG_PATH} untouched."; return 0; }
+    else
+        jq -n --argjson acct "${acct}" --arg ver "${version}" '
+            {hasCompletedOnboarding: true, oauthAccount: $acct}
+            | (if $ver != "" then .lastOnboardingVersion = $ver else . end)
+        ' > "${tmp}" || { rm -f "${tmp}"; log "ERROR: jq render failed; skipping onboarding seed."; return 0; }
+    fi
+
+    if ! mv "${tmp}" "${CLAUDE_CONFIG_PATH}"; then
+        rm -f "${tmp}"
+        log "ERROR: failed to write ${CLAUDE_CONFIG_PATH}."
+        return 0
+    fi
+    chown "${USER_NAME}:${USER_NAME}" "${CLAUDE_CONFIG_PATH}"
+    chmod 600 "${CLAUDE_CONFIG_PATH}"
+    log "Seeded ${CLAUDE_CONFIG_PATH} (hasCompletedOnboarding=true, oauthAccount set)."
+
+    # Smoke test — sudo resets env, so pass the token explicitly.
+    if sudo -u "${USER_NAME}" env CLAUDE_CODE_OAUTH_TOKEN="${token}" \
+            claude -p "respond with OK" 2>/dev/null | grep -q 'OK'; then
+        log "Smoke test: claude -p returned OK."
+    else
+        log "WARNING: claude -p smoke test did not return OK; token or account may be stale."
+    fi
 }
 
 # Ensure the log file exists and is readable by user so they can
@@ -148,6 +221,13 @@ EOF
                 chown "${USER_NAME}:${USER_NAME}" "${CLAUDE_SETTINGS_PATH}"
                 log "Removed stale apiKeyHelper from settings.json."
             fi
+        fi
+
+        # Bypass the browser-based onboarding wizard so interactive `claude`
+        # works on this headless VM. Only attempted when the token fetch
+        # succeeded upstream; otherwise there's nothing to verify against.
+        if [[ -n "${TOKEN}" ]]; then
+            seed_claude_onboarding "${TOKEN}"
         fi
         ;;
 
