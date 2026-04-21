@@ -74,15 +74,20 @@ var setupTemplateCmd = &cobra.Command{
 	},
 }
 
+// addSharedSetupFlags registers the --force/--project-only/--global-only flags
+// that both "cws setup" and "cws setup template" accept. Keeping one definition
+// prevents the two subcommands' help text from drifting.
+func addSharedSetupFlags(c *cobra.Command) {
+	c.Flags().Bool("force", false, "overwrite existing config files")
+	c.Flags().Bool("project-only", false, "scaffold only .workstation.yaml")
+	c.Flags().Bool("global-only", false, "scaffold only ~/.config/cws/config.yaml")
+}
+
 func init() {
-	setupCmd.Flags().Bool("force", false, "overwrite existing config files")
-	setupCmd.Flags().Bool("project-only", false, "scaffold only .workstation.yaml")
-	setupCmd.Flags().Bool("global-only", false, "scaffold only ~/.config/cws/config.yaml")
+	addSharedSetupFlags(setupCmd)
 	setupCmd.Flags().Bool("advanced", false, "also prompt for cluster/config/machine/disk fields")
 
-	setupTemplateCmd.Flags().Bool("force", false, "overwrite existing config files")
-	setupTemplateCmd.Flags().Bool("project-only", false, "scaffold only .workstation.yaml")
-	setupTemplateCmd.Flags().Bool("global-only", false, "scaffold only ~/.config/cws/config.yaml")
+	addSharedSetupFlags(setupTemplateCmd)
 
 	setupCmd.AddCommand(setupTemplateCmd)
 	rootCmd.AddCommand(setupCmd)

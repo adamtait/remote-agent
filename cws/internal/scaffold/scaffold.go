@@ -127,7 +127,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	}
 	answer := strings.ToLower(strings.TrimSpace(confirm))
 	if answer == "n" || answer == "no" {
-		return fmt.Errorf("cancelled by user")
+		return fmt.Errorf("%w: user declined", ErrCancelled)
 	}
 
 	if writeProject {

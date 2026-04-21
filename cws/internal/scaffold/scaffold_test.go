@@ -167,6 +167,30 @@ func TestInteractiveScaffold_NoCancelsOnProceed(t *testing.T) {
 	}
 }
 
+func TestInteractiveScaffold_DeclineWrapsErrCancelled(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	stdin := strings.NewReader(strings.Join([]string{
+		"my-proj-123",
+		"https://github.com/a/b.git",
+		"us-central1",
+		"Alice",
+		"alice@example.com",
+		"no",
+	}, "\n") + "\n")
+	var stdout, stderr bytes.Buffer
+	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
+		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
+		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, scaffold.ErrCancelled) {
+		t.Errorf("expected errors.Is(err, ErrCancelled), got: %v", err)
+	}
+}
+
 func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
 	// Guard against a future caller forgetting to pipe Stderr.
 	cwd := t.TempDir()
