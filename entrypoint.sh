@@ -49,6 +49,7 @@ command -v gcloud >/dev/null 2>&1 || {
 # (e.g. apiKeyHelper set + OAuth token exported would trigger auth conflict).
 rm -f "${OAUTH_PROFILE_PATH}"
 rm -f "${APIKEY_HELPER_PATH}"
+sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/environment
 
 case "${CLAUDE_AUTH_MODE}" in
     apikey)
@@ -101,15 +102,22 @@ EOF
         if [[ -z "${TOKEN}" ]]; then
             log "WARNING: OAuth token fetch failed. Check SA permissions."
         else
-            # /etc/profile.d/ is sourced by login shells, including the
-            # code-oss integrated terminal.
+            # /etc/environment is read by PAM and injected into every session
+            # (login, non-login interactive, and IDE-spawned terminals alike).
+            # This is the primary delivery mechanism for the token.
+            sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/environment
+            echo "CLAUDE_CODE_OAUTH_TOKEN=${TOKEN}" >> /etc/environment
+            log "OAuth token written to /etc/environment."
+
+            # /etc/profile.d/ is sourced by login shells (e.g. SSH).
+            # Keep this as a secondary path so SSH sessions also pick up the token.
             umask 077
             cat > "${OAUTH_PROFILE_PATH}" <<EOF
 # Auto-generated at workstation boot. Do not edit.
 export CLAUDE_CODE_OAUTH_TOKEN='${TOKEN}'
 EOF
             chmod 0644 "${OAUTH_PROFILE_PATH}"
-            log "OAuth token exported via ${OAUTH_PROFILE_PATH}."
+            log "OAuth token also exported via ${OAUTH_PROFILE_PATH} (login shells)."
         fi
 
         # Remove any stale apiKeyHelper from settings.json to prevent the
