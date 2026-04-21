@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/adamtait/remote-agent/cws/internal/scaffold"
+	"github.com/adamtait/remote-agent/internal/scaffold"
 )
 
 func TestWriteAtomic_CreatesNewFile(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/adamtait/remote-agent/cws/internal/config"
-	"github.com/adamtait/remote-agent/cws/internal/gcloud"
+	"github.com/adamtait/remote-agent/internal/config"
+	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

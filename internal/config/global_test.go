@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/adamtait/remote-agent/cws/internal/config"
+	"github.com/adamtait/remote-agent/internal/config"
 )
 
 func TestLoadGlobalConfig_ParsesAllFields(t *testing.T) {

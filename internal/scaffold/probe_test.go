@@ -3,7 +3,7 @@ package scaffold_test
 import (
 	"testing"
 
-	"github.com/adamtait/remote-agent/cws/internal/scaffold"
+	"github.com/adamtait/remote-agent/internal/scaffold"
 )
 
 func TestStaticProber_ReturnsCannedValues(t *testing.T) {

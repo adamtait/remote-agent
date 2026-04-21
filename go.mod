@@ -1,4 +1,4 @@
-module github.com/adamtait/remote-agent/cws
+module github.com/adamtait/remote-agent
 
 go 1.26.2
 

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/adamtait/remote-agent/cws/internal/config"
+	"github.com/adamtait/remote-agent/internal/config"
 )
 
 func TestFindProjectConfig_FoundInCurrentDir(t *testing.T) {
