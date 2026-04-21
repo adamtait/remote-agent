@@ -30,7 +30,16 @@ GIT_HELPER_PATH="/usr/local/bin/git-credential-gcp-secret"
 CLAUDE_SETTINGS_DIR="${USER_HOME}/.claude"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_DIR}/settings.json"
 
-log() { echo "[claude-setup] $*"; }
+log() {
+    local msg="[claude-setup] $*"
+    echo "${msg}"
+    # Also write to syslog. The host VM's logging agent ships /var/log/syslog
+    # to Cloud Logging, so this surfaces in `gcloud logging read` even though
+    # the parent /google/scripts/entrypoint.sh doesn't ship startup-d stdout.
+    # Without this, every failure in this script is invisible to anyone
+    # debugging from outside the workstation.
+    command -v logger >/dev/null 2>&1 && logger -t claude-setup "${msg}" || true
+}
 
 # =============================================================================
 # Claude auth — runs EVERY boot so rotations are picked up.
@@ -94,9 +103,11 @@ EOF
 
     oauth)
         log "Fetching CLAUDE_CODE_OAUTH_TOKEN from Secret Manager..."
+        # Capture stderr to the log so failures (missing scope, missing IAM,
+        # token unavailable) surface instead of being silently swallowed.
         TOKEN=$(gcloud secrets versions access latest \
             --secret="${CLAUDE_AUTH_SECRET_NAME}" \
-            --project="${GCP_PROJECT_ID}" 2>/dev/null || true)
+            --project="${GCP_PROJECT_ID}" 2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
 
         if [[ -z "${TOKEN}" ]]; then
             log "WARNING: OAuth token fetch failed. Check SA permissions."

@@ -242,15 +242,25 @@ log "Auth mode: ${CLAUDE_AUTH_MODE} (Claude secret: ${CLAUDE_SECRET_NAME}, GitHu
 log "Ensuring workstations config '${CONFIG_NAME}'..."
 if gcloud workstations configs describe "${CONFIG_NAME}" \
         --cluster="${CLUSTER_NAME}" --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
-    log "Config exists — updating image, env, and service account..."
+    log "Config exists — updating image, env, service account, and scopes..."
     # --service-account is included on UPDATE too so that re-running this
     # script reconciles drift. Without it, a config originally created
     # without an SA would silently keep using the default Compute Engine SA,
     # which can't write container output logs.
+    #
+    # --service-account-scopes=cloud-platform is REQUIRED for the SA's OAuth
+    # token (issued by the metadata server) to be authorized for Secret
+    # Manager API calls. Without it, the VM gets a default scope set
+    # (devstorage.read_only, logging.write, monitoring.write) that does
+    # NOT include cloud-platform, so `gcloud secrets versions access` from
+    # inside the container fails with a misleading "no active account"
+    # error even though IAM bindings are correct. Best practice is to
+    # grant cloud-platform scope and let IAM gate actual access.
     gcloud workstations configs update "${CONFIG_NAME}" \
         --cluster="${CLUSTER_NAME}" --region="${REGION}" --project="${PROJECT_ID}" \
         --container-custom-image="${IMAGE_URI}" \
         --service-account="${SERVICE_ACCOUNT_EMAIL}" \
+        --service-account-scopes=https://www.googleapis.com/auth/cloud-platform \
         --container-env="${CONTAINER_ENV}"
 else
     gcloud workstations configs create "${CONFIG_NAME}" \
@@ -260,6 +270,7 @@ else
         --pd-disk-type="pd-balanced" \
         --container-custom-image="${IMAGE_URI}" \
         --service-account="${SERVICE_ACCOUNT_EMAIL}" \
+        --service-account-scopes=https://www.googleapis.com/auth/cloud-platform \
         --container-env="${CONTAINER_ENV}"
 fi
 
