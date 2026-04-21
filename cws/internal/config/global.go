@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -10,9 +11,12 @@ import (
 )
 
 // GlobalConfigPath returns the default path for the global user config.
-func GlobalConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "cws", "config.yaml")
+func GlobalConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("unable to determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "cws", "config.yaml"), nil
 }
 
 // LoadGlobalConfig reads and parses the global config file.
