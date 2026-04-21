@@ -66,6 +66,33 @@ func TestSetupTemplate_RefusesExistingWithoutForce(t *testing.T) {
 	}
 }
 
+func TestSetupTemplate_ErrorPrintedOnce(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	// Pre-write .workstation.yaml so the command errors.
+	if err := os.WriteFile(filepath.Join(cwd, ".workstation.yaml"), []byte("old\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := cmd.ExecuteWithIO(&bytes.Buffer{}, &stdout, &stderr, []string{"setup", "template"})
+	if code == 0 {
+		t.Fatal("expected non-zero exit")
+	}
+	// The "already exists" substring should appear exactly once in stderr —
+	// cobra's default error printing is silenced so only our fmt.Fprintln runs.
+	if n := strings.Count(stderr.String(), "already exists"); n != 1 {
+		t.Errorf("expected 'already exists' once in stderr, got %d occurrences:\n%s", n, stderr.String())
+	}
+}
+
 func TestSetupTemplate_ForceOverwrites(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()

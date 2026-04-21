@@ -18,8 +18,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "cws",
-	Short: "Manage Google Cloud Workstations with Claude Code",
+	Use:           "cws",
+	Short:         "Manage Google Cloud Workstations with Claude Code",
+	SilenceErrors: true, // cmd.Execute/ExecuteWithIO print errors explicitly
+	SilenceUsage:  true, // don't dump --help on runtime errors
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		home, err := os.UserHomeDir()
 		if err != nil {
