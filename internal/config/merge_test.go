@@ -123,3 +123,90 @@ func TestWorkstationName_TruncatedAt63(t *testing.T) {
 		t.Errorf("expected ≤63 chars, got %d", len(name))
 	}
 }
+
+func TestMerge_AutoSleepFromGlobalDefaults(t *testing.T) {
+	h := 2
+	project := &config.ProjectConfig{ProjectID: "p"}
+	global := &config.GlobalConfig{
+		Defaults: config.GlobalDefaults{AutoSleepHours: &h},
+	}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoSleepHours == nil || *cfg.AutoSleepHours != 2 {
+		t.Errorf("AutoSleepHours: got %v, want &2", cfg.AutoSleepHours)
+	}
+}
+
+func TestMerge_AutoSleepNeverSleep(t *testing.T) {
+	zero := 0
+	project := &config.ProjectConfig{ProjectID: "p", AutoSleepHours: &zero}
+	global := &config.GlobalConfig{}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoSleepHours == nil || *cfg.AutoSleepHours != 0 {
+		t.Errorf("AutoSleepHours: got %v, want &0 (never sleep)", cfg.AutoSleepHours)
+	}
+}
+
+func TestMerge_AutoShutdownFromProjectConfig(t *testing.T) {
+	project := &config.ProjectConfig{ProjectID: "p", AutoShutdownHours: 24}
+	global := &config.GlobalConfig{}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoShutdownHours != 24 {
+		t.Errorf("AutoShutdownHours: got %d, want 24", cfg.AutoShutdownHours)
+	}
+}
+
+func TestMerge_ProjectConfigOverridesGlobalDefaultsForAutoSleep(t *testing.T) {
+	projectH := 1
+	globalH := 4
+	project := &config.ProjectConfig{ProjectID: "p", AutoSleepHours: &projectH}
+	global := &config.GlobalConfig{
+		Defaults: config.GlobalDefaults{AutoSleepHours: &globalH},
+	}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoSleepHours == nil || *cfg.AutoSleepHours != 1 {
+		t.Errorf("AutoSleepHours: got %v, want &1 (project should override global default)", cfg.AutoSleepHours)
+	}
+}
+
+func TestMerge_GlobalProjectOverrideWinsForAutoShutdown(t *testing.T) {
+	project := &config.ProjectConfig{ProjectID: "my-proj", AutoShutdownHours: 12}
+	global := &config.GlobalConfig{
+		Projects: map[string]config.GlobalProjectOverride{
+			"my-proj": {AutoShutdownHours: 48},
+		},
+	}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoShutdownHours != 48 {
+		t.Errorf("AutoShutdownHours: got %d, want 48 (global override should win)", cfg.AutoShutdownHours)
+	}
+}
+
+func TestMerge_NilAutoSleepDoesNotOverrideNonNil(t *testing.T) {
+	globalH := 3
+	project := &config.ProjectConfig{ProjectID: "p"} // AutoSleepHours nil
+	global := &config.GlobalConfig{
+		Defaults: config.GlobalDefaults{AutoSleepHours: &globalH},
+	}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoSleepHours == nil || *cfg.AutoSleepHours != 3 {
+		t.Errorf("AutoSleepHours: got %v, want &3 (nil in project must not overwrite global default)", cfg.AutoSleepHours)
+	}
+}

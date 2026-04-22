@@ -44,6 +44,13 @@ func Merge(project *ProjectConfig, global *GlobalConfig) (*Config, error) {
 	}
 	cfg.GitUserName = global.Defaults.GitUserName
 	cfg.GitUserEmail = global.Defaults.GitUserEmail
+	if global.Defaults.AutoSleepHours != nil {
+		v := *global.Defaults.AutoSleepHours
+		cfg.AutoSleepHours = &v
+	}
+	if global.Defaults.AutoShutdownHours != 0 {
+		cfg.AutoShutdownHours = global.Defaults.AutoShutdownHours
+	}
 
 	// Project config
 	if project.ProjectID != "" {
@@ -67,6 +74,13 @@ func Merge(project *ProjectConfig, global *GlobalConfig) (*Config, error) {
 	if project.DiskSizeGB != 0 {
 		cfg.DiskSizeGB = project.DiskSizeGB
 	}
+	if project.AutoSleepHours != nil {
+		v := *project.AutoSleepHours
+		cfg.AutoSleepHours = &v
+	}
+	if project.AutoShutdownHours != 0 {
+		cfg.AutoShutdownHours = project.AutoShutdownHours
+	}
 
 	// Global project overrides (highest precedence)
 	if override, ok := global.Projects[cfg.ProjectID]; ok {
@@ -81,6 +95,13 @@ func Merge(project *ProjectConfig, global *GlobalConfig) (*Config, error) {
 		}
 		if override.RepoName != "" {
 			cfg.RepoName = override.RepoName
+		}
+		if override.AutoSleepHours != nil {
+			v := *override.AutoSleepHours
+			cfg.AutoSleepHours = &v
+		}
+		if override.AutoShutdownHours != 0 {
+			cfg.AutoShutdownHours = override.AutoShutdownHours
 		}
 	}
 

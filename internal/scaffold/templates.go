@@ -50,6 +50,8 @@ github_repo_url: %s   # REQUIRED — probed: %s
 # config_name:  claude-dev-config
 # machine_type: e2-standard-4
 # disk_size_gb: 50
+# auto_sleep_hours: 2             # hours idle before stopping (0=never sleep; 1–24; GCP default: 2)
+# auto_shutdown_hours: 12         # hours running before force-stop (1–168; GCP default: ~12)
 `, projectID, probedOr(pv.ProjectID), repoURL, probedOr(pv.GithubRepoURL))
 	return b.String()
 }
@@ -65,6 +67,8 @@ defaults:
   # region: %s
   # git_user_name:  %s
   # git_user_email: %s
+  # auto_sleep_hours: 2           # hours idle before stopping (0=never sleep; 1–24; GCP default: 2)
+  # auto_shutdown_hours: 12       # hours running before force-stop (1–168; GCP default: ~12)
 
 # projects:
 #   my-gcp-project:
@@ -72,6 +76,8 @@ defaults:
 #     image_name:           claude-code-workstation
 #     image_tag:            latest
 #     repo_name:            claude-workstation-images
+#     auto_sleep_hours:   1
+#     auto_shutdown_hours: 24
 `, firstNonEmpty(pv.Region, "us-central1"), quoteOrPlaceholder(pv.GitUserName), quoteOrPlaceholder(pv.GitUserEmail))
 	return b.String()
 }
