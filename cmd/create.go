@@ -25,6 +25,8 @@ Requires .ws.yaml in the project root with project_id and github_repo_url set.`,
 
 func init() {
 	rootCmd.AddCommand(createCmd)
+	createCmd.Flags().Int("auto-sleep", 0, "Stop workstation after N seconds idle (0 = GCP default ~7200)")
+	createCmd.Flags().Int("auto-shutdown", 0, "Force-stop workstation after N seconds running (0 = GCP default ~43200)")
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
@@ -62,6 +64,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		if strings.ContainsAny(val, ",=") {
 			return fmt.Errorf("%s must not contain ',' or '=' (gcloud --container-env limitation): %q", field, val)
 		}
+	}
+
+	if v, _ := cmd.Flags().GetInt("auto-sleep"); v != 0 {
+		cfg.AutoSleepSeconds = v
+	}
+	if v, _ := cmd.Flags().GetInt("auto-shutdown"); v != 0 {
+		cfg.AutoShutdownSeconds = v
 	}
 
 	r := runner
@@ -202,24 +211,42 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	if configExists {
 		logStep("Config exists — updating image, env, service account, and scopes...")
-		if err := r.Run("workstations", "configs", "update", cfg.ConfigName,
+		updateArgs := []string{
+			"workstations", "configs", "update", cfg.ConfigName,
 			"--cluster", cfg.ClusterName, "--region", cfg.Region, "--project", cfg.ProjectID,
-			"--container-custom-image="+imageURI,
-			"--service-account="+serviceAccountEmail,
+			"--container-custom-image=" + imageURI,
+			"--service-account=" + serviceAccountEmail,
 			"--service-account-scopes=https://www.googleapis.com/auth/cloud-platform",
-			"--container-env="+containerEnv); err != nil {
+			"--container-env=" + containerEnv,
+		}
+		if cfg.AutoSleepSeconds > 0 {
+			updateArgs = append(updateArgs, fmt.Sprintf("--idle-timeout=%ds", cfg.AutoSleepSeconds))
+		}
+		if cfg.AutoShutdownSeconds > 0 {
+			updateArgs = append(updateArgs, fmt.Sprintf("--running-timeout=%ds", cfg.AutoShutdownSeconds))
+		}
+		if err := r.Run(updateArgs...); err != nil {
 			return fmt.Errorf("updating workstations config: %w", err)
 		}
 	} else {
-		if err := r.Run("workstations", "configs", "create", cfg.ConfigName,
+		createArgs := []string{
+			"workstations", "configs", "create", cfg.ConfigName,
 			"--cluster", cfg.ClusterName, "--region", cfg.Region, "--project", cfg.ProjectID,
-			"--machine-type="+cfg.MachineType,
-			"--pd-disk-size="+strconv.Itoa(cfg.DiskSizeGB),
+			"--machine-type=" + cfg.MachineType,
+			"--pd-disk-size=" + strconv.Itoa(cfg.DiskSizeGB),
 			"--pd-disk-type=pd-balanced",
-			"--container-custom-image="+imageURI,
-			"--service-account="+serviceAccountEmail,
+			"--container-custom-image=" + imageURI,
+			"--service-account=" + serviceAccountEmail,
 			"--service-account-scopes=https://www.googleapis.com/auth/cloud-platform",
-			"--container-env="+containerEnv); err != nil {
+			"--container-env=" + containerEnv,
+		}
+		if cfg.AutoSleepSeconds > 0 {
+			createArgs = append(createArgs, fmt.Sprintf("--idle-timeout=%ds", cfg.AutoSleepSeconds))
+		}
+		if cfg.AutoShutdownSeconds > 0 {
+			createArgs = append(createArgs, fmt.Sprintf("--running-timeout=%ds", cfg.AutoShutdownSeconds))
+		}
+		if err := r.Run(createArgs...); err != nil {
 			return fmt.Errorf("creating workstations config: %w", err)
 		}
 	}
