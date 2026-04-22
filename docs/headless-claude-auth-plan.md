@@ -7,16 +7,16 @@
 browser-based OAuth flow that cannot complete on a headless workstation. Auth
 is fine; the wizard is the blocker.
 
-## Fix (from handoff DOC)
+## Fix
 
 Pre-seed `/home/user/.claude.json` with:
 
 - `hasCompletedOnboarding: true`
 - `lastOnboardingVersion` matching installed `claude --version`
-- `oauthAccount` block: `{accountUuid, emailAddress, organizationUuid}`
+- `oauthAccount` block: `{accountUuid, emailAddress, organizationUuid}` *(optional — only written if `CLAUDE_OAUTH_ACCOUNT_SECRET_NAME` is set)*
 
-The `oauthAccount` fields must come from a machine where the user has logged
-in interactively (the operator's laptop).
+`oauthAccount` is not required to suppress the wizard; it enriches `/status`
+display. The wizard gate is `hasCompletedOnboarding: true` alone.
 
 ## Scope
 
