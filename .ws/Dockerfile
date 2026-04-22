@@ -38,7 +38,7 @@ RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && ex
 
 # --- Our startup script -----------------------------------------------------
 # Numbered 200 so it runs after the base image's own 100-series scripts.
-COPY entrypoint.sh /etc/workstation-startup.d/200_claude-setup.sh
+COPY .ws/entrypoint.sh /etc/workstation-startup.d/200_claude-setup.sh
 RUN chmod +x /etc/workstation-startup.d/200_claude-setup.sh
 
 # The base image's ENTRYPOINT handles IDE startup; don't override it.
