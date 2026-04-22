@@ -11,17 +11,6 @@ import (
 	"testing"
 )
 
-// fakeDockerRunner records args and optionally fails.
-type fakeDockerRunner struct {
-	runs [][]string
-	err  error
-}
-
-func (f *fakeDockerRunner) Run(args ...string) error {
-	f.runs = append(f.runs, args)
-	return f.err
-}
-
 // Preflight tests exercise ensureBuildAssets, which we expose in cmd to
 // test without running the whole create flow.
 func TestEnsureBuildAssets_Present_ReturnsNil(t *testing.T) {
