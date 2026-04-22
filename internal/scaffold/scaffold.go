@@ -178,6 +178,14 @@ func TemplateScaffold(opts TemplateOptions) error {
 		}
 		fmt.Fprintln(opts.Stdout, "Wrote "+path)
 	}
+	if !opts.GlobalOnly {
+		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
+			Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
+			Force: opts.Force,
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

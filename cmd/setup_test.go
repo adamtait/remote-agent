@@ -133,3 +133,72 @@ func TestSetupTemplate_ForceOverwrites(t *testing.T) {
 		t.Fatalf("expected %s to be overwritten, still contains 'old': %q", projectPath, string(data))
 	}
 }
+
+func TestSetupTemplate_WritesAssets(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	var stdin, stdout, stderr bytes.Buffer
+	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup", "template"})
+	if code != 0 {
+		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
+	}
+	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+		p := filepath.Join(cwd, ".ws", name)
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("missing %s: %v", p, err)
+		}
+	}
+}
+
+func TestSetupTemplate_GlobalOnly_SkipsAssets(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	var stdin, stdout, stderr bytes.Buffer
+	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup", "template", "--global-only"})
+	if code != 0 {
+		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".ws", "Dockerfile")); !os.IsNotExist(err) {
+		t.Error("--global-only should not write .ws/Dockerfile")
+	}
+}
+
+func TestSetupTemplate_ProjectOnly_WritesAssets(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	var stdin, stdout, stderr bytes.Buffer
+	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup", "template", "--project-only"})
+	if code != 0 {
+		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
+	}
+	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+		if _, err := os.Stat(filepath.Join(cwd, ".ws", name)); err != nil {
+			t.Errorf("missing %s: %v", name, err)
+		}
+	}
+	// Global config should not exist under --project-only.
+	if _, err := os.Stat(filepath.Join(home, ".config", "ws", "config.yaml")); !os.IsNotExist(err) {
+		t.Error("--project-only should not write ~/.config/ws/config.yaml")
+	}
+}
