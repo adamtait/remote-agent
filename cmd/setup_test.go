@@ -29,7 +29,7 @@ func TestSetupTemplate_WritesFiles(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d. stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
 
-	projectPath := filepath.Join(cwd, ".ws.yaml")
+	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
 	if _, err := os.Stat(projectPath); err != nil {
 		t.Fatalf("expected %s to exist: %v", projectPath, err)
 	}
@@ -50,7 +50,10 @@ func TestSetupTemplate_RefusesExistingWithoutForce(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	projectPath := filepath.Join(cwd, ".ws.yaml")
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
 	if err := os.WriteFile(projectPath, []byte("old: content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -76,8 +79,11 @@ func TestSetupTemplate_ErrorPrintedOnce(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	// Pre-write .ws.yaml so the command errors.
-	if err := os.WriteFile(filepath.Join(cwd, ".ws.yaml"), []byte("old\n"), 0644); err != nil {
+	// Pre-write .ws/config.yaml so the command errors.
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("old\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,7 +110,10 @@ func TestSetupTemplate_ForceOverwrites(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	projectPath := filepath.Join(cwd, ".ws.yaml")
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
 	if err := os.WriteFile(projectPath, []byte("old: content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

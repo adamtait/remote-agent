@@ -38,7 +38,7 @@ func RenderProjectTemplate(pv ProbedValues) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `# ws project config — committed to the repo root
+	fmt.Fprintf(&b, `# ws project config (.ws/config.yaml) — committed to git
 # Required fields have no default; uncomment and fill them in.
 # Optional fields show the default ws will apply if left unset.
 
