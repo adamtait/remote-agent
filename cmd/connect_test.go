@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -91,5 +92,54 @@ func TestRunConnect_Stopped_StartsThenSSH(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "starting") {
 		t.Errorf("expected notice about starting, got %q", errOut.String())
+	}
+}
+
+func TestRunConnect_Starting_SkipsStart(t *testing.T) {
+	runner := &testRunner{
+		checks: map[string]bool{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
+		},
+		outputs: map[string][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_STARTING\t\n"),
+		},
+	}
+	client := gcloud.NewClient(runner)
+	var errOut bytes.Buffer
+	if err := runConnect(newConnectCfg(), client, "", &errOut); err != nil {
+		t.Fatalf("runConnect: %v", err)
+	}
+	for _, call := range runner.runs {
+		if strings.HasPrefix(strings.Join(call, " "), "workstations start ") {
+			t.Errorf("did not expect a start call for STARTING state, got: %v", call)
+		}
+	}
+}
+
+func TestRunConnect_StartError_Propagates(t *testing.T) {
+	runner := &testRunner{
+		checks: map[string]bool{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
+		},
+		outputs: map[string][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_STOPPED\t\n"),
+		},
+		runErrors: map[string]error{
+			"workstations start p-user --cluster cl --config cfg --region r --project p": errors.New("boom"),
+		},
+	}
+	client := gcloud.NewClient(runner)
+	var errOut bytes.Buffer
+	err := runConnect(newConnectCfg(), client, "", &errOut)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "starting workstation") || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("error should wrap start failure, got: %v", err)
+	}
+	for _, call := range runner.runs {
+		if strings.HasPrefix(strings.Join(call, " "), "workstations ssh ") {
+			t.Errorf("ssh must not be called after start failure, got: %v", call)
+		}
 	}
 }

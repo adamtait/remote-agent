@@ -11,14 +11,20 @@ import (
 
 // testRunner is a minimal fake for resolve tests.
 type testRunner struct {
-	outputs map[string][]byte
-	checks  map[string]bool
-	runs    [][]string
+	outputs   map[string][]byte
+	checks    map[string]bool
+	runs      [][]string
+	runErrors map[string]error
 }
 
 func (f *testRunner) key(args []string) string { return strings.Join(args, " ") }
 func (f *testRunner) Run(args ...string) error {
 	f.runs = append(f.runs, args)
+	if f.runErrors != nil {
+		if err, ok := f.runErrors[f.key(args)]; ok {
+			return err
+		}
+	}
 	return nil
 }
 func (f *testRunner) RunWithStdin(_ io.Reader, _ ...string) error          { return nil }
