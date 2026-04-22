@@ -11,23 +11,6 @@ import (
 	"github.com/adamtait/remote-agent/cmd"
 )
 
-func runSetupScaffold(t *testing.T, args ...string) (int, string, string) {
-	t.Helper()
-	cwd := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	origWd, _ := os.Getwd()
-	if err := os.Chdir(cwd); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
-
-	var stdin, stdout, stderr bytes.Buffer
-	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr,
-		append([]string{"setup", "scaffold"}, args...))
-	return code, stdout.String(), stderr.String()
-}
-
 func TestSetupScaffold_WritesEmbeddedDefaults(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
