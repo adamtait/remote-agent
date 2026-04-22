@@ -89,8 +89,10 @@ func TestRenderGlobalTemplate_QuotesGitIdentity(t *testing.T) {
 func TestRenderProjectTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
 	got := scaffold.RenderProjectTemplate(scaffold.ProbedValues{})
 	for _, want := range []string{
-		"# auto_sleep_seconds:",
-		"# auto_shutdown_seconds:",
+		"# auto_sleep_hours:",
+		"# auto_shutdown_hours:",
+		"0=never sleep",
+		"1–24",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("RenderProjectTemplate missing %q\ngot:\n%s", want, got)
@@ -101,8 +103,10 @@ func TestRenderProjectTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
 func TestRenderGlobalTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
 	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{})
 	for _, want := range []string{
-		"# auto_sleep_seconds:",
-		"# auto_shutdown_seconds:",
+		"# auto_sleep_hours:",
+		"# auto_shutdown_hours:",
+		"0=never sleep",
+		"1–168",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("RenderGlobalTemplate missing %q\ngot:\n%s", want, got)
