@@ -25,8 +25,8 @@ Requires .ws.yaml in the project root with project_id and github_repo_url set.`,
 
 func init() {
 	rootCmd.AddCommand(createCmd)
-	createCmd.Flags().Int("auto-sleep", 0, "Stop workstation after N seconds idle (0 = GCP default ~7200)")
-	createCmd.Flags().Int("auto-shutdown", 0, "Force-stop workstation after N seconds running (0 = GCP default ~43200)")
+	createCmd.Flags().Int("auto-sleep", 0, "Hours idle before stopping (0=never sleep, omit=GCP default ~2h; max 24)")
+	createCmd.Flags().Int("auto-shutdown", 0, "Hours running before force-stop (omit=GCP default ~12h; 1–168)")
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
@@ -66,11 +66,25 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if v, _ := cmd.Flags().GetInt("auto-sleep"); v != 0 {
-		cfg.AutoSleepSeconds = v
+	if cmd.Flags().Changed("auto-sleep") {
+		v, _ := cmd.Flags().GetInt("auto-sleep")
+		cfg.AutoSleepHours = &v
 	}
-	if v, _ := cmd.Flags().GetInt("auto-shutdown"); v != 0 {
-		cfg.AutoShutdownSeconds = v
+	if cmd.Flags().Changed("auto-shutdown") {
+		v, _ := cmd.Flags().GetInt("auto-shutdown")
+		cfg.AutoShutdownHours = v
+	}
+
+	if cfg.AutoSleepHours != nil {
+		h := *cfg.AutoSleepHours
+		if h < 0 || h > 24 {
+			return fmt.Errorf("auto_sleep_hours must be 0 (never) or 1–24; got %d", h)
+		}
+	}
+	if cfg.AutoShutdownHours != 0 {
+		if cfg.AutoShutdownHours < 1 || cfg.AutoShutdownHours > 168 {
+			return fmt.Errorf("auto_shutdown_hours must be 1–168; got %d", cfg.AutoShutdownHours)
+		}
 	}
 
 	r := runner
@@ -219,11 +233,11 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			"--service-account-scopes=https://www.googleapis.com/auth/cloud-platform",
 			"--container-env=" + containerEnv,
 		}
-		if cfg.AutoSleepSeconds > 0 {
-			updateArgs = append(updateArgs, fmt.Sprintf("--idle-timeout=%ds", cfg.AutoSleepSeconds))
+		if cfg.AutoSleepHours != nil {
+			updateArgs = append(updateArgs, fmt.Sprintf("--idle-timeout=%ds", *cfg.AutoSleepHours*3600))
 		}
-		if cfg.AutoShutdownSeconds > 0 {
-			updateArgs = append(updateArgs, fmt.Sprintf("--running-timeout=%ds", cfg.AutoShutdownSeconds))
+		if cfg.AutoShutdownHours > 0 {
+			updateArgs = append(updateArgs, fmt.Sprintf("--running-timeout=%ds", cfg.AutoShutdownHours*3600))
 		}
 		if err := r.Run(updateArgs...); err != nil {
 			return fmt.Errorf("updating workstations config: %w", err)
@@ -240,11 +254,11 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			"--service-account-scopes=https://www.googleapis.com/auth/cloud-platform",
 			"--container-env=" + containerEnv,
 		}
-		if cfg.AutoSleepSeconds > 0 {
-			createArgs = append(createArgs, fmt.Sprintf("--idle-timeout=%ds", cfg.AutoSleepSeconds))
+		if cfg.AutoSleepHours != nil {
+			createArgs = append(createArgs, fmt.Sprintf("--idle-timeout=%ds", *cfg.AutoSleepHours*3600))
 		}
-		if cfg.AutoShutdownSeconds > 0 {
-			createArgs = append(createArgs, fmt.Sprintf("--running-timeout=%ds", cfg.AutoShutdownSeconds))
+		if cfg.AutoShutdownHours > 0 {
+			createArgs = append(createArgs, fmt.Sprintf("--running-timeout=%ds", cfg.AutoShutdownHours*3600))
 		}
 		if err := r.Run(createArgs...); err != nil {
 			return fmt.Errorf("creating workstations config: %w", err)
