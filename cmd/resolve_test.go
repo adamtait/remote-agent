@@ -13,10 +13,14 @@ import (
 type testRunner struct {
 	outputs map[string][]byte
 	checks  map[string]bool
+	runs    [][]string
 }
 
-func (f *testRunner) key(args []string) string                             { return strings.Join(args, " ") }
-func (f *testRunner) Run(args ...string) error                             { return nil }
+func (f *testRunner) key(args []string) string { return strings.Join(args, " ") }
+func (f *testRunner) Run(args ...string) error {
+	f.runs = append(f.runs, args)
+	return nil
+}
 func (f *testRunner) RunWithStdin(_ io.Reader, _ ...string) error          { return nil }
 func (f *testRunner) Check(args ...string) bool {
 	if v, ok := f.checks[f.key(args)]; ok {
