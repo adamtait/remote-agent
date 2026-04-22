@@ -17,13 +17,14 @@ func TestInteractiveScaffold_WritesBothFiles(t *testing.T) {
 	home := t.TempDir()
 
 	// Inputs (in order): project_id, github_repo_url, region, git_user_name,
-	// git_user_email, then "y" to confirm.
+	// git_user_email, then "y" to confirm, then "y" to scaffold.
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
 		"https://github.com/a/b.git",
 		"us-central1",
 		"Alice",
 		"alice@example.com",
+		"y",
 		"y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
@@ -100,7 +101,7 @@ func TestInteractiveScaffold_ForceOverwrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "us-central1", "Alice", "alice@example.com", "y",
+		"my-proj-123", "https://github.com/a/b.git", "us-central1", "Alice", "alice@example.com", "y", "n",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
@@ -120,7 +121,7 @@ func TestInteractiveScaffold_ProjectOnlySkipsGlobal(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "y",
+		"my-proj-123", "https://github.com/a/b.git", "y", "n",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
@@ -207,7 +208,8 @@ func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
 		"us-central1",
 		"Alice",
 		"alice@example.com",
-		"y",
+		"y", // Proceed?
+		"n", // Scaffold .ws/ assets?
 	}, "\n") + "\n")
 	var stdout bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{

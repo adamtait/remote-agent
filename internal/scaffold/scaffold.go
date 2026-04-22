@@ -147,6 +147,25 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		}
 	}
 
+	// Scaffold prompt — only when project assets would apply.
+	if writeProject {
+		answer, err := Prompt(stdin, opts.Stdout,
+			"Scaffold customizable .ws/Dockerfile and .ws/entrypoint.sh? [Y/n]",
+			"Y", nil)
+		if err != nil {
+			return err
+		}
+		ans := strings.ToLower(strings.TrimSpace(answer))
+		if ans != "n" && ans != "no" {
+			if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
+				Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
+				Force: opts.Force,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+
 	fmt.Fprintln(opts.Stdout, "Run 'ws create' to provision the workstation.")
 	return nil
 }
