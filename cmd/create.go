@@ -234,10 +234,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			"--container-env=" + containerEnv,
 		}
 		if cfg.AutoSleepHours != nil {
-			updateArgs = append(updateArgs, fmt.Sprintf("--idle-timeout=%ds", *cfg.AutoSleepHours*3600))
+			updateArgs = append(updateArgs, fmt.Sprintf("--idle-timeout=%d", *cfg.AutoSleepHours*3600))
 		}
 		if cfg.AutoShutdownHours > 0 {
-			updateArgs = append(updateArgs, fmt.Sprintf("--running-timeout=%ds", cfg.AutoShutdownHours*3600))
+			updateArgs = append(updateArgs, fmt.Sprintf("--running-timeout=%d", cfg.AutoShutdownHours*3600))
 		}
 		if err := r.Run(updateArgs...); err != nil {
 			return fmt.Errorf("updating workstations config: %w", err)
@@ -255,10 +255,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			"--container-env=" + containerEnv,
 		}
 		if cfg.AutoSleepHours != nil {
-			createArgs = append(createArgs, fmt.Sprintf("--idle-timeout=%ds", *cfg.AutoSleepHours*3600))
+			createArgs = append(createArgs, fmt.Sprintf("--idle-timeout=%d", *cfg.AutoSleepHours*3600))
 		}
 		if cfg.AutoShutdownHours > 0 {
-			createArgs = append(createArgs, fmt.Sprintf("--running-timeout=%ds", cfg.AutoShutdownHours*3600))
+			createArgs = append(createArgs, fmt.Sprintf("--running-timeout=%d", cfg.AutoShutdownHours*3600))
 		}
 		if err := r.Run(createArgs...); err != nil {
 			return fmt.Errorf("creating workstations config: %w", err)
