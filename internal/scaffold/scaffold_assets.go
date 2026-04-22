@@ -27,7 +27,7 @@ type AssetResult struct {
 	source map[string]string
 }
 
-func (r AssetResult) Wrote(name string) bool   { return r.wrote[name] }
+func (r AssetResult) Wrote(name string) bool    { return r.wrote[name] }
 func (r AssetResult) Source(name string) string { return r.source[name] }
 
 // assetMode returns the file mode for a named asset.

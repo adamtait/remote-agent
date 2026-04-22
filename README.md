@@ -30,8 +30,8 @@ The `--container-env` block now contains only pointers
 
 - `main.go` / `cmd/` / `internal/` — `ws` CLI (idempotent provisioning)
 - `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
-- `Dockerfile` — custom image: code-oss + Node 20 + gh + Claude Code
-- `entrypoint.sh` — runs at container boot; sets up git, clones the repo
+- `.ws/Dockerfile` — custom image: code-oss + Node 20 + gh + Claude Code
+- `.ws/entrypoint.sh` — runs at container boot; sets up git, clones the repo
 
 ## Prerequisites
 
