@@ -51,28 +51,6 @@ log() {
 # has already completed interactive login).
 seed_claude_onboarding() {
     local token="$1"
-    if [[ -z "${CLAUDE_OAUTH_ACCOUNT_SECRET_NAME:-}" ]]; then
-        log "WARNING: CLAUDE_OAUTH_ACCOUNT_SECRET_NAME not set; interactive claude will show the onboarding wizard."
-        return 0
-    fi
-
-    log "Fetching oauthAccount metadata from Secret Manager..."
-    local acct
-    acct=$(gcloud secrets versions access latest \
-        --secret="${CLAUDE_OAUTH_ACCOUNT_SECRET_NAME}" \
-        --project="${GCP_PROJECT_ID}" 2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
-
-    if [[ -z "${acct}" ]]; then
-        log "WARNING: oauthAccount fetch returned empty; skipping onboarding seed."
-        return 0
-    fi
-
-    if ! jq -e '.accountUuid and .emailAddress and .organizationUuid' \
-            >/dev/null 2>&1 <<<"${acct}"; then
-        log "WARNING: oauthAccount JSON missing required fields; skipping onboarding seed."
-        return 0
-    fi
-
     local version
     version=$(sudo -u "${USER_NAME}" claude --version 2>/dev/null | awk '{print $1}' || true)
     if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
@@ -80,20 +58,38 @@ seed_claude_onboarding() {
         version=""
     fi
 
+    # Optionally enrich with oauthAccount from Secret Manager (for /status display).
+    local acct=""
+    if [[ -n "${CLAUDE_OAUTH_ACCOUNT_SECRET_NAME:-}" ]]; then
+        log "Fetching oauthAccount metadata from Secret Manager..."
+        acct=$(gcloud secrets versions access latest \
+            --secret="${CLAUDE_OAUTH_ACCOUNT_SECRET_NAME}" \
+            --project="${GCP_PROJECT_ID}" 2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
+        if [[ -z "${acct}" ]]; then
+            log "WARNING: oauthAccount fetch returned empty; skipping oauthAccount field."
+            acct=""
+        elif ! jq -e '.accountUuid and .emailAddress and .organizationUuid' \
+                >/dev/null 2>&1 <<<"${acct}"; then
+            log "WARNING: oauthAccount JSON missing required fields; skipping oauthAccount field."
+            acct=""
+        fi
+    fi
+
     local tmp
     tmp=$(mktemp)
     if [[ -f "${CLAUDE_CONFIG_PATH}" ]]; then
         # Merge: preserve any other keys Claude Code writes (project state,
         # trusted dirs, MCP servers, etc.).
-        jq --argjson acct "${acct}" --arg ver "${version}" '
+        jq --arg acct "${acct}" --arg ver "${version}" '
             .hasCompletedOnboarding = true
             | (if $ver != "" then .lastOnboardingVersion = $ver else . end)
-            | .oauthAccount = $acct
+            | (if $acct != "" then .oauthAccount = ($acct | fromjson) else . end)
         ' "${CLAUDE_CONFIG_PATH}" > "${tmp}" || { rm -f "${tmp}"; log "ERROR: jq merge failed; leaving ${CLAUDE_CONFIG_PATH} untouched."; return 0; }
     else
-        jq -n --argjson acct "${acct}" --arg ver "${version}" '
-            {hasCompletedOnboarding: true, oauthAccount: $acct}
+        jq -n --arg acct "${acct}" --arg ver "${version}" '
+            {hasCompletedOnboarding: true}
             | (if $ver != "" then .lastOnboardingVersion = $ver else . end)
+            | (if $acct != "" then .oauthAccount = ($acct | fromjson) else . end)
         ' > "${tmp}" || { rm -f "${tmp}"; log "ERROR: jq render failed; skipping onboarding seed."; return 0; }
     fi
 
@@ -104,7 +100,7 @@ seed_claude_onboarding() {
     fi
     chown "${USER_NAME}:${USER_NAME}" "${CLAUDE_CONFIG_PATH}"
     chmod 600 "${CLAUDE_CONFIG_PATH}"
-    log "Seeded ${CLAUDE_CONFIG_PATH} (hasCompletedOnboarding=true, oauthAccount set)."
+    log "Seeded ${CLAUDE_CONFIG_PATH} (hasCompletedOnboarding=true${acct:+, oauthAccount set})."
 
     # Smoke test — sudo resets env, so pass the token explicitly.
     if sudo -u "${USER_NAME}" env CLAUDE_CODE_OAUTH_TOKEN="${token}" \
