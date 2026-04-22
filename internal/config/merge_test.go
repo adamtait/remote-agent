@@ -123,3 +123,73 @@ func TestWorkstationName_TruncatedAt63(t *testing.T) {
 		t.Errorf("expected ≤63 chars, got %d", len(name))
 	}
 }
+
+func TestMerge_AutoSleepFromGlobalDefaults(t *testing.T) {
+	project := &config.ProjectConfig{ProjectID: "p"}
+	global := &config.GlobalConfig{
+		Defaults: config.GlobalDefaults{AutoSleepSeconds: 3600},
+	}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoSleepSeconds != 3600 {
+		t.Errorf("AutoSleepSeconds: got %d, want 3600", cfg.AutoSleepSeconds)
+	}
+}
+
+func TestMerge_AutoShutdownFromProjectConfig(t *testing.T) {
+	project := &config.ProjectConfig{ProjectID: "p", AutoShutdownSeconds: 86400}
+	global := &config.GlobalConfig{}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoShutdownSeconds != 86400 {
+		t.Errorf("AutoShutdownSeconds: got %d, want 86400", cfg.AutoShutdownSeconds)
+	}
+}
+
+func TestMerge_ProjectConfigOverridesGlobalDefaultsForAutoSleep(t *testing.T) {
+	project := &config.ProjectConfig{ProjectID: "p", AutoSleepSeconds: 1800}
+	global := &config.GlobalConfig{
+		Defaults: config.GlobalDefaults{AutoSleepSeconds: 7200},
+	}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoSleepSeconds != 1800 {
+		t.Errorf("AutoSleepSeconds: got %d, want 1800 (project should override global default)", cfg.AutoSleepSeconds)
+	}
+}
+
+func TestMerge_GlobalProjectOverrideWinsForAutoShutdown(t *testing.T) {
+	project := &config.ProjectConfig{ProjectID: "my-proj", AutoShutdownSeconds: 3600}
+	global := &config.GlobalConfig{
+		Projects: map[string]config.GlobalProjectOverride{
+			"my-proj": {AutoShutdownSeconds: 7200},
+		},
+	}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoShutdownSeconds != 7200 {
+		t.Errorf("AutoShutdownSeconds: got %d, want 7200 (global override should win)", cfg.AutoShutdownSeconds)
+	}
+}
+
+func TestMerge_ZeroAutoSleepDoesNotOverrideNonZero(t *testing.T) {
+	project := &config.ProjectConfig{ProjectID: "p"}
+	global := &config.GlobalConfig{
+		Defaults: config.GlobalDefaults{AutoSleepSeconds: 5400},
+	}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoSleepSeconds != 5400 {
+		t.Errorf("AutoSleepSeconds: got %d, want 5400 (zero in project must not overwrite global default)", cfg.AutoSleepSeconds)
+	}
+}
