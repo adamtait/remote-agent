@@ -9,8 +9,8 @@ type ProjectConfig struct {
 	GithubRepoURL      string `yaml:"github_repo_url"`
 	MachineType        string `yaml:"machine_type"`
 	DiskSizeGB         int    `yaml:"disk_size_gb"`
-	AutoSleepSeconds   int    `yaml:"auto_sleep_seconds"`
-	AutoShutdownSeconds int    `yaml:"auto_shutdown_seconds"`
+	AutoSleepHours    *int `yaml:"auto_sleep_hours"`
+	AutoShutdownHours int  `yaml:"auto_shutdown_hours"`
 }
 
 // GlobalDefaults is the defaults section of ~/.config/ws/config.yaml.
@@ -18,8 +18,8 @@ type GlobalDefaults struct {
 	Region              string `yaml:"region"`
 	GitUserName         string `yaml:"git_user_name"`
 	GitUserEmail        string `yaml:"git_user_email"`
-	AutoSleepSeconds    int    `yaml:"auto_sleep_seconds"`
-	AutoShutdownSeconds int    `yaml:"auto_shutdown_seconds"`
+	AutoSleepHours    *int `yaml:"auto_sleep_hours"`
+	AutoShutdownHours int  `yaml:"auto_shutdown_hours"`
 }
 
 // GlobalProjectOverride is a per-project-id override block in the global config.
@@ -28,8 +28,8 @@ type GlobalProjectOverride struct {
 	ImageName           string `yaml:"image_name"`
 	ImageTag            string `yaml:"image_tag"`
 	RepoName            string `yaml:"repo_name"`
-	AutoSleepSeconds    int    `yaml:"auto_sleep_seconds"`
-	AutoShutdownSeconds int    `yaml:"auto_shutdown_seconds"`
+	AutoSleepHours    *int `yaml:"auto_sleep_hours"`
+	AutoShutdownHours int  `yaml:"auto_shutdown_hours"`
 }
 
 // GlobalConfig is unmarshalled from ~/.config/ws/config.yaml.
@@ -55,6 +55,6 @@ type Config struct {
 	RepoName            string
 	WorkstationName     string // <project_id>-<username>, sanitized, ≤63 chars
 	ProjectConfigPath   string // absolute path to the .ws.yaml that was found
-	AutoSleepSeconds    int
-	AutoShutdownSeconds int
+	AutoSleepHours    *int // nil=GCP default, 0=never sleep, N=hours (1-24)
+	AutoShutdownHours int  // 0=GCP default, N=hours (1-168)
 }

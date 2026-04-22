@@ -125,71 +125,88 @@ func TestWorkstationName_TruncatedAt63(t *testing.T) {
 }
 
 func TestMerge_AutoSleepFromGlobalDefaults(t *testing.T) {
+	h := 2
 	project := &config.ProjectConfig{ProjectID: "p"}
 	global := &config.GlobalConfig{
-		Defaults: config.GlobalDefaults{AutoSleepSeconds: 3600},
+		Defaults: config.GlobalDefaults{AutoSleepHours: &h},
 	}
 	cfg, err := config.Merge(project, global)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AutoSleepSeconds != 3600 {
-		t.Errorf("AutoSleepSeconds: got %d, want 3600", cfg.AutoSleepSeconds)
+	if cfg.AutoSleepHours == nil || *cfg.AutoSleepHours != 2 {
+		t.Errorf("AutoSleepHours: got %v, want &2", cfg.AutoSleepHours)
 	}
 }
 
-func TestMerge_AutoShutdownFromProjectConfig(t *testing.T) {
-	project := &config.ProjectConfig{ProjectID: "p", AutoShutdownSeconds: 86400}
+func TestMerge_AutoSleepNeverSleep(t *testing.T) {
+	zero := 0
+	project := &config.ProjectConfig{ProjectID: "p", AutoSleepHours: &zero}
 	global := &config.GlobalConfig{}
 	cfg, err := config.Merge(project, global)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AutoShutdownSeconds != 86400 {
-		t.Errorf("AutoShutdownSeconds: got %d, want 86400", cfg.AutoShutdownSeconds)
+	if cfg.AutoSleepHours == nil || *cfg.AutoSleepHours != 0 {
+		t.Errorf("AutoSleepHours: got %v, want &0 (never sleep)", cfg.AutoSleepHours)
+	}
+}
+
+func TestMerge_AutoShutdownFromProjectConfig(t *testing.T) {
+	project := &config.ProjectConfig{ProjectID: "p", AutoShutdownHours: 24}
+	global := &config.GlobalConfig{}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoShutdownHours != 24 {
+		t.Errorf("AutoShutdownHours: got %d, want 24", cfg.AutoShutdownHours)
 	}
 }
 
 func TestMerge_ProjectConfigOverridesGlobalDefaultsForAutoSleep(t *testing.T) {
-	project := &config.ProjectConfig{ProjectID: "p", AutoSleepSeconds: 1800}
+	projectH := 1
+	globalH := 4
+	project := &config.ProjectConfig{ProjectID: "p", AutoSleepHours: &projectH}
 	global := &config.GlobalConfig{
-		Defaults: config.GlobalDefaults{AutoSleepSeconds: 7200},
+		Defaults: config.GlobalDefaults{AutoSleepHours: &globalH},
 	}
 	cfg, err := config.Merge(project, global)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AutoSleepSeconds != 1800 {
-		t.Errorf("AutoSleepSeconds: got %d, want 1800 (project should override global default)", cfg.AutoSleepSeconds)
+	if cfg.AutoSleepHours == nil || *cfg.AutoSleepHours != 1 {
+		t.Errorf("AutoSleepHours: got %v, want &1 (project should override global default)", cfg.AutoSleepHours)
 	}
 }
 
 func TestMerge_GlobalProjectOverrideWinsForAutoShutdown(t *testing.T) {
-	project := &config.ProjectConfig{ProjectID: "my-proj", AutoShutdownSeconds: 3600}
+	project := &config.ProjectConfig{ProjectID: "my-proj", AutoShutdownHours: 12}
 	global := &config.GlobalConfig{
 		Projects: map[string]config.GlobalProjectOverride{
-			"my-proj": {AutoShutdownSeconds: 7200},
+			"my-proj": {AutoShutdownHours: 48},
 		},
 	}
 	cfg, err := config.Merge(project, global)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AutoShutdownSeconds != 7200 {
-		t.Errorf("AutoShutdownSeconds: got %d, want 7200 (global override should win)", cfg.AutoShutdownSeconds)
+	if cfg.AutoShutdownHours != 48 {
+		t.Errorf("AutoShutdownHours: got %d, want 48 (global override should win)", cfg.AutoShutdownHours)
 	}
 }
 
-func TestMerge_ZeroAutoSleepDoesNotOverrideNonZero(t *testing.T) {
-	project := &config.ProjectConfig{ProjectID: "p"}
+func TestMerge_NilAutoSleepDoesNotOverrideNonNil(t *testing.T) {
+	globalH := 3
+	project := &config.ProjectConfig{ProjectID: "p"} // AutoSleepHours nil
 	global := &config.GlobalConfig{
-		Defaults: config.GlobalDefaults{AutoSleepSeconds: 5400},
+		Defaults: config.GlobalDefaults{AutoSleepHours: &globalH},
 	}
 	cfg, err := config.Merge(project, global)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AutoSleepSeconds != 5400 {
-		t.Errorf("AutoSleepSeconds: got %d, want 5400 (zero in project must not overwrite global default)", cfg.AutoSleepSeconds)
+	if cfg.AutoSleepHours == nil || *cfg.AutoSleepHours != 3 {
+		t.Errorf("AutoSleepHours: got %v, want &3 (nil in project must not overwrite global default)", cfg.AutoSleepHours)
 	}
 }
