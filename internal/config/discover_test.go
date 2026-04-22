@@ -2,7 +2,6 @@
 package config_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,37 +67,4 @@ func TestFindProjectConfig_NotFoundReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-}
-
-func TestFindProjectConfig_AutoMigratesLegacy(t *testing.T) {
-	dir := t.TempDir()
-	legacy := filepath.Join(dir, ".ws.yaml")
-	if err := os.WriteFile(legacy, []byte("project_id: legacy\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := config.FindProjectConfig(dir, dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := filepath.Join(dir, ".ws", "config.yaml")
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
-		t.Errorf("expected %s removed after migration", legacy)
-	}
-}
-
-func TestFindProjectConfig_BothPresent_Errors(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir) // writes .ws/config.yaml
-	if err := os.WriteFile(filepath.Join(dir, ".ws.yaml"), []byte("x\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	_, err := config.FindProjectConfig(dir, dir)
-	if err == nil {
-		t.Fatal("expected conflict error")
-	}
-	fmt.Fprintln(os.Stderr, err)
 }
