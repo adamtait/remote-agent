@@ -85,3 +85,27 @@ func TestRenderGlobalTemplate_QuotesGitIdentity(t *testing.T) {
 		t.Errorf("expected quoted git_user_name, got:\n%s", got)
 	}
 }
+
+func TestRenderProjectTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
+	got := scaffold.RenderProjectTemplate(scaffold.ProbedValues{})
+	for _, want := range []string{
+		"# auto_sleep_seconds:",
+		"# auto_shutdown_seconds:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderProjectTemplate missing %q\ngot:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderGlobalTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
+	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{})
+	for _, want := range []string{
+		"# auto_sleep_seconds:",
+		"# auto_shutdown_seconds:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderGlobalTemplate missing %q\ngot:\n%s", want, got)
+		}
+	}
+}
