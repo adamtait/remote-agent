@@ -75,10 +75,11 @@ func ScaffoldAssets(opts ScaffoldAssetsOptions) (AssetResult, error) {
 			}
 		}
 
-		body, source, err := ResolveSource(opts.Home, name)
+		body, err := EmbeddedSeed(name)
 		if err != nil {
 			return res, err
 		}
+		source := "embedded-default"
 		res.source[name] = source
 
 		if opts.DryRun {

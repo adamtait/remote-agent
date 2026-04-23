@@ -7,22 +7,9 @@ import (
 	"testing"
 )
 
-func TestResolveSource_EmbeddedWhenNoUserTemplate(t *testing.T) {
-	home := t.TempDir()
-	body, label, err := ResolveSource(home, "Dockerfile")
-	if err != nil {
-		t.Fatalf("ResolveSource: %v", err)
-	}
-	if !bytes.Equal(body, embeddedDockerfile) {
-		t.Errorf("expected embedded bytes, got different content (%d vs %d bytes)", len(body), len(embeddedDockerfile))
-	}
-	if label != "embedded-default" {
-		t.Errorf("label = %q, want %q", label, "embedded-default")
-	}
-}
-
 func TestResolveSource_UserTemplateTakesPrecedence(t *testing.T) {
 	home := t.TempDir()
+	projectRoot := t.TempDir()
 	tmplDir := filepath.Join(home, ".config", "ws", "template")
 	if err := os.MkdirAll(tmplDir, 0755); err != nil {
 		t.Fatal(err)
@@ -32,7 +19,7 @@ func TestResolveSource_UserTemplateTakesPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body, label, err := ResolveSource(home, "Dockerfile")
+	body, label, err := ResolveSource(home, projectRoot, "Dockerfile")
 	if err != nil {
 		t.Fatalf("ResolveSource: %v", err)
 	}
@@ -44,37 +31,54 @@ func TestResolveSource_UserTemplateTakesPrecedence(t *testing.T) {
 	}
 }
 
-func TestResolveSource_PartialTemplate_FallsBackPerFile(t *testing.T) {
+func TestResolveSource_ProjectTakesPrecedenceOverUser(t *testing.T) {
 	home := t.TempDir()
-	tmplDir := filepath.Join(home, ".config", "ws", "template")
-	if err := os.MkdirAll(tmplDir, 0755); err != nil {
+	projectRoot := t.TempDir()
+
+	// Write user template
+	userTmplDir := filepath.Join(home, ".config", "ws", "template")
+	if err := os.MkdirAll(userTmplDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	// Only Dockerfile present; entrypoint.sh should fall back.
-	if err := os.WriteFile(filepath.Join(tmplDir, "Dockerfile"), []byte("FROM custom\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(userTmplDir, "Dockerfile"), []byte("FROM user\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	_, dockerLabel, err := ResolveSource(home, "Dockerfile")
-	if err != nil {
+	// Write project override
+	wsDir := filepath.Join(projectRoot, ".ws")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if dockerLabel != "user-template" {
-		t.Errorf("Dockerfile label = %q, want user-template", dockerLabel)
+	projectBytes := []byte("FROM project\n")
+	if err := os.WriteFile(filepath.Join(wsDir, "Dockerfile"), projectBytes, 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	_, entLabel, err := ResolveSource(home, "entrypoint.sh")
+	body, label, err := ResolveSource(home, projectRoot, "Dockerfile")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ResolveSource: %v", err)
 	}
-	if entLabel != "embedded-default" {
-		t.Errorf("entrypoint.sh label = %q, want embedded-default", entLabel)
+	if !bytes.Equal(body, projectBytes) {
+		t.Errorf("expected project bytes, got: %q", body)
+	}
+	if label != "project-override" {
+		t.Errorf("label = %q, want project-override", label)
+	}
+}
+
+func TestResolveSource_MissingBoth_ReturnsError(t *testing.T) {
+	home := t.TempDir()
+	projectRoot := t.TempDir()
+
+	_, _, err := ResolveSource(home, projectRoot, "Dockerfile")
+	if err == nil {
+		t.Fatal("expected error when both project and user template missing")
 	}
 }
 
 func TestResolveSource_UnknownName(t *testing.T) {
 	home := t.TempDir()
-	_, _, err := ResolveSource(home, "unknown-asset")
+	_, _, err := ResolveSource(home, "", "unknown-asset")
 	if err == nil {
 		t.Fatal("expected error for unknown asset name, got nil")
 	}
@@ -95,8 +99,27 @@ func TestResolveSource_UserTemplateUnreadable_Propagates(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(path, 0644) })
 
-	_, _, err := ResolveSource(home, "Dockerfile")
+	_, _, err := ResolveSource(home, "", "Dockerfile")
 	if err == nil {
 		t.Fatal("expected permission error, got nil")
+	}
+}
+
+func TestEmbeddedSeed_ReturnsBytes(t *testing.T) {
+	for _, name := range AssetNames {
+		data, err := EmbeddedSeed(name)
+		if err != nil {
+			t.Errorf("EmbeddedSeed(%q): %v", name, err)
+		}
+		if len(data) == 0 {
+			t.Errorf("EmbeddedSeed(%q) returned empty bytes", name)
+		}
+	}
+}
+
+func TestEmbeddedSeed_UnknownName_ReturnsError(t *testing.T) {
+	_, err := EmbeddedSeed("not-a-real-asset")
+	if err == nil {
+		t.Fatal("expected error for unknown asset name")
 	}
 }

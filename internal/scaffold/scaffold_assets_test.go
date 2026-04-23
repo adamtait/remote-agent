@@ -120,16 +120,16 @@ func TestScaffoldAssets_DryRun_WritesNothing(t *testing.T) {
 	}
 }
 
-func TestScaffoldAssets_UserTemplatePrecedence(t *testing.T) {
+func TestScaffoldAssets_AlwaysWritesEmbedded(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	wsDir := filepath.Join(cwd, ".ws")
+	// Place a user template; ScaffoldAssets should ignore it and use embedded bytes.
 	tmplDir := filepath.Join(home, ".config", "ws", "template")
 	if err := os.MkdirAll(tmplDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	customDocker := []byte("FROM my/custom:latest\n")
-	if err := os.WriteFile(filepath.Join(tmplDir, "Dockerfile"), customDocker, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmplDir, "Dockerfile"), []byte("FROM my/custom:latest\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -142,11 +142,11 @@ func TestScaffoldAssets_UserTemplatePrecedence(t *testing.T) {
 	}
 
 	dockerContents, _ := os.ReadFile(filepath.Join(wsDir, "Dockerfile"))
-	if !bytes.Equal(dockerContents, customDocker) {
-		t.Errorf("Dockerfile bytes = %q, want user-template bytes", dockerContents)
+	if !bytes.Equal(dockerContents, embeddedDockerfile) {
+		t.Errorf("Dockerfile bytes differ from embedded; ScaffoldAssets should always use embedded bytes")
 	}
-	if res.Source("Dockerfile") != "user-template" {
-		t.Errorf("Dockerfile source = %q, want user-template", res.Source("Dockerfile"))
+	if res.Source("Dockerfile") != "embedded-default" {
+		t.Errorf("Dockerfile source = %q, want embedded-default", res.Source("Dockerfile"))
 	}
 	if res.Source("entrypoint.sh") != "embedded-default" {
 		t.Errorf("entrypoint.sh source = %q, want embedded-default", res.Source("entrypoint.sh"))
