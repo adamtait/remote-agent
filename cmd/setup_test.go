@@ -39,7 +39,7 @@ func TestSetupTemplate_WritesFiles(t *testing.T) {
 	}
 }
 
-func TestSetupTemplate_RefusesExistingWithoutForce(t *testing.T) {
+func TestSetupTemplate_ExistingSkipsAndPreservesContent(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -54,48 +54,23 @@ func TestSetupTemplate_RefusesExistingWithoutForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
-	if err := os.WriteFile(projectPath, []byte("old: content\n"), 0o644); err != nil {
+	original := []byte("old: content\n")
+	if err := os.WriteFile(projectPath, original, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup", "template"})
-	if code == 0 {
-		t.Fatalf("expected non-zero exit, got 0. stderr=%q stdout=%q", stderr.String(), stdout.String())
+	if code != 0 {
+		t.Fatalf("expected exit 0 on re-run, got %d. stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "already exists") {
-		t.Fatalf("expected stderr to contain %q, got: %q", "already exists", stderr.String())
+	if !strings.Contains(stdout.String(), "skip") || !strings.Contains(stdout.String(), "already present") {
+		t.Errorf("expected skip notice in stdout, got: %q", stdout.String())
 	}
-}
-
-func TestSetupTemplate_ErrorPrintedOnce(t *testing.T) {
-	cwd := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	origWd, _ := os.Getwd()
-	if err := os.Chdir(cwd); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
-
-	// Pre-write .ws/config.yaml so the command errors.
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("old\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	code := cmd.ExecuteWithIO(&bytes.Buffer{}, &stdout, &stderr, []string{"setup", "template"})
-	if code == 0 {
-		t.Fatal("expected non-zero exit")
-	}
-	// The "already exists" substring should appear exactly once in stderr —
-	// cobra's default error printing is silenced so only our fmt.Fprintln runs.
-	if n := strings.Count(stderr.String(), "already exists"); n != 1 {
-		t.Errorf("expected 'already exists' once in stderr, got %d occurrences:\n%s", n, stderr.String())
+	got, _ := os.ReadFile(projectPath)
+	if !bytes.Equal(got, original) {
+		t.Errorf("existing project config modified: %q", got)
 	}
 }
 
