@@ -32,10 +32,12 @@ func (r AssetResult) Source(name string) string { return r.source[name] }
 
 // assetMode returns the file mode for a named asset.
 func assetMode(name string) os.FileMode {
-	if name == "entrypoint.sh" {
+	switch name {
+	case "entrypoint.sh", "profile.d/00-ws-wait.sh":
 		return 0755
+	default:
+		return 0644
 	}
-	return 0644
 }
 
 // ScaffoldAssets writes each asset in AssetNames to <Cwd>/.ws/<name>.

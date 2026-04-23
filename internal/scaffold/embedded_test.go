@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -32,5 +33,15 @@ func TestEmbeddedEntrypoint_HasShebangAndStrictMode(t *testing.T) {
 	}
 	if !strings.Contains(s, "set -euo pipefail") {
 		t.Error("embedded entrypoint.sh should contain 'set -euo pipefail'")
+	}
+}
+
+func TestEmbedded_WaitScriptHasShebangAndTimeout(t *testing.T) {
+	if !bytes.HasPrefix(embeddedWaitScript, []byte("#!/")) {
+		t.Errorf("expected shebang at start of embeddedWaitScript")
+	}
+	if !bytes.Contains(embeddedWaitScript, []byte("timeout")) &&
+		!bytes.Contains(embeddedWaitScript, []byte("TIMEOUT")) {
+		t.Errorf("wait script should mention a timeout")
 	}
 }

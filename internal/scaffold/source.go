@@ -11,7 +11,7 @@ import (
 )
 
 // AssetNames enumerates the build assets ws knows how to scaffold.
-var AssetNames = []string{"Dockerfile", "entrypoint.sh"}
+var AssetNames = []string{"Dockerfile", "entrypoint.sh", "profile.d/00-ws-wait.sh"}
 
 // ResolveSource returns the bytes to scaffold for the named asset.
 //
@@ -44,6 +44,8 @@ func embeddedFor(name string) ([]byte, bool) {
 		return embeddedDockerfile, true
 	case "entrypoint.sh":
 		return embeddedEntrypoint, true
+	case "profile.d/00-ws-wait.sh":
+		return embeddedWaitScript, true
 	default:
 		return nil, false
 	}
