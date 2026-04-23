@@ -219,6 +219,68 @@ func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestInteractiveScaffold_GlobalExists_StillScaffoldsAssets(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	// Pre-seed the global config so its WriteAtomic returns "already exists".
+	globalDir := filepath.Join(home, ".config", "ws")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), []byte("defaults:\n  region: us-east1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdin := strings.NewReader(strings.Join([]string{
+		"my-proj-123", "https://github.com/a/b.git", "us-central1", "Alice", "alice@example.com", "y",
+	}, "\n") + "\n")
+	var stdout, stderr bytes.Buffer
+
+	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
+		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
+		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
+	})
+	// Global write is expected to fail without --force; the user's contract is
+	// that build assets still get scaffolded before that error surfaces.
+	if err == nil {
+		t.Fatal("expected error from existing global config, got nil")
+	}
+
+	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+		p := filepath.Join(cwd, ".ws", name)
+		if _, statErr := os.Stat(p); statErr != nil {
+			t.Errorf("expected %s to be scaffolded despite global-config error: %v", p, statErr)
+		}
+	}
+}
+
+func TestTemplateScaffold_GlobalExists_StillScaffoldsAssets(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	globalDir := filepath.Join(home, ".config", "ws")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), []byte("defaults:\n  region: us-east1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	err := scaffold.TemplateScaffold(scaffold.TemplateOptions{
+		Stdout: &stdout, Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
+	})
+	if err == nil {
+		t.Fatal("expected error from existing global config, got nil")
+	}
+
+	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+		p := filepath.Join(cwd, ".ws", name)
+		if _, statErr := os.Stat(p); statErr != nil {
+			t.Errorf("expected %s to be scaffolded despite global-config error: %v", p, statErr)
+		}
+	}
+}
+
 func TestTemplateScaffold_WritesBothFiles(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()

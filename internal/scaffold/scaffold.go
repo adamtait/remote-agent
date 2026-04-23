@@ -136,6 +136,19 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		return fmt.Errorf("%w: user declined", ErrCancelled)
 	}
 
+	// Scaffold build assets first so they land even when a later config
+	// WriteAtomic bails on an existing file. Idempotent: OnlyMissing skips
+	// assets that are already present; --force overwrites.
+	if writeProject {
+		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
+			Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
+			Force:       opts.Force,
+			OnlyMissing: !opts.Force,
+		}); err != nil {
+			return err
+		}
+	}
+
 	if writeProject {
 		if err := WriteAtomic(filepath.Join(opts.Cwd, ".ws", "config.yaml"), []byte(project.marshal()), opts.Force); err != nil {
 			return err
@@ -143,18 +156,6 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	}
 	if writeGlobal {
 		if err := WriteAtomic(filepath.Join(opts.Home, ".config", "ws", "config.yaml"), []byte(global.marshal()), opts.Force); err != nil {
-			return err
-		}
-	}
-
-	// Always scaffold project build assets. Idempotent: skips files that
-	// already exist so re-running ws setup is safe; --force overwrites.
-	if writeProject {
-		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
-			Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
-			Force:       opts.Force,
-			OnlyMissing: !opts.Force,
-		}); err != nil {
 			return err
 		}
 	}
@@ -176,6 +177,17 @@ func TemplateScaffold(opts TemplateOptions) error {
 		GithubRepoURL: opts.Prober.GitOriginURL(),
 	}
 
+	// Scaffold build assets first so they land even when a later config
+	// WriteAtomic bails on an existing file.
+	if !opts.GlobalOnly {
+		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
+			Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
+			Force:       opts.Force,
+			OnlyMissing: !opts.Force,
+		}); err != nil {
+			return err
+		}
+	}
 	if !opts.GlobalOnly {
 		path := filepath.Join(opts.Cwd, ".ws", "config.yaml")
 		if err := WriteAtomic(path, []byte(RenderProjectTemplate(pv)), opts.Force); err != nil {
@@ -189,14 +201,6 @@ func TemplateScaffold(opts TemplateOptions) error {
 			return err
 		}
 		fmt.Fprintln(opts.Stdout, "Wrote "+path)
-	}
-	if !opts.GlobalOnly {
-		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
-			Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
-			Force: opts.Force,
-		}); err != nil {
-			return err
-		}
 	}
 	return nil
 }
