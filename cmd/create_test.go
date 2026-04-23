@@ -161,12 +161,27 @@ func TestCreate_StagesProfileDBeforeBuildAndCleansUp(t *testing.T) {
 func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 	sleep := 2
 	cfg := &config.Config{
-		ProjectID: "p", GithubRepoURL: "https://example.com/r.git",
-		GitUserName: "Alice", GitUserEmail: "a@x.com",
-		Region: "us-central1", MachineType: "e2-standard-4",
-		DiskSizeGB: 50, ClusterName: "c", ConfigName: "cf",
-		ServiceAccountName: "sa", ImageName: "i", ImageTag: "t", RepoName: "r",
-		AutoSleepHours: &sleep, AutoShutdownHours: 12,
+		Git: config.GitConfig{
+			UserName:      "Alice",
+			UserEmail:     "a@x.com",
+			GithubRepoURL: "https://example.com/r.git",
+		},
+		Gcloud: config.GcloudConfig{
+			Project: "p",
+			Workstation: config.WorkstationConfig{
+				Region:             "us-central1",
+				MachineType:        "e2-standard-4",
+				DiskSizeGB:         50,
+				ClusterName:        "c",
+				ConfigName:         "cf",
+				ServiceAccountName: "sa",
+				ImageName:          "i",
+				ImageTag:           "t",
+				RepoName:           "r",
+				AutoSleepHours:     &sleep,
+				AutoShutdownHours:  12,
+			},
+		},
 		Secrets: map[string]config.SecretEntry{
 			"claude_oauth": {SecretName: "claude-auth", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
 			"github_pat":   {SecretName: "github-pat", EnvVar: "GH_TOKEN"},

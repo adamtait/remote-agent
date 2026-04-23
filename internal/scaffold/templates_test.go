@@ -26,18 +26,21 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		`git:`,
 		`  user_name: "Alice"`,
 		`  user_email: "alice@example.com"`,
-		`workstation:`,
-		`  region: us-central1`,
-		`  machine_type: e2-standard-4`,
-		`  disk_size_gb: 50`,
-		`  cluster_name: claude-dev-cluster`,
-		`  config_name: claude-dev-config`,
-		`  service_account_name: claude-workstation-sa`,
-		`  image_name: claude-code-workstation`,
-		`  image_tag: latest`,
-		`  repo_name: claude-workstation-images`,
-		`  auto_sleep_hours: 2`,
-		`  auto_shutdown_hours: 12`,
+		`  github_repo_url: https://github.com/my-org/my-repo.git`,
+		`gcloud:`,
+		`  project: my-gcp-project`,
+		`  workstation:`,
+		`    region: us-central1`,
+		`    machine_type: e2-standard-4`,
+		`    disk_size_gb: 50`,
+		`    cluster_name: claude-dev-cluster`,
+		`    config_name: claude-dev-config`,
+		`    service_account_name: claude-workstation-sa`,
+		`    image_name: claude-code-workstation`,
+		`    image_tag: latest`,
+		`    repo_name: claude-workstation-images`,
+		`    auto_sleep_hours: 2`,
+		`    auto_shutdown_hours: 12`,
 		`secrets:`,
 		`  claude_oauth:`,
 		`    secret_name: claude-code-oauth-token`,
@@ -88,11 +91,13 @@ func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T)
 	}
 	got := scaffold.RenderProjectConfig(pv)
 	for _, want := range []string{
-		`project:`,
-		`  id: my-proj`,
+		`git:`,
 		`  github_repo_url: https://example.com/r.git`,
-		`# workstation:`,
-		`#   machine_type: e2-standard-8`,
+		`gcloud:`,
+		`  project: my-proj`,
+		`# gcloud:`,
+		`#   workstation:`,
+		`#     machine_type: e2-standard-8`,
 		`# secrets:`,
 		`# env:`,
 	} {
@@ -104,12 +109,12 @@ func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T)
 
 func TestRenderProjectConfig_ZeroValuesStillShowCommentedExamples(t *testing.T) {
 	got := scaffold.RenderProjectConfig(scaffold.ProjectValues{})
-	for _, want := range []string{`# workstation:`, `# secrets:`, `# env:`} {
+	for _, want := range []string{`# gcloud:`, `#   workstation:`, `# secrets:`, `# env:`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing commented example %q", want)
 		}
 	}
-	if !strings.Contains(got, "id:") || !strings.Contains(got, "github_repo_url:") {
+	if !strings.Contains(got, "project:") || !strings.Contains(got, "github_repo_url:") {
 		t.Error("required keys should still be present as placeholders")
 	}
 }

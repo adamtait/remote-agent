@@ -39,8 +39,10 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 	for _, want := range []string{
 		`  user_name: "Alice"`,
 		`  user_email: "alice@example.com"`,
-		`  region: us-central1`,
-		`  machine_type: e2-standard-4`,
+		`  github_repo_url: https://github.com/a/b.git`,
+		`  project: my-proj-123`,
+		`    region: us-central1`,
+		`    machine_type: e2-standard-4`,
 		`  claude_oauth:`,
 		`    secret_name: claude-code-oauth-token`,
 		`  github_pat:`,
@@ -53,9 +55,10 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 
 	project, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
 	for _, want := range []string{
-		`  id: my-proj-123`,
 		`  github_repo_url: https://github.com/a/b.git`,
-		`# workstation:`,
+		`  project: my-proj-123`,
+		`#   workstation:`,
+		`# gcloud:`,
 		`# secrets:`,
 	} {
 		if !strings.Contains(string(project), want) {
@@ -170,9 +173,10 @@ func TestInteractiveScaffold_ProjectExists_SkipsAndPreserves(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("existing: true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Project exists → only user prompts: auth_mode, git_user_name, git_user_email, confirm
+	// Project exists → user config still prompts for project_id and github_repo_url,
+	// then auth_mode, git_user_name, git_user_email, confirm.
 	stdin := strings.NewReader(strings.Join([]string{
-		"1", "Alice", "alice@example.com", "y",
+		"my-proj-123", "https://github.com/a/b.git", "1", "Alice", "alice@example.com", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{

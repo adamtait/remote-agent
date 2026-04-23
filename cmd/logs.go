@@ -22,7 +22,7 @@ Use --tail=N to print the N most recent entries and exit.`,
 			return err
 		}
 		follow := !cmd.Flags().Changed("tail")
-		return client.Logs(cfg.ProjectID, resolved, follow, logsTail)
+		return client.Logs(cfg.Gcloud.Project, resolved, follow, logsTail)
 	},
 }
 

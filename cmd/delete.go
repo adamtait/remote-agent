@@ -41,7 +41,8 @@ var deleteCmd = &cobra.Command{
 			}
 		}
 
-		return client.Delete(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, resolved)
+		ws := cfg.Gcloud.Workstation
+		return client.Delete(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
 	},
 }
 

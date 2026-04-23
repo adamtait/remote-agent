@@ -20,36 +20,39 @@ func Merge(u *UserConfig, project *ProjectConfig) (*Config, error) {
 	}
 
 	cfg := &Config{
-		// project-only fields
-		ProjectID:     project.Project.ID,
-		GithubRepoURL: project.Project.GithubRepoURL,
-
-		// git — user only (never read from project)
-		GitUserName:  u.Git.UserName,
-		GitUserEmail: u.Git.UserEmail,
+		Git: GitConfig{
+			UserName:      u.Git.UserName,
+			UserEmail:     u.Git.UserEmail,
+			GithubRepoURL: pick(project.Git.GithubRepoURL, u.Git.GithubRepoURL),
+		},
+		Gcloud: GcloudConfig{
+			Project: pick(project.Gcloud.Project, u.Gcloud.Project),
+		},
 	}
 
 	// workstation: user is the baseline, project overrides per field.
-	lift := func(ur, p WorkstationConfig) {
-		cfg.Region = pick(p.Region, ur.Region)
-		cfg.MachineType = pick(p.MachineType, ur.MachineType)
-		cfg.DiskSizeGB = pickInt(p.DiskSizeGB, ur.DiskSizeGB)
-		cfg.ClusterName = pick(p.ClusterName, ur.ClusterName)
-		cfg.ConfigName = pick(p.ConfigName, ur.ConfigName)
-		cfg.ServiceAccountName = pick(p.ServiceAccountName, ur.ServiceAccountName)
-		cfg.ImageName = pick(p.ImageName, ur.ImageName)
-		cfg.ImageTag = pick(p.ImageTag, ur.ImageTag)
-		cfg.RepoName = pick(p.RepoName, ur.RepoName)
-		cfg.AutoSleepHours = pickIntPtr(p.AutoSleepHours, ur.AutoSleepHours)
-		cfg.AutoShutdownHours = pickInt(p.AutoShutdownHours, ur.AutoShutdownHours)
+	lift := func(ur, p WorkstationConfig) WorkstationConfig {
+		return WorkstationConfig{
+			Region:             pick(p.Region, ur.Region),
+			MachineType:        pick(p.MachineType, ur.MachineType),
+			DiskSizeGB:         pickInt(p.DiskSizeGB, ur.DiskSizeGB),
+			ClusterName:        pick(p.ClusterName, ur.ClusterName),
+			ConfigName:         pick(p.ConfigName, ur.ConfigName),
+			ServiceAccountName: pick(p.ServiceAccountName, ur.ServiceAccountName),
+			ImageName:          pick(p.ImageName, ur.ImageName),
+			ImageTag:           pick(p.ImageTag, ur.ImageTag),
+			RepoName:           pick(p.RepoName, ur.RepoName),
+			AutoSleepHours:     pickIntPtr(p.AutoSleepHours, ur.AutoSleepHours),
+			AutoShutdownHours:  pickInt(p.AutoShutdownHours, ur.AutoShutdownHours),
+		}
 	}
-	lift(u.Workstation, project.Workstation)
+	cfg.Gcloud.Workstation = lift(u.Gcloud.Workstation, project.Gcloud.Workstation)
 
 	// Secrets: user map seeds, project entries override or add by logical name.
 	cfg.Secrets = mergeSecretMap(u.Secrets, project.Secrets)
 	cfg.Env = mergeStringMap(u.Env, project.Env)
 
-	cfg.WorkstationName = WorkstationName(cfg.ProjectID, currentUsername())
+	cfg.WorkstationName = WorkstationName(cfg.Gcloud.Project, currentUsername())
 	return cfg, nil
 }
 

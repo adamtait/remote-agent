@@ -31,10 +31,10 @@ func buildContainerEnv(cfg *config.Config) string {
 	var pairs []string
 	add := func(k, v string) { pairs = append(pairs, k+"="+v) }
 
-	add("GCP_PROJECT_ID", cfg.ProjectID)
-	add("GITHUB_REPO_URL", cfg.GithubRepoURL)
-	add("GIT_USER_NAME", cfg.GitUserName)
-	add("GIT_USER_EMAIL", cfg.GitUserEmail)
+	add("GCP_PROJECT_ID", cfg.Gcloud.Project)
+	add("GITHUB_REPO_URL", cfg.Git.GithubRepoURL)
+	add("GIT_USER_NAME", cfg.Git.UserName)
+	add("GIT_USER_EMAIL", cfg.Git.UserEmail)
 
 	logicalNames := make([]string, 0, len(cfg.Secrets))
 	for k := range cfg.Secrets {
@@ -71,7 +71,7 @@ var createCmd = &cobra.Command{
 and IAM setup remain idempotent; the workstation itself is freshly created on
 every run. Use --name to set the workstation name (auto-suffixed on collision);
 omit it for an auto-generated memorable name.
-Requires .ws.yaml in the project root with project_id and github_repo_url set.`,
+Requires .ws/config.yaml in the project root with git.github_repo_url and gcloud.project set.`,
 	RunE: runCreate,
 }
 
@@ -83,18 +83,20 @@ func init() {
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
+	ws := &cfg.Gcloud.Workstation
+
 	// The workstation image ships HTTPS-only credentials (PAT via git helper) —
 	// no SSH keys, no known_hosts. Rewrite SSH URLs so the clone inside the
 	// container doesn't die with "Host key verification failed".
-	if normalized := scaffold.NormalizeGithubRepoURL(cfg.GithubRepoURL); normalized != cfg.GithubRepoURL {
+	if normalized := scaffold.NormalizeGithubRepoURL(cfg.Git.GithubRepoURL); normalized != cfg.Git.GithubRepoURL {
 		fmt.Printf("\033[1;33mWARN:\033[0m rewriting SSH github_repo_url to HTTPS for container clone: %s → %s\n",
-			cfg.GithubRepoURL, normalized)
-		cfg.GithubRepoURL = normalized
+			cfg.Git.GithubRepoURL, normalized)
+		cfg.Git.GithubRepoURL = normalized
 	}
 	for field, val := range map[string]string{
-		"git_user_name":   cfg.GitUserName,
-		"git_user_email":  cfg.GitUserEmail,
-		"github_repo_url": cfg.GithubRepoURL,
+		"git_user_name":   cfg.Git.UserName,
+		"git_user_email":  cfg.Git.UserEmail,
+		"github_repo_url": cfg.Git.GithubRepoURL,
 	} {
 		if strings.ContainsAny(val, ",=") {
 			return fmt.Errorf("%s must not contain ',' or '=' (gcloud --container-env limitation): %q", field, val)
@@ -103,31 +105,31 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	if cmd.Flags().Changed("auto-sleep") {
 		v, _ := cmd.Flags().GetInt("auto-sleep")
-		cfg.AutoSleepHours = &v
+		ws.AutoSleepHours = &v
 	}
 	if cmd.Flags().Changed("auto-shutdown") {
 		v, _ := cmd.Flags().GetInt("auto-shutdown")
-		cfg.AutoShutdownHours = v
+		ws.AutoShutdownHours = v
 	}
 
-	if cfg.AutoSleepHours != nil {
-		h := *cfg.AutoSleepHours
+	if ws.AutoSleepHours != nil {
+		h := *ws.AutoSleepHours
 		if h < 0 || h > 24 {
 			return fmt.Errorf("auto_sleep_hours must be 0 (never) or 1–24; got %d", h)
 		}
 	}
-	if cfg.AutoShutdownHours != 0 {
-		if cfg.AutoShutdownHours < 1 || cfg.AutoShutdownHours > 168 {
-			return fmt.Errorf("auto_shutdown_hours must be 1–168; got %d", cfg.AutoShutdownHours)
+	if ws.AutoShutdownHours != 0 {
+		if ws.AutoShutdownHours < 1 || ws.AutoShutdownHours > 168 {
+			return fmt.Errorf("auto_shutdown_hours must be 1–168; got %d", ws.AutoShutdownHours)
 		}
 	}
 
 	r := runner
 
 	imageURI := fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
-		cfg.Region, cfg.ProjectID, cfg.RepoName, cfg.ImageName, cfg.ImageTag)
+		ws.Region, cfg.Gcloud.Project, ws.RepoName, ws.ImageName, ws.ImageTag)
 	serviceAccountEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com",
-		cfg.ServiceAccountName, cfg.ProjectID)
+		ws.ServiceAccountName, cfg.Gcloud.Project)
 
 	logStep := func(msg string) { fmt.Printf("\033[1;34m==>\033[0m %s\n", msg) }
 
@@ -138,7 +140,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		"artifactregistry.googleapis.com",
 		"secretmanager.googleapis.com",
 		"iam.googleapis.com",
-		"--project", cfg.ProjectID, "--quiet"); err != nil {
+		"--project", cfg.Gcloud.Project, "--quiet"); err != nil {
 		return fmt.Errorf("enabling APIs: %w", err)
 	}
 
@@ -150,7 +152,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	// with SERVICE_DISABLED if that policy is on and the API is off. Try
 	// best-effort; surface a warning but don't block the rest of setup.
 	if err := r.Run("services", "enable", "reauth.googleapis.com",
-		"--project", cfg.ProjectID, "--quiet"); err != nil {
+		"--project", cfg.Gcloud.Project, "--quiet"); err != nil {
 		fmt.Printf("\033[1;33mWARN:\033[0m could not enable reauth.googleapis.com (%v).\n"+
 			"      This is only required if your org enforces a session/reauth policy.\n"+
 			"      If `gcloud workstations ssh` later fails with SERVICE_DISABLED for\n"+
@@ -158,13 +160,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 2 — Artifact Registry repo
-	logStep(fmt.Sprintf("Ensuring Artifact Registry repo '%s'...", cfg.RepoName))
-	if !r.Check("artifacts", "repositories", "describe", cfg.RepoName, "--location", cfg.Region, "--project", cfg.ProjectID) {
-		if err := r.Run("artifacts", "repositories", "create", cfg.RepoName,
+	logStep(fmt.Sprintf("Ensuring Artifact Registry repo '%s'...", ws.RepoName))
+	if !r.Check("artifacts", "repositories", "describe", ws.RepoName, "--location", ws.Region, "--project", cfg.Gcloud.Project) {
+		if err := r.Run("artifacts", "repositories", "create", ws.RepoName,
 			"--repository-format=docker",
-			"--location", cfg.Region,
+			"--location", ws.Region,
 			"--description=Claude Code workstation images",
-			"--project", cfg.ProjectID); err != nil {
+			"--project", cfg.Gcloud.Project); err != nil {
 			return fmt.Errorf("creating artifact registry repo: %w", err)
 		}
 	}
@@ -191,7 +193,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 	defer stageCleanup()
 
-	if err := r.Run("auth", "configure-docker", fmt.Sprintf("%s-docker.pkg.dev", cfg.Region), "--quiet"); err != nil {
+	if err := r.Run("auth", "configure-docker", fmt.Sprintf("%s-docker.pkg.dev", ws.Region), "--quiet"); err != nil {
 		return fmt.Errorf("configuring docker auth: %w", err)
 	}
 	if err := (dockerRunner{}).Run(dockerBuildArgs(imageURI)...); err != nil {
@@ -208,12 +210,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	for _, logical := range secretLogicalOrder {
 		s := cfg.Secrets[logical]
 		prompt := fmt.Sprintf("Enter value for secret %q (env var %s)", s.SecretName, s.EnvVar)
-		if err := ensureSecret(r, cfg.ProjectID, s.SecretName, prompt); err != nil {
+		if err := ensureSecret(r, cfg.Gcloud.Project, s.SecretName, prompt); err != nil {
 			return fmt.Errorf("ensuring secret %s: %w", s.SecretName, err)
 		}
 		if s.OAuthAccountSecretName != "" {
 			p := fmt.Sprintf("Enter value for oauth_account secret %q", s.OAuthAccountSecretName)
-			if err := ensureSecret(r, cfg.ProjectID, s.OAuthAccountSecretName, p); err != nil {
+			if err := ensureSecret(r, cfg.Gcloud.Project, s.OAuthAccountSecretName, p); err != nil {
 				return fmt.Errorf("ensuring oauth_account secret %s: %w", s.OAuthAccountSecretName, err)
 			}
 		}
@@ -221,10 +223,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	// Step 5 — Service account and IAM
 	logStep(fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail))
-	if !r.Check("iam", "service-accounts", "describe", serviceAccountEmail, "--project", cfg.ProjectID) {
-		if err := r.Run("iam", "service-accounts", "create", cfg.ServiceAccountName,
+	if !r.Check("iam", "service-accounts", "describe", serviceAccountEmail, "--project", cfg.Gcloud.Project) {
+		if err := r.Run("iam", "service-accounts", "create", ws.ServiceAccountName,
 			"--display-name=Claude Workstation SA",
-			"--project", cfg.ProjectID); err != nil {
+			"--project", cfg.Gcloud.Project); err != nil {
 			return fmt.Errorf("creating service account: %w", err)
 		}
 	}
@@ -247,19 +249,19 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		if err := r.Run("secrets", "add-iam-policy-binding", secret,
 			"--member=serviceAccount:"+serviceAccountEmail,
 			"--role=roles/secretmanager.secretAccessor",
-			"--project", cfg.ProjectID,
+			"--project", cfg.Gcloud.Project,
 			"--condition=None"); err != nil {
 			return fmt.Errorf("binding secret %s IAM: %w", secret, err)
 		}
 	}
 
 	// Bind Artifact Registry repo
-	logStep(fmt.Sprintf("Granting artifactregistry.reader on '%s'...", cfg.RepoName))
-	if err := r.Run("artifacts", "repositories", "add-iam-policy-binding", cfg.RepoName,
-		"--location", cfg.Region,
+	logStep(fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName))
+	if err := r.Run("artifacts", "repositories", "add-iam-policy-binding", ws.RepoName,
+		"--location", ws.Region,
 		"--member=serviceAccount:"+serviceAccountEmail,
 		"--role=roles/artifactregistry.reader",
-		"--project", cfg.ProjectID,
+		"--project", cfg.Gcloud.Project,
 		"--condition=None"); err != nil {
 		return fmt.Errorf("binding artifact registry IAM: %w", err)
 	}
@@ -267,7 +269,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	// Bind project-level roles
 	logStep("Granting logWriter and metricWriter on project...")
 	for _, role := range []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"} {
-		if err := r.Run("projects", "add-iam-policy-binding", cfg.ProjectID,
+		if err := r.Run("projects", "add-iam-policy-binding", cfg.Gcloud.Project,
 			"--member=serviceAccount:"+serviceAccountEmail,
 			"--role="+role,
 			"--condition=None"); err != nil {
@@ -276,59 +278,59 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 6 — Workstations cluster
-	logStep(fmt.Sprintf("Ensuring workstations cluster '%s'...", cfg.ClusterName))
-	if !r.Check("workstations", "clusters", "describe", cfg.ClusterName, "--region", cfg.Region, "--project", cfg.ProjectID) {
+	logStep(fmt.Sprintf("Ensuring workstations cluster '%s'...", ws.ClusterName))
+	if !r.Check("workstations", "clusters", "describe", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project) {
 		fmt.Printf("\033[1;33mWARN:\033[0m Creating cluster — this takes ~20 minutes on first run.\n")
-		if err := r.Run("workstations", "clusters", "create", cfg.ClusterName,
-			"--region", cfg.Region,
-			"--project", cfg.ProjectID); err != nil {
+		if err := r.Run("workstations", "clusters", "create", ws.ClusterName,
+			"--region", ws.Region,
+			"--project", cfg.Gcloud.Project); err != nil {
 			return fmt.Errorf("creating workstations cluster: %w", err)
 		}
 	}
 
 	// Step 7 — Workstations config
-	logStep(fmt.Sprintf("Ensuring workstations config '%s'...", cfg.ConfigName))
+	logStep(fmt.Sprintf("Ensuring workstations config '%s'...", ws.ConfigName))
 	containerEnv := buildContainerEnv(cfg)
 
-	configExists := r.Check("workstations", "configs", "describe", cfg.ConfigName,
-		"--cluster", cfg.ClusterName, "--region", cfg.Region, "--project", cfg.ProjectID)
+	configExists := r.Check("workstations", "configs", "describe", ws.ConfigName,
+		"--cluster", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project)
 
 	if configExists {
 		logStep("Config exists — updating image, env, service account, and scopes...")
 		updateArgs := []string{
-			"workstations", "configs", "update", cfg.ConfigName,
-			"--cluster", cfg.ClusterName, "--region", cfg.Region, "--project", cfg.ProjectID,
+			"workstations", "configs", "update", ws.ConfigName,
+			"--cluster", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project,
 			"--container-custom-image=" + imageURI,
 			"--service-account=" + serviceAccountEmail,
 			"--service-account-scopes=https://www.googleapis.com/auth/cloud-platform",
 			"--container-env=" + containerEnv,
 		}
-		if cfg.AutoSleepHours != nil {
-			updateArgs = append(updateArgs, fmt.Sprintf("--idle-timeout=%d", *cfg.AutoSleepHours*3600))
+		if ws.AutoSleepHours != nil {
+			updateArgs = append(updateArgs, fmt.Sprintf("--idle-timeout=%d", *ws.AutoSleepHours*3600))
 		}
-		if cfg.AutoShutdownHours > 0 {
-			updateArgs = append(updateArgs, fmt.Sprintf("--running-timeout=%d", cfg.AutoShutdownHours*3600))
+		if ws.AutoShutdownHours > 0 {
+			updateArgs = append(updateArgs, fmt.Sprintf("--running-timeout=%d", ws.AutoShutdownHours*3600))
 		}
 		if err := r.Run(updateArgs...); err != nil {
 			return fmt.Errorf("updating workstations config: %w", err)
 		}
 	} else {
 		createArgs := []string{
-			"workstations", "configs", "create", cfg.ConfigName,
-			"--cluster", cfg.ClusterName, "--region", cfg.Region, "--project", cfg.ProjectID,
-			"--machine-type=" + cfg.MachineType,
-			"--pd-disk-size=" + strconv.Itoa(cfg.DiskSizeGB),
+			"workstations", "configs", "create", ws.ConfigName,
+			"--cluster", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project,
+			"--machine-type=" + ws.MachineType,
+			"--pd-disk-size=" + strconv.Itoa(ws.DiskSizeGB),
 			"--pd-disk-type=pd-balanced",
 			"--container-custom-image=" + imageURI,
 			"--service-account=" + serviceAccountEmail,
 			"--service-account-scopes=https://www.googleapis.com/auth/cloud-platform",
 			"--container-env=" + containerEnv,
 		}
-		if cfg.AutoSleepHours != nil {
-			createArgs = append(createArgs, fmt.Sprintf("--idle-timeout=%d", *cfg.AutoSleepHours*3600))
+		if ws.AutoSleepHours != nil {
+			createArgs = append(createArgs, fmt.Sprintf("--idle-timeout=%d", *ws.AutoSleepHours*3600))
 		}
-		if cfg.AutoShutdownHours > 0 {
-			createArgs = append(createArgs, fmt.Sprintf("--running-timeout=%d", cfg.AutoShutdownHours*3600))
+		if ws.AutoShutdownHours > 0 {
+			createArgs = append(createArgs, fmt.Sprintf("--running-timeout=%d", ws.AutoShutdownHours*3600))
 		}
 		if err := r.Run(createArgs...); err != nil {
 			return fmt.Errorf("creating workstations config: %w", err)
@@ -336,7 +338,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 8 — Resolve a unique workstation name and create it.
-	existing, err := client.List(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName)
+	existing, err := client.List(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName)
 	if err != nil {
 		return fmt.Errorf("listing existing workstations: %w", err)
 	}
@@ -361,26 +363,26 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	logStep(fmt.Sprintf("Creating workstation '%s'...", workstationName))
 	if err := r.Run("workstations", "create", workstationName,
-		"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
-		"--region", cfg.Region, "--project", cfg.ProjectID); err != nil {
+		"--cluster", ws.ClusterName, "--config", ws.ConfigName,
+		"--region", ws.Region, "--project", cfg.Gcloud.Project); err != nil {
 		return fmt.Errorf("creating workstation: %w", err)
 	}
 
-	wsInfo, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, workstationName)
+	wsInfo, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, workstationName)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
 	}
 	if wsInfo.State != "STATE_RUNNING" && wsInfo.State != "STATE_STARTING" {
 		logStep("Starting workstation...")
 		if err := r.Run("workstations", "start", workstationName,
-			"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
-			"--region", cfg.Region, "--project", cfg.ProjectID); err != nil {
+			"--cluster", ws.ClusterName, "--config", ws.ConfigName,
+			"--region", ws.Region, "--project", cfg.Gcloud.Project); err != nil {
 			return fmt.Errorf("starting workstation: %w", err)
 		}
 	}
 
 	// Step 9 — Print access info
-	info, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, workstationName)
+	info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, workstationName)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
 	}
@@ -404,9 +406,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 `,
 		info.Host,
 		workstationName,
-		cfg.ClusterName,
-		cfg.ConfigName,
-		cfg.Region,
+		ws.ClusterName,
+		ws.ConfigName,
+		ws.Region,
 		workstationName,
 		workstationName,
 	)
