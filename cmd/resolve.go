@@ -12,7 +12,7 @@ import (
 )
 
 // resolveWorkstationName returns the workstation name to target.
-// If name is non-empty, it is used directly. Otherwise, the default (<project_id>-<username>)
+// If name is non-empty, it is used directly. Otherwise, the default (<repo-slug>-<username>)
 // is tried; if not found and exactly one workstation exists, that one is used; if multiple
 // exist, the user is prompted to choose.
 func resolveWorkstationName(cfg *config.Config, client *gcloud.Client, name string) (string, error) {

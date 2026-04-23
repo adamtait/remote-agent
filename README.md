@@ -28,7 +28,7 @@ The `--container-env` block now contains only pointers
 
 ## Files
 
-- `main.go` / `cmd/` / `internal/` — `ws` CLI (idempotent provisioning)
+- `main.go` / `cmd/` / `internal/` — `ws` CLI
 - `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
 - `.ws/Dockerfile` — custom image: code-oss + Node 20 + gh + Claude Code
 - `.ws/entrypoint.sh` — runs at container boot; sets up git, clones the repo
@@ -76,10 +76,6 @@ slow part). You'll be prompted to choose OAuth token vs API key, then for
 the value and your GitHub PAT — these go straight into Secret Manager, not
 your shell history.
 
-Subsequent runs skip everything that already exists and finish in under a
-minute. Re-run after rotating a secret to pick up the new value in the
-workstation config.
-
 ## Day-to-day
 
 ```bash
@@ -92,7 +88,8 @@ ws delete         # delete the workstation
 ```
 
 Each targeted command accepts an optional name argument; otherwise the
-default `<project_id>-<username>` workstation is used.
+default `<repo-slug>-<username>` workstation is used (`<repo-slug>` is
+parsed from `github_repo_url`).
 
 Open the printed browser IDE URL, launch a terminal, `cd ~/workspace`, run
 `claude`.
@@ -106,24 +103,23 @@ All rotations happen via Secret Manager — no need to re-run `ws create`.
 echo -n 'sk-ant-newvalue' | gcloud secrets versions add anthropic-api-key \
     --data-file=- --project=$PROJECT_ID
 
-# Claude OAuth token — picked up on next `workstations start`
+# Claude OAuth token — picked up on next container boot
 echo -n 'sk-ant-oat01-newvalue' | gcloud secrets versions add claude-code-oauth-token \
     --data-file=- --project=$PROJECT_ID
-ws stop
-ws create    # starts the workstation back up
+ws stop      # next `ws connect` will auto-start and pick up the new token
 
 # GitHub PAT — picked up on next git operation, no restart
 echo -n 'ghp_newvalue' | gcloud secrets versions add github-pat \
     --data-file=- --project=$PROJECT_ID
 ```
 
-To switch Claude auth modes (OAuth ↔ API key), delete the old secret first
-and re-run `ws create`:
+To switch Claude auth modes (OAuth ↔ API key), delete the old secret and
+recreate the workstation:
 
 ```bash
 gcloud secrets delete anthropic-api-key --project=$PROJECT_ID
-ws create                 # will prompt for OAuth token
-ws stop && ws create     # restart so the container picks up the new mode
+ws delete                 # tear down the existing workstation
+ws create                 # will prompt for OAuth token and create fresh
 ```
 
 ## How auth actually works at runtime
