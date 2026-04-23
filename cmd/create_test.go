@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/adamtait/remote-agent/internal/config"
 )
 
 // Preflight tests exercise ensureBuildAssets, which we expose in cmd to
@@ -126,3 +128,79 @@ func equalStringSlices(a, b []string) bool {
 // This compile-time check catches breaks if we later extract an interface.
 var _ io.Writer = (*bytes.Buffer)(nil)
 var _ error = errors.New("sentinel")
+
+func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
+	sleep := 2
+	cfg := &config.Config{
+		ProjectID: "p", GithubRepoURL: "https://example.com/r.git",
+		GitUserName: "Alice", GitUserEmail: "a@x.com",
+		Region: "us-central1", MachineType: "e2-standard-4",
+		DiskSizeGB: 50, ClusterName: "c", ConfigName: "cf",
+		ServiceAccountName: "sa", ImageName: "i", ImageTag: "t", RepoName: "r",
+		AutoSleepHours: &sleep, AutoShutdownHours: 12,
+		Secrets: map[string]config.SecretEntry{
+			"claude_oauth": {SecretName: "claude-auth", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
+			"github_pat":   {SecretName: "github-pat", EnvVar: "GH_TOKEN"},
+			"my_extra":     {SecretName: "ex", EnvVar: "MY_EXTRA"},
+		},
+		Env: map[string]string{"STATIC_KEY": "abc"},
+	}
+	got := buildContainerEnv(cfg)
+	m := map[string]string{}
+	for _, p := range strings.Split(got, ",") {
+		kv := strings.SplitN(p, "=", 2)
+		if len(kv) == 2 {
+			m[kv[0]] = kv[1]
+		}
+	}
+	must := map[string]string{
+		"GCP_PROJECT_ID":              "p",
+		"GITHUB_REPO_URL":             "https://example.com/r.git",
+		"GIT_USER_NAME":               "Alice",
+		"GIT_USER_EMAIL":              "a@x.com",
+		"WS_SECRET_CLAUDE_OAUTH_NAME": "claude-auth",
+		"WS_SECRET_CLAUDE_OAUTH_VAR":  "CLAUDE_CODE_OAUTH_TOKEN",
+		"WS_SECRET_GITHUB_PAT_NAME":   "github-pat",
+		"WS_SECRET_GITHUB_PAT_VAR":    "GH_TOKEN",
+		"WS_SECRET_MY_EXTRA_NAME":     "ex",
+		"WS_SECRET_MY_EXTRA_VAR":      "MY_EXTRA",
+		"STATIC_KEY":                  "abc",
+	}
+	for k, v := range must {
+		if m[k] != v {
+			t.Errorf("container env %s: got %q, want %q (full string: %q)", k, m[k], v, got)
+		}
+	}
+	parts := strings.Split(m["WS_SECRETS"], "|")
+	wantSet := map[string]bool{"claude_oauth": true, "github_pat": true, "my_extra": true}
+	for _, p := range parts {
+		if !wantSet[p] {
+			t.Errorf("unexpected WS_SECRETS entry: %q", p)
+		}
+		delete(wantSet, p)
+	}
+	if len(wantSet) != 0 {
+		t.Errorf("missing WS_SECRETS entries: %v", wantSet)
+	}
+	for _, banned := range []string{"CLAUDE_AUTH_MODE=", "CLAUDE_AUTH_SECRET_NAME=", "GITHUB_PAT_SECRET_NAME="} {
+		if strings.Contains(got, banned) {
+			t.Errorf("container env still contains old key %q: %q", banned, got)
+		}
+	}
+}
+
+func TestBuildContainerEnv_OAuthAccountSiblingEmitted(t *testing.T) {
+	cfg := &config.Config{
+		Secrets: map[string]config.SecretEntry{
+			"claude_oauth": {
+				SecretName:             "claude-auth",
+				EnvVar:                 "CLAUDE_CODE_OAUTH_TOKEN",
+				OAuthAccountSecretName: "claude-oauth-account",
+			},
+		},
+	}
+	got := buildContainerEnv(cfg)
+	if !strings.Contains(got, "WS_SECRET_CLAUDE_OAUTH_OAUTH_ACCOUNT_SECRET_NAME=claude-oauth-account") {
+		t.Errorf("oauth_account_secret_name not emitted: %q", got)
+	}
+}
