@@ -223,9 +223,12 @@ No new runtime dependencies.
 - **Single merged secret** — `{token, accountUuid, emailAddress,
   organizationUuid}` in one JSON blob. One fetch, guaranteed coupling.
 - **Extend bypass to `apikey` mode** if the wizard also fires there.
-- **`ANTHROPIC_API_KEY` guardrail** — `/etc/profile.d/claude-auth.sh`
-  appends `unset ANTHROPIC_API_KEY` in oauth mode so stray exports can't
-  silently switch billing.
+- **`ANTHROPIC_API_KEY` guardrail** — extend `00-ws-wait.sh` (or a sibling
+  `/etc/profile.d/*.sh`) to `unset ANTHROPIC_API_KEY` in oauth mode so
+  stray exports can't silently switch billing. (The original
+  `/etc/profile.d/claude-auth.sh` mechanism referenced here was superseded
+  by the sentinel-gated `/run/ws/env` delivery in the
+  2026-04-23 env-loading-race fix.)
 - **Version-diff skip** — compare installed version to stored
   `lastOnboardingVersion`; skip rewrite if equal. Minor speedup.
 - **Boot-time `/status` audit** — log auth method on every boot so fleet

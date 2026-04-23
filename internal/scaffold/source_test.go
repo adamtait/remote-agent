@@ -100,3 +100,23 @@ func TestResolveSource_UserTemplateUnreadable_Propagates(t *testing.T) {
 		t.Fatal("expected permission error, got nil")
 	}
 }
+
+func TestResolveSource_ProfileDWaitAsset(t *testing.T) {
+	home := t.TempDir()
+	body, label, err := ResolveSource(home, "profile.d/00-ws-wait.sh")
+	if err != nil {
+		t.Fatalf("ResolveSource: %v", err)
+	}
+	if label != "embedded-default" {
+		t.Errorf("label = %q, want embedded-default", label)
+	}
+	if len(body) == 0 {
+		t.Errorf("expected non-empty embedded body for profile.d/00-ws-wait.sh")
+	}
+	if !bytes.Contains(body, []byte("/run/ws/ready")) {
+		t.Errorf("expected body to reference sentinel path /run/ws/ready")
+	}
+	if !bytes.Contains(body, []byte("/run/ws/env")) {
+		t.Errorf("expected body to source /run/ws/env")
+	}
+}
