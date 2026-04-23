@@ -280,21 +280,39 @@ if ! printf 'protocol=https\nhost=github.com\n\n' \
     log "WARNING: git credential helper returned no password. Check SA permissions."
 fi
 
-# Export GH_TOKEN so the gh CLI authenticates without a separate `gh auth login`.
-# Uses the same PAT already stored in Secret Manager.
-log "Fetching GH_TOKEN from Secret Manager..."
-GH_PAT=$(gcloud secrets versions access latest \
-    --secret="${GITHUB_PAT_SECRET_NAME}" \
-    --project="${GCP_PROJECT_ID}" 2>/dev/null || true)
+# =============================================================================
+# gh CLI wrapper — fetches the PAT per-invocation from Secret Manager and
+# forwards to the real /usr/bin/gh. PATH precedence (/usr/local/bin before
+# /usr/bin) means every `gh` call goes through this wrapper. The PAT never
+# persists on disk; rotations are picked up on the next invocation.
+#
+# Replaces the prior GH_TOKEN-in-/etc/environment approach, which lost a
+# boot-order race against code-oss (terminals spawned from the IDE never
+# inherited the env var) and exposed the PAT in a 0644 file.
+# =============================================================================
+GH_WRAPPER_PATH="/usr/local/bin/gh"
+log "Installing gh wrapper → ${GH_WRAPPER_PATH}"
 
+# One-time cleanup: remove any GH_TOKEN= line written by a prior install.
 sed -i '/^GH_TOKEN=/d' /etc/environment
-if [[ -n "${GH_PAT}" ]]; then
-    echo "GH_TOKEN=${GH_PAT}" >> /etc/environment
-    log "GH_TOKEN written to /etc/environment."
-else
-    log "WARNING: GH_TOKEN fetch failed. Check SA permissions."
+
+cat > "${GH_WRAPPER_PATH}" <<EOF
+#!/bin/bash
+# Auto-generated at workstation boot. Do not edit.
+# Fetches the current GitHub PAT from Secret Manager and forwards to the
+# real gh CLI. Token never persists; rotations are picked up on the next
+# invocation.
+GH_TOKEN=\$(gcloud secrets versions access latest \\
+    --secret='${GITHUB_PAT_SECRET_NAME}' \\
+    --project='${GCP_PROJECT_ID}' 2>/dev/null) || true
+exec env GH_TOKEN="\${GH_TOKEN}" /usr/bin/gh "\$@"
+EOF
+chmod 0755 "${GH_WRAPPER_PATH}"
+
+# Sanity check: the wrapper should authenticate against github.com.
+if ! "${GH_WRAPPER_PATH}" auth status >/dev/null 2>&1; then
+    log "WARNING: gh wrapper failed auth status. Check SA permissions on ${GITHUB_PAT_SECRET_NAME}."
 fi
-unset GH_PAT
 
 # =============================================================================
 # First-boot-ish setup below this line. Each step has its own idempotence
