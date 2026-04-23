@@ -52,6 +52,9 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 		cfg.ProjectConfigPath = projectCfgPath
+		if err := config.Validate(cfg); err != nil {
+			return err
+		}
 		runner = gcloud.RealRunner{}
 		client = gcloud.NewClient(runner)
 		return nil
