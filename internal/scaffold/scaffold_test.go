@@ -469,4 +469,15 @@ func TestInteractiveScaffold_AdvancedUncommentsOptionalProjectKeys(t *testing.T)
 			t.Errorf("project config missing uncommented %q\ngot:\n%s", want, proj)
 		}
 	}
+	// auto_sleep_hours / auto_shutdown_hours are never prompted, even with
+	// --advanced — they must stay commented.
+	for _, want := range []string{"# auto_sleep_hours:", "# auto_shutdown_hours:"} {
+		if !strings.Contains(string(proj), want) {
+			t.Errorf("project config missing commented %q in --advanced run\ngot:\n%s", want, proj)
+		}
+	}
+	global, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
+	if !strings.Contains(string(global), `git_user_name:  "Alice"`) {
+		t.Errorf("global config missing git_user_name in --advanced run:\n%s", global)
+	}
 }
