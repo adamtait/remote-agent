@@ -12,7 +12,7 @@ import (
 )
 
 // StageProfileD merges project-level and user-global profile.d scripts into
-// <cwd>/.ws/profile.d.staged/. User-global wins on filename collision.
+// <cwd>/.ws/profile.d.staged/. Project-level wins on filename collision.
 //
 // Returns the stage path, a cleanup func the caller MUST invoke (typically
 // via defer) to remove the staging dir, and any error.
@@ -33,9 +33,11 @@ func StageProfileD(cwd, home string) (string, func(), error) {
 
 	cleanup := func() { _ = os.RemoveAll(stage) }
 
+	// Copy user-global first, then project-level — the second pass
+	// overwrites collisions, so project wins.
 	sources := []string{
-		filepath.Join(cwd, ".ws", "profile.d"),
 		filepath.Join(home, ".config", "ws", "profile.d"),
+		filepath.Join(cwd, ".ws", "profile.d"),
 	}
 	for _, src := range sources {
 		if err := copyShellScriptsInto(src, stage); err != nil {

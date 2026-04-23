@@ -38,7 +38,7 @@ The `--container-env` block now contains only pointers
   any additional `*.sh` file you drop here is baked into `/etc/profile.d/`.
 - `~/.config/ws/profile.d/*.sh` — same, but scoped to you across all
   projects. On filename collision with a project-level script the
-  user-global version wins.
+  project-level version wins.
 
 ## Prerequisites
 

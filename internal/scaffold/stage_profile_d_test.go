@@ -56,7 +56,7 @@ func TestStageProfileD_CopiesUserGlobalOnly(t *testing.T) {
 	}
 }
 
-func TestStageProfileD_UserGlobalOverridesProjectOnCollision(t *testing.T) {
+func TestStageProfileD_ProjectOverridesUserGlobalOnCollision(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	writeProfileScript(t, filepath.Join(cwd, ".ws", "profile.d"), "50-shared.sh", "echo project\n")
@@ -72,8 +72,8 @@ func TestStageProfileD_UserGlobalOverridesProjectOnCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading staged file: %v", err)
 	}
-	if string(data) != "echo user\n" {
-		t.Errorf("collision: staged = %q, want user-global %q", data, "echo user\n")
+	if string(data) != "echo project\n" {
+		t.Errorf("collision: staged = %q, want project %q", data, "echo project\n")
 	}
 }
 
