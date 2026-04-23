@@ -63,7 +63,7 @@ func TestInteractiveScaffold_WritesBothFiles(t *testing.T) {
 	}
 }
 
-func TestInteractiveScaffold_RefusesIfProjectFileExists(t *testing.T) {
+func TestInteractiveScaffold_ProjectExists_SkipsAndPreserves(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
@@ -72,21 +72,68 @@ func TestInteractiveScaffold_RefusesIfProjectFileExists(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("existing: true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	// Only global prompts should be consumed: region, git_user_name,
+	// git_user_email, then Proceed? confirm. Project prompts are skipped
+	// because .ws/config.yaml already exists.
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "us-central1", "Alice", "alice@example.com", "y",
+		"us-central1", "Alice", "alice@example.com", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
 	})
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if err != nil {
+		t.Fatalf("expected no error for pre-existing project config, got: %v", err)
 	}
-	// File unchanged
 	got, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
 	if string(got) != "existing: true\n" {
-		t.Errorf("file modified: %q", got)
+		t.Errorf("existing project file modified: %q", got)
+	}
+	// Assets still scaffolded.
+	if _, err := os.Stat(filepath.Join(cwd, ".ws", "Dockerfile")); err != nil {
+		t.Errorf("Dockerfile not scaffolded: %v", err)
+	}
+}
+
+func TestInteractiveScaffold_BothConfigsExist_IsNoOp(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("existing: project\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config", "ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config", "ws", "config.yaml"), []byte("existing: global\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Empty stdin: no prompts should be consumed because nothing will be written.
+	var stdout, stderr bytes.Buffer
+	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
+		Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr,
+		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
+	})
+	if err != nil {
+		t.Fatalf("expected no error when both configs exist, got: %v", err)
+	}
+	// Both config files preserved byte-for-byte.
+	proj, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
+	if string(proj) != "existing: project\n" {
+		t.Errorf("project config modified: %q", proj)
+	}
+	global, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
+	if string(global) != "existing: global\n" {
+		t.Errorf("global config modified: %q", global)
+	}
+	// Assets still scaffolded.
+	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+		if _, err := os.Stat(filepath.Join(cwd, ".ws", name)); err != nil {
+			t.Errorf("%s not scaffolded on re-run: %v", name, err)
+		}
 	}
 }
 
@@ -219,20 +266,20 @@ func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestInteractiveScaffold_GlobalExists_StillScaffoldsAssets(t *testing.T) {
+func TestInteractiveScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	// Pre-seed the global config so its WriteAtomic returns "already exists".
 	globalDir := filepath.Join(home, ".config", "ws")
 	if err := os.MkdirAll(globalDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), []byte("defaults:\n  region: us-east1\n"), 0644); err != nil {
+	original := []byte("defaults:\n  region: us-east1\n")
+	if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), original, 0644); err != nil {
 		t.Fatal(err)
 	}
-
+	// Only project prompts consumed: project_id, github_repo_url, confirm.
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "us-central1", "Alice", "alice@example.com", "y",
+		"my-proj-123", "https://github.com/a/b.git", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 
@@ -240,28 +287,29 @@ func TestInteractiveScaffold_GlobalExists_StillScaffoldsAssets(t *testing.T) {
 		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
 	})
-	// Global write is expected to fail without --force; the user's contract is
-	// that build assets still get scaffolded before that error surfaces.
-	if err == nil {
-		t.Fatal("expected error from existing global config, got nil")
+	if err != nil {
+		t.Fatalf("expected no error for pre-existing global config, got: %v", err)
 	}
-
+	got, _ := os.ReadFile(filepath.Join(globalDir, "config.yaml"))
+	if !bytes.Equal(got, original) {
+		t.Errorf("existing global config modified: %q", got)
+	}
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		p := filepath.Join(cwd, ".ws", name)
-		if _, statErr := os.Stat(p); statErr != nil {
-			t.Errorf("expected %s to be scaffolded despite global-config error: %v", p, statErr)
+		if _, statErr := os.Stat(filepath.Join(cwd, ".ws", name)); statErr != nil {
+			t.Errorf("%s not scaffolded: %v", name, statErr)
 		}
 	}
 }
 
-func TestTemplateScaffold_GlobalExists_StillScaffoldsAssets(t *testing.T) {
+func TestTemplateScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	globalDir := filepath.Join(home, ".config", "ws")
 	if err := os.MkdirAll(globalDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), []byte("defaults:\n  region: us-east1\n"), 0644); err != nil {
+	original := []byte("defaults:\n  region: us-east1\n")
+	if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), original, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,14 +317,16 @@ func TestTemplateScaffold_GlobalExists_StillScaffoldsAssets(t *testing.T) {
 	err := scaffold.TemplateScaffold(scaffold.TemplateOptions{
 		Stdout: &stdout, Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
 	})
-	if err == nil {
-		t.Fatal("expected error from existing global config, got nil")
+	if err != nil {
+		t.Fatalf("expected no error for pre-existing global config, got: %v", err)
 	}
-
+	got, _ := os.ReadFile(filepath.Join(globalDir, "config.yaml"))
+	if !bytes.Equal(got, original) {
+		t.Errorf("existing global config modified: %q", got)
+	}
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		p := filepath.Join(cwd, ".ws", name)
-		if _, statErr := os.Stat(p); statErr != nil {
-			t.Errorf("expected %s to be scaffolded despite global-config error: %v", p, statErr)
+		if _, statErr := os.Stat(filepath.Join(cwd, ".ws", name)); statErr != nil {
+			t.Errorf("%s not scaffolded: %v", name, statErr)
 		}
 	}
 }
