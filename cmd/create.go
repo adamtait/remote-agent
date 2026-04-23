@@ -153,6 +153,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	_, stageCleanup, err := scaffold.StageProfileD(cwd, home)
+	if err != nil {
+		return fmt.Errorf("staging profile.d: %w", err)
+	}
+	defer stageCleanup()
+
 	if err := r.Run("auth", "configure-docker", fmt.Sprintf("%s-docker.pkg.dev", cfg.Region), "--quiet"); err != nil {
 		return fmt.Errorf("configuring docker auth: %w", err)
 	}
