@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -182,10 +180,11 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("determining working directory: %w", err)
 	}
-	isTTY := term.IsTerminal(int(os.Stdin.Fd()))
-	if err := ensureBuildAssets(cwd, home, os.Stdin, os.Stdout, isTTY); err != nil {
+	cleanupAssets, err := materializeBuildAssets(cwd, home)
+	if err != nil {
 		return err
 	}
+	defer cleanupAssets()
 
 	_, stageCleanup, err := scaffold.StageProfileD(cwd, home)
 	if err != nil {
@@ -459,41 +458,50 @@ func (d dockerRunner) Run(args ...string) error {
 	return cmd.Run()
 }
 
-// ensureBuildAssets verifies .ws/Dockerfile and .ws/entrypoint.sh exist in
-// cwd. If missing and stdin is a TTY, prompts to scaffold. If missing and
-// non-TTY, returns an error directing the user to run 'ws setup scaffold'.
-func ensureBuildAssets(cwd, home string, stdin io.Reader, out io.Writer, isTTY bool) error {
-	missing := []string{}
+// materializeBuildAssets ensures .ws/Dockerfile and .ws/entrypoint.sh exist
+// for docker build. Missing files are resolved from user template or embedded
+// defaults and written to .ws/. The returned cleanup func removes only the
+// files that were written by this call; pre-existing files are untouched.
+func materializeBuildAssets(cwd, home string) (func(), error) {
+	wsDir := filepath.Join(cwd, ".ws")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		return func() {}, fmt.Errorf("creating .ws/: %w", err)
+	}
+	var written []string
 	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(cwd, ".ws", n)); err != nil {
-			missing = append(missing, n)
+		dest := filepath.Join(wsDir, n)
+		if _, statErr := os.Stat(dest); statErr == nil {
+			continue
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			for _, p := range written {
+				os.Remove(p)
+			}
+			return func() {}, fmt.Errorf("checking %s: %w", dest, statErr)
 		}
+		data, _, err := scaffold.ResolveSource(home, "", n)
+		if err != nil {
+			for _, p := range written {
+				os.Remove(p)
+			}
+			return func() {}, fmt.Errorf("resolving %s: %w", n, err)
+		}
+		var mode os.FileMode = 0644
+		if n == "entrypoint.sh" {
+			mode = 0755
+		}
+		if err := os.WriteFile(dest, data, mode); err != nil {
+			for _, p := range written {
+				os.Remove(p)
+			}
+			return func() {}, fmt.Errorf("writing %s: %w", dest, err)
+		}
+		written = append(written, dest)
 	}
-	if len(missing) == 0 {
-		return nil
-	}
-	if !isTTY {
-		return fmt.Errorf(".ws/ not initialized (missing: %s) — run 'ws setup scaffold' first",
-			strings.Join(missing, ", "))
-	}
-
-	reader := bufio.NewReader(stdin)
-	fmt.Fprintf(out, "No .ws/ assets (missing: %s). Scaffold defaults now? [Y/n] ",
-		strings.Join(missing, ", "))
-	line, err := reader.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("reading stdin: %w", err)
-	}
-	ans := strings.ToLower(strings.TrimSpace(line))
-	if ans == "n" || ans == "no" {
-		return fmt.Errorf(".ws/ not initialized — re-run 'ws create' after 'ws setup scaffold'")
-	}
-
-	_, err = scaffold.ScaffoldAssets(scaffold.ScaffoldAssetsOptions{
-		TargetDir: filepath.Join(cwd, ".ws"), Home: home, Stdout: out,
-		OnlyMissing: true,
-	})
-	return err
+	return func() {
+		for _, p := range written {
+			os.Remove(p)
+		}
+	}, nil
 }
 
 // dockerBuildArgs returns the buildx args used by `ws create`, centralized so
