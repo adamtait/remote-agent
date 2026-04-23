@@ -53,7 +53,7 @@ type Config struct {
 	ImageName           string
 	ImageTag            string
 	RepoName            string
-	WorkstationName     string // <project_id>-<username>, sanitized, ≤63 chars
+	WorkstationName     string // <repo-slug>-<username>, sanitized, ≤63 chars
 	ProjectConfigPath   string // absolute path to the .ws.yaml that was found
 	AutoSleepHours    *int // nil=GCP default, 0=never sleep, N=hours (1-24)
 	AutoShutdownHours int  // 0=GCP default, N=hours (1-168)

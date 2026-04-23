@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/adamtait/remote-agent/internal/scaffold"
 	"gopkg.in/yaml.v3"
 )
 
@@ -115,23 +116,37 @@ func Merge(project *ProjectConfig, global *GlobalConfig) (*Config, error) {
 	if username == "" {
 		username = "user"
 	}
-	cfg.WorkstationName = WorkstationName(cfg.ProjectID, username)
+
+	// Workstation name is derived from the repo slug so a single GCP project
+	// can host distinguishable workstations for multiple repos. Fall back to
+	// the project ID if the repo URL is unset or unparseable (e.g. when a
+	// command runs before .ws.yaml has been populated).
+	slug := scaffold.RepoSlugFromURL(scaffold.NormalizeGithubRepoURL(cfg.GithubRepoURL))
+	if slug == "" {
+		slug = cfg.ProjectID
+	}
+	if slug == "" {
+		slug = "ws"
+	}
+	cfg.WorkstationName = WorkstationName(slug, username)
 
 	return cfg, nil
 }
 
 var nonAlphanumHyphen = regexp.MustCompile(`[^a-z0-9]+`)
 
-// WorkstationName returns the default workstation name for a project/user pair.
-// Exported so it can be tested directly.
-func WorkstationName(projectID, username string) string {
+// WorkstationName returns the default workstation name for a repo/user pair.
+// Input is sanitized to lowercase alphanumerics and hyphens and truncated to
+// 63 characters (GCP Workstation name limit). Exported so it can be tested
+// directly.
+func WorkstationName(repoSlug, username string) string {
 	clean := func(s string) string {
 		s = strings.ToLower(s)
 		s = nonAlphanumHyphen.ReplaceAllString(s, "-")
 		s = strings.Trim(s, "-")
 		return s
 	}
-	name := clean(projectID) + "-" + clean(username)
+	name := clean(repoSlug) + "-" + clean(username)
 	if len(name) > 63 {
 		name = name[:63]
 	}

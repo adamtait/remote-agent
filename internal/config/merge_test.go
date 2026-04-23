@@ -97,18 +97,18 @@ func TestMerge_GlobalDefaultsForGitIdentity(t *testing.T) {
 
 func TestWorkstationName_Sanitized(t *testing.T) {
 	cases := []struct {
-		projectID  string
+		repoSlug   string
 		username   string
 		wantPrefix string
 	}{
-		{"my-project", "adam", "my-project-adam"},
-		{"My_Project!", "Adam.Tait", "my-project-adam-tait"},
-		{"proj", "user", "proj-user"},
+		{"remote-agent", "adam", "remote-agent-adam"},
+		{"My_Repo!", "Adam.Tait", "my-repo-adam-tait"},
+		{"repo", "user", "repo-user"},
 	}
 	for _, tc := range cases {
-		got := config.WorkstationName(tc.projectID, tc.username)
+		got := config.WorkstationName(tc.repoSlug, tc.username)
 		if !strings.HasPrefix(got, tc.wantPrefix) {
-			t.Errorf("WorkstationName(%q, %q) = %q, want prefix %q", tc.projectID, tc.username, got, tc.wantPrefix)
+			t.Errorf("WorkstationName(%q, %q) = %q, want prefix %q", tc.repoSlug, tc.username, got, tc.wantPrefix)
 		}
 		if len(got) > 63 {
 			t.Errorf("WorkstationName result too long: %d chars", len(got))
@@ -121,6 +121,51 @@ func TestWorkstationName_TruncatedAt63(t *testing.T) {
 	name := config.WorkstationName(long, long)
 	if len(name) > 63 {
 		t.Errorf("expected ≤63 chars, got %d", len(name))
+	}
+}
+
+func TestMerge_WorkstationNameUsesRepoSlug(t *testing.T) {
+	project := &config.ProjectConfig{
+		ProjectID:     "my-gcp-project",
+		GithubRepoURL: "https://github.com/adamtait/remote-agent.git",
+	}
+	global := &config.GlobalConfig{}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The repo slug, not the project ID, should drive the name.
+	if !strings.HasPrefix(cfg.WorkstationName, "remote-agent-") {
+		t.Errorf("WorkstationName = %q, want it to start with %q", cfg.WorkstationName, "remote-agent-")
+	}
+	if strings.HasPrefix(cfg.WorkstationName, "my-gcp-project-") {
+		t.Errorf("WorkstationName = %q, should not use project_id when repo URL is set", cfg.WorkstationName)
+	}
+}
+
+func TestMerge_WorkstationNameFallsBackToProjectID(t *testing.T) {
+	project := &config.ProjectConfig{ProjectID: "my-gcp-project"} // no GithubRepoURL
+	global := &config.GlobalConfig{}
+	cfg, err := config.Merge(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(cfg.WorkstationName, "my-gcp-project-") {
+		t.Errorf("WorkstationName = %q, want it to start with project_id %q", cfg.WorkstationName, "my-gcp-project-")
+	}
+}
+
+func TestMerge_WorkstationNameNormalizesSSHRepoURL(t *testing.T) {
+	project := &config.ProjectConfig{
+		ProjectID:     "p",
+		GithubRepoURL: "git@github.com:adamtait/remote-agent.git",
+	}
+	cfg, err := config.Merge(project, &config.GlobalConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(cfg.WorkstationName, "remote-agent-") {
+		t.Errorf("WorkstationName = %q, want it derived from SSH URL's repo slug", cfg.WorkstationName)
 	}
 }
 
