@@ -147,22 +147,15 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		}
 	}
 
-	// Scaffold prompt — only when project assets would apply.
+	// Always scaffold project build assets. Idempotent: skips files that
+	// already exist so re-running ws setup is safe; --force overwrites.
 	if writeProject {
-		answer, err := Prompt(stdin, opts.Stdout,
-			"Scaffold customizable .ws/Dockerfile and .ws/entrypoint.sh? [Y/n]",
-			"Y", nil)
-		if err != nil {
+		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
+			Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
+			Force:       opts.Force,
+			OnlyMissing: !opts.Force,
+		}); err != nil {
 			return err
-		}
-		ans := strings.ToLower(strings.TrimSpace(answer))
-		if ans != "n" && ans != "no" {
-			if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
-				Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
-				Force: opts.Force,
-			}); err != nil {
-				return err
-			}
 		}
 	}
 

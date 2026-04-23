@@ -203,7 +203,7 @@ func TestSetupTemplate_ProjectOnly_WritesAssets(t *testing.T) {
 	}
 }
 
-func TestSetupInteractive_ScaffoldPromptYes(t *testing.T) {
+func TestSetupInteractive_AlwaysScaffoldsAssets(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -215,16 +215,15 @@ func TestSetupInteractive_ScaffoldPromptYes(t *testing.T) {
 
 	// Pipe pre-canned answers for every prompt in order:
 	//   project_id, github_repo_url, region, git_user_name, git_user_email,
-	//   Proceed? [Y/n], Scaffold? [Y/n]
+	//   Proceed? [Y/n]
 	input := strings.Join([]string{
-		"my-project",                 // project_id
-		"https://github.com/a/b.git", // github_repo_url
-		"us-central1",                // region (global defaults)
-		"Alice",                      // git_user_name
-		"a@example.com",              // git_user_email
-		"Y",                          // Proceed?
-		"Y",                          // Scaffold .ws/ assets?
-		"",                           // trailing newline
+		"my-project",
+		"https://github.com/a/b.git",
+		"us-central1",
+		"Alice",
+		"a@example.com",
+		"Y", // Proceed?
+		"",  // trailing newline
 	}, "\n")
 	var stdin bytes.Buffer
 	stdin.WriteString(input)
@@ -234,14 +233,16 @@ func TestSetupInteractive_ScaffoldPromptYes(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d. stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+	for _, name := range []string{"config.yaml", "Dockerfile", "entrypoint.sh"} {
 		if _, err := os.Stat(filepath.Join(cwd, ".ws", name)); err != nil {
-			t.Errorf("missing %s: %v", name, err)
+			t.Errorf("missing .ws/%s: %v", name, err)
 		}
 	}
 }
 
-func TestSetupInteractive_ScaffoldPromptNo(t *testing.T) {
+func TestSetupInteractive_RerunSkipsExistingAssets(t *testing.T) {
+	// Re-running ws setup must not error on pre-existing scaffold assets;
+	// OnlyMissing semantics make the scaffold step idempotent.
 	cwd := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -251,30 +252,31 @@ func TestSetupInteractive_ScaffoldPromptNo(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
+	// Pre-create a customized Dockerfile that must survive setup.
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	custom := []byte("# user customization\n")
+	if err := os.WriteFile(filepath.Join(cwd, ".ws", "Dockerfile"), custom, 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	input := strings.Join([]string{
-		"my-project",
-		"https://github.com/a/b.git",
-		"us-central1",
-		"Alice",
-		"a@example.com",
-		"Y", // Proceed
-		"n", // Scaffold? NO
-		"",
+		"my-project", "https://github.com/a/b.git", "us-central1",
+		"Alice", "a@example.com", "Y", "",
 	}, "\n")
 	var stdin bytes.Buffer
 	stdin.WriteString(input)
-
 	var stdout, stderr bytes.Buffer
 	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup"})
 	if code != 0 {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
-	// Config must exist…
-	if _, err := os.Stat(filepath.Join(cwd, ".ws", "config.yaml")); err != nil {
-		t.Errorf("config.yaml should exist: %v", err)
+	got, _ := os.ReadFile(filepath.Join(cwd, ".ws", "Dockerfile"))
+	if string(got) != string(custom) {
+		t.Errorf("custom Dockerfile was overwritten:\n%s", got)
 	}
-	// …but assets must NOT.
-	if _, err := os.Stat(filepath.Join(cwd, ".ws", "Dockerfile")); !os.IsNotExist(err) {
-		t.Error("Dockerfile should not be scaffolded when user answered 'n'")
+	if _, err := os.Stat(filepath.Join(cwd, ".ws", "entrypoint.sh")); err != nil {
+		t.Errorf("entrypoint.sh should still be scaffolded: %v", err)
 	}
 }
