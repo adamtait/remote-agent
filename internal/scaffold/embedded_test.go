@@ -72,3 +72,12 @@ func TestEmbedded_EntrypointSentinelIsLast(t *testing.T) {
 		t.Errorf("sentinel touch (byte %d) must precede 'Entrypoint complete' log (byte %d)", idxTouch, idxDone)
 	}
 }
+
+func TestEmbedded_DockerfileCopiesStagedProfileD(t *testing.T) {
+	if !bytes.Contains(embeddedDockerfile, []byte(".ws/profile.d.staged/")) {
+		t.Errorf("Dockerfile should COPY .ws/profile.d.staged/ into /etc/profile.d/")
+	}
+	if !bytes.Contains(embeddedDockerfile, []byte("/etc/profile.d/")) {
+		t.Errorf("Dockerfile should target /etc/profile.d/")
+	}
+}
