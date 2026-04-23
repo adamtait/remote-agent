@@ -66,13 +66,19 @@ func TestResolveSource_ProjectTakesPrecedenceOverUser(t *testing.T) {
 	}
 }
 
-func TestResolveSource_MissingBoth_ReturnsError(t *testing.T) {
+func TestResolveSource_MissingBoth_FallsBackToEmbedded(t *testing.T) {
 	home := t.TempDir()
 	projectRoot := t.TempDir()
 
-	_, _, err := ResolveSource(home, projectRoot, "Dockerfile")
-	if err == nil {
-		t.Fatal("expected error when both project and user template missing")
+	body, label, err := ResolveSource(home, projectRoot, "Dockerfile")
+	if err != nil {
+		t.Fatalf("expected embedded fallback, got error: %v", err)
+	}
+	if label != "embedded-default" {
+		t.Errorf("label = %q, want %q", label, "embedded-default")
+	}
+	if len(body) == 0 {
+		t.Error("expected non-empty embedded body")
 	}
 }
 
