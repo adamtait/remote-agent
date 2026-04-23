@@ -1,4 +1,3 @@
-// ws/internal/scaffold/templates_test.go
 package scaffold_test
 
 import (
@@ -8,235 +7,109 @@ import (
 	"github.com/adamtait/remote-agent/internal/scaffold"
 )
 
-func TestRenderProjectTemplate_WithProbes(t *testing.T) {
-	pv := scaffold.ProbedValues{
-		ProjectID:     "my-proj",
-		GithubRepoURL: "https://github.com/a/b.git",
-	}
-	got := scaffold.RenderProjectTemplate(pv, scaffold.UserProjectValues{})
-
-	for _, want := range []string{
-		"project_id: my-proj",
-		"github_repo_url: https://github.com/a/b.git",
-		"# region:",
-		"# cluster_name:",
-		"# machine_type:",
-		"# disk_size_gb:",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("RenderProjectTemplate missing %q\ngot:\n%s", want, got)
-		}
-	}
-}
-
-func TestRenderProjectTemplate_EmptyProbesShowPlaceholder(t *testing.T) {
-	got := scaffold.RenderProjectTemplate(scaffold.ProbedValues{}, scaffold.UserProjectValues{})
-	if !strings.Contains(got, "(none — set manually)") {
-		t.Errorf("RenderProjectTemplate missing placeholder\ngot:\n%s", got)
-	}
-}
-
-func TestRenderGlobalTemplate_WithProbes(t *testing.T) {
-	pv := scaffold.ProbedValues{
-		Region:       "us-central1",
+func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
+	uv := scaffold.UserValues{
 		GitUserName:  "Alice",
 		GitUserEmail: "alice@example.com",
+		Region:       "us-central1", MachineType: "e2-standard-4", DiskSizeGB: 50,
+		ClusterName: "claude-dev-cluster", ConfigName: "claude-dev-config",
+		ServiceAccountName: "claude-workstation-sa",
+		ImageName:          "claude-code-workstation",
+		ImageTag:           "latest",
+		RepoName:           "claude-workstation-images",
+		AutoSleepHours:     2,
+		AutoShutdownHours:  12,
+		ClaudeAuthMode:     scaffold.ClaudeAuthOAuth,
 	}
-	got := scaffold.RenderGlobalTemplate(pv, scaffold.UserGlobalValues{})
-
+	got := scaffold.RenderUserConfig(uv)
 	for _, want := range []string{
-		"defaults:",
-		"# region: us-central1",
-		"# git_user_name:",
-		"Alice",
-		"# git_user_email:",
-		"alice@example.com",
-		"# projects:",
+		`git:`,
+		`  user_name: "Alice"`,
+		`  user_email: "alice@example.com"`,
+		`workstation:`,
+		`  region: us-central1`,
+		`  machine_type: e2-standard-4`,
+		`  disk_size_gb: 50`,
+		`  cluster_name: claude-dev-cluster`,
+		`  config_name: claude-dev-config`,
+		`  service_account_name: claude-workstation-sa`,
+		`  image_name: claude-code-workstation`,
+		`  image_tag: latest`,
+		`  repo_name: claude-workstation-images`,
+		`  auto_sleep_hours: 2`,
+		`  auto_shutdown_hours: 12`,
+		`secrets:`,
+		`  claude_oauth:`,
+		`    secret_name: claude-code-oauth-token`,
+		`    env_var: CLAUDE_CODE_OAUTH_TOKEN`,
+		`  github_pat:`,
+		`    secret_name: github-pat`,
+		`    env_var: GH_TOKEN`,
+		`env: {}`,
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("RenderGlobalTemplate missing %q\ngot:\n%s", want, got)
+			t.Errorf("user config missing %q\n---\n%s", want, got)
 		}
 	}
 }
 
-func TestRenderGlobalTemplate_NoProbesStillRenders(t *testing.T) {
-	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{}, scaffold.UserGlobalValues{})
-	if !strings.Contains(got, "defaults:") {
-		t.Errorf("RenderGlobalTemplate missing 'defaults:'\ngot:\n%s", got)
+func TestRenderUserConfig_APIKeyModeSelectsApiKeyEntry(t *testing.T) {
+	uv := scaffold.UserValues{ClaudeAuthMode: scaffold.ClaudeAuthAPIKey}
+	got := scaffold.RenderUserConfig(uv)
+	if !strings.Contains(got, "claude_apikey:") {
+		t.Errorf("apikey mode did not write claude_apikey entry:\n%s", got)
+	}
+	if strings.Contains(got, "claude_oauth:") {
+		t.Errorf("apikey mode also wrote claude_oauth entry:\n%s", got)
+	}
+	if !strings.Contains(got, "env_var: ANTHROPIC_API_KEY") {
+		t.Errorf("apikey env_var should be ANTHROPIC_API_KEY:\n%s", got)
 	}
 }
 
-func TestRenderGlobalTemplate_EmptyProbesDoNotMangleEnDash(t *testing.T) {
-	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{}, scaffold.UserGlobalValues{})
-	// The placeholder sentinel uses a literal en-dash (U+2014). Ensure we
-	// didn't %q-escape it into \u2014.
-	if strings.Contains(got, `\u2014`) {
-		t.Errorf("template contains escaped en-dash \\u2014:\n%s", got)
-	}
-	if !strings.Contains(got, "(none — set manually)") {
-		t.Errorf("template missing literal placeholder with en-dash:\n%s", got)
-	}
-}
-
-func TestRenderGlobalTemplate_QuotesGitIdentity(t *testing.T) {
-	pv := scaffold.ProbedValues{GitUserName: "Alice Example"}
-	got := scaffold.RenderGlobalTemplate(pv, scaffold.UserGlobalValues{})
-	if !strings.Contains(got, `"Alice Example"`) {
-		t.Errorf("expected quoted git_user_name, got:\n%s", got)
-	}
-}
-
-func TestRenderProjectTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
-	got := scaffold.RenderProjectTemplate(scaffold.ProbedValues{}, scaffold.UserProjectValues{})
+func TestRenderUserConfig_IncludesSecretsDocumentationComments(t *testing.T) {
+	got := scaffold.RenderUserConfig(scaffold.UserValues{ClaudeAuthMode: scaffold.ClaudeAuthOAuth})
 	for _, want := range []string{
-		"# auto_sleep_hours:",
-		"# auto_shutdown_hours:",
-		"0=never sleep",
-		"1–24",
+		"claude_oauth  → fetches at boot",
+		"claude_apikey → installs Claude",
+		"github_pat    → installs git",
+		"Exactly one of {claude_oauth, claude_apikey}",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("RenderProjectTemplate missing %q\ngot:\n%s", want, got)
+			t.Errorf("user config missing documentation comment %q", want)
 		}
 	}
 }
 
-func TestRenderGlobalTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
-	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{}, scaffold.UserGlobalValues{})
+func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T) {
+	pv := scaffold.ProjectValues{
+		ProjectID:     "my-proj",
+		GithubRepoURL: "https://example.com/r.git",
+	}
+	got := scaffold.RenderProjectConfig(pv)
 	for _, want := range []string{
-		"# auto_sleep_hours:",
-		"# auto_shutdown_hours:",
-		"0=never sleep",
-		"1–168",
+		`project:`,
+		`  id: my-proj`,
+		`  github_repo_url: https://example.com/r.git`,
+		`# workstation:`,
+		`#   machine_type: e2-standard-8`,
+		`# secrets:`,
+		`# env:`,
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("RenderGlobalTemplate missing %q\ngot:\n%s", want, got)
+			t.Errorf("project config missing %q\n---\n%s", want, got)
 		}
 	}
 }
 
-func TestRenderProjectTemplate_UserValuesRenderUncommented(t *testing.T) {
-	pv := scaffold.ProbedValues{ProjectID: "probed-proj"}
-	uv := scaffold.UserProjectValues{
-		ProjectID:     "chosen-proj",
-		GithubRepoURL: "https://github.com/a/b.git",
-		Region:        "us-east1",
-		ClusterName:   "my-cluster",
-		ConfigName:    "my-config",
-		MachineType:   "e2-standard-8",
-		DiskSizeGB:    "100",
-	}
-	got := scaffold.RenderProjectTemplate(pv, uv)
-
-	// User-provided values: uncommented.
-	for _, want := range []string{
-		"project_id: chosen-proj",
-		"github_repo_url: https://github.com/a/b.git",
-		"region: us-east1",
-		"cluster_name: my-cluster",
-		"config_name: my-config",
-		"machine_type: e2-standard-8",
-		"disk_size_gb: 100",
-	} {
+func TestRenderProjectConfig_ZeroValuesStillShowCommentedExamples(t *testing.T) {
+	got := scaffold.RenderProjectConfig(scaffold.ProjectValues{})
+	for _, want := range []string{`# workstation:`, `# secrets:`, `# env:`} {
 		if !strings.Contains(got, want) {
-			t.Errorf("missing uncommented %q\ngot:\n%s", want, got)
+			t.Errorf("missing commented example %q", want)
 		}
 	}
-	// region line must preserve its trailing inline comment.
-	if !strings.Contains(got, "region: us-east1  # optional; falls back to global default, then us-central1") {
-		t.Errorf("region line missing trailing comment:\n%s", got)
-	}
-	// Probed hint still surfaces even when user overrides.
-	if !strings.Contains(got, "probed: probed-proj") {
-		t.Errorf("probed hint lost:\n%s", got)
-	}
-}
-
-func TestRenderProjectTemplate_EmptyUserValuesStayCommented(t *testing.T) {
-	got := scaffold.RenderProjectTemplate(
-		scaffold.ProbedValues{},
-		scaffold.UserProjectValues{
-			ProjectID:     "chosen-proj",
-			GithubRepoURL: "https://github.com/a/b.git",
-		},
-	)
-	for _, want := range []string{
-		"# region:",
-		"# cluster_name:",
-		"# config_name:",
-		"# machine_type:",
-		"# disk_size_gb:",
-		"# auto_sleep_hours:",
-		"# auto_shutdown_hours:",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing commented default %q\ngot:\n%s", want, got)
-		}
-	}
-	// Negative check: no uncommented versions of these keys.
-	for _, unwant := range []string{
-		"\nregion:",
-		"\ncluster_name:",
-		"\nconfig_name:",
-		"\nmachine_type:",
-		"\ndisk_size_gb:",
-	} {
-		if strings.Contains(got, unwant) {
-			t.Errorf("unexpected uncommented key %q\ngot:\n%s", unwant, got)
-		}
-	}
-}
-
-func TestRenderGlobalTemplate_UserValuesRenderUncommented(t *testing.T) {
-	uv := scaffold.UserGlobalValues{
-		Region:       "us-east1",
-		GitUserName:  "Alice Example",
-		GitUserEmail: "alice@example.com",
-	}
-	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{}, uv)
-
-	for _, want := range []string{
-		"  region: us-east1",
-		`  git_user_name:  "Alice Example"`,
-		`  git_user_email: "alice@example.com"`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing uncommented %q\ngot:\n%s", want, got)
-		}
-	}
-	// Optional-but-not-prompted keys stay commented.
-	for _, want := range []string{
-		"# auto_sleep_hours:",
-		"# auto_shutdown_hours:",
-		"# projects:",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing commented %q\ngot:\n%s", want, got)
-		}
-	}
-}
-
-func TestRenderGlobalTemplate_EmptyUserValuesStayCommented(t *testing.T) {
-	got := scaffold.RenderGlobalTemplate(
-		scaffold.ProbedValues{Region: "us-central1"},
-		scaffold.UserGlobalValues{},
-	)
-	for _, want := range []string{
-		"# region: us-central1",
-		"# git_user_name:",
-		"# git_user_email:",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing commented %q\ngot:\n%s", want, got)
-		}
-	}
-	// Negative: no uncommented two-space-indented versions.
-	for _, unwant := range []string{
-		"\n  region:",
-		"\n  git_user_name:",
-		"\n  git_user_email:",
-	} {
-		if strings.Contains(got, unwant) {
-			t.Errorf("unexpected uncommented key %q\ngot:\n%s", unwant, got)
-		}
+	if !strings.Contains(got, "id:") || !strings.Contains(got, "github_repo_url:") {
+		t.Error("required keys should still be present as placeholders")
 	}
 }
