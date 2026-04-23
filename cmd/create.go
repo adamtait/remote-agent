@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -469,17 +470,22 @@ func materializeBuildAssets(cwd, home string) (func(), error) {
 	var written []string
 	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
 		dest := filepath.Join(wsDir, n)
-		if _, err := os.Stat(dest); err == nil {
+		if _, statErr := os.Stat(dest); statErr == nil {
 			continue
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			for _, p := range written {
+				os.Remove(p)
+			}
+			return func() {}, fmt.Errorf("checking %s: %w", dest, statErr)
 		}
-		data, _, err := scaffold.ResolveSource(home, cwd, n)
+		data, _, err := scaffold.ResolveSource(home, "", n)
 		if err != nil {
 			for _, p := range written {
 				os.Remove(p)
 			}
 			return func() {}, fmt.Errorf("resolving %s: %w", n, err)
 		}
-		mode := os.FileMode(0644)
+		var mode os.FileMode = 0644
 		if n == "entrypoint.sh" {
 			mode = 0755
 		}
