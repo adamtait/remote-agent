@@ -85,15 +85,15 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		GithubRepoURL: opts.Prober.GitOriginURL(),
 	}
 
-	project := projectConfigYAML{}
-	global := globalConfigYAML{}
+	var projectUV UserProjectValues
+	var globalUV UserGlobalValues
 
 	if writeProject {
 		projectID, err := Prompt(stdin, opts.Stdout, "project_id", pv.ProjectID, ValidateProjectID)
 		if err != nil {
 			return err
 		}
-		project.ProjectID = projectID
+		projectUV.ProjectID = projectID
 
 		if !opts.Prober.BillingEnabled(projectID) && opts.Stderr != nil {
 			fmt.Fprintf(opts.Stderr, "WARN: could not confirm billing is enabled on %s (ws create will fail otherwise)\n", projectID)
@@ -109,22 +109,22 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 			}
 			repoURL = normalized
 		}
-		project.GithubRepoURL = repoURL
+		projectUV.GithubRepoURL = repoURL
 
 		if opts.Advanced {
-			if project.Region, err = Prompt(stdin, opts.Stdout, "region", pv.Region, nil); err != nil {
+			if projectUV.Region, err = Prompt(stdin, opts.Stdout, "region", pv.Region, nil); err != nil {
 				return err
 			}
-			if project.ClusterName, err = Prompt(stdin, opts.Stdout, "cluster_name", "claude-dev-cluster", nil); err != nil {
+			if projectUV.ClusterName, err = Prompt(stdin, opts.Stdout, "cluster_name", "claude-dev-cluster", nil); err != nil {
 				return err
 			}
-			if project.ConfigName, err = Prompt(stdin, opts.Stdout, "config_name", "claude-dev-config", nil); err != nil {
+			if projectUV.ConfigName, err = Prompt(stdin, opts.Stdout, "config_name", "claude-dev-config", nil); err != nil {
 				return err
 			}
-			if project.MachineType, err = Prompt(stdin, opts.Stdout, "machine_type", "e2-standard-4", nil); err != nil {
+			if projectUV.MachineType, err = Prompt(stdin, opts.Stdout, "machine_type", "e2-standard-4", nil); err != nil {
 				return err
 			}
-			if project.DiskSizeGB, err = Prompt(stdin, opts.Stdout, "disk_size_gb", "50", nil); err != nil {
+			if projectUV.DiskSizeGB, err = Prompt(stdin, opts.Stdout, "disk_size_gb", "50", nil); err != nil {
 				return err
 			}
 		}
@@ -132,13 +132,13 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 
 	if writeGlobal {
 		var err error
-		if global.Region, err = Prompt(stdin, opts.Stdout, "region", pv.Region, nil); err != nil {
+		if globalUV.Region, err = Prompt(stdin, opts.Stdout, "region", pv.Region, nil); err != nil {
 			return err
 		}
-		if global.GitUserName, err = Prompt(stdin, opts.Stdout, "git_user_name", pv.GitUserName, nil); err != nil {
+		if globalUV.GitUserName, err = Prompt(stdin, opts.Stdout, "git_user_name", pv.GitUserName, nil); err != nil {
 			return err
 		}
-		if global.GitUserEmail, err = Prompt(stdin, opts.Stdout, "git_user_email", pv.GitUserEmail, nil); err != nil {
+		if globalUV.GitUserEmail, err = Prompt(stdin, opts.Stdout, "git_user_email", pv.GitUserEmail, nil); err != nil {
 			return err
 		}
 	}
@@ -147,11 +147,11 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		fmt.Fprintln(opts.Stdout)
 		if writeProject {
 			fmt.Fprintln(opts.Stdout, "About to write "+projectPath+":")
-			fmt.Fprintln(opts.Stdout, indent(project.marshal(), "  "))
+			fmt.Fprintln(opts.Stdout, indent(RenderProjectTemplate(pv, projectUV), "  "))
 		}
 		if writeGlobal {
 			fmt.Fprintln(opts.Stdout, "About to write "+globalPath+":")
-			fmt.Fprintln(opts.Stdout, indent(global.marshal(), "  "))
+			fmt.Fprintln(opts.Stdout, indent(RenderGlobalTemplate(pv, globalUV), "  "))
 		}
 
 		confirm, err := Prompt(stdin, opts.Stdout, "Proceed? [Y/n]", "Y", nil)
@@ -178,12 +178,12 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	}
 
 	if writeProject {
-		if err := WriteAtomic(projectPath, []byte(project.marshal()), opts.Force); err != nil {
+		if err := WriteAtomic(projectPath, []byte(RenderProjectTemplate(pv, projectUV)), opts.Force); err != nil {
 			return err
 		}
 	}
 	if writeGlobal {
-		if err := WriteAtomic(globalPath, []byte(global.marshal()), opts.Force); err != nil {
+		if err := WriteAtomic(globalPath, []byte(RenderGlobalTemplate(pv, globalUV)), opts.Force); err != nil {
 			return err
 		}
 	}
@@ -253,53 +253,6 @@ func warnPrereqs(out io.Writer, p Prober) {
 	if !p.HasDocker() {
 		fmt.Fprintln(out, "WARN: docker not found on PATH — ws create needs it to build the workstation image")
 	}
-}
-
-type projectConfigYAML struct {
-	ProjectID     string
-	Region        string
-	ClusterName   string
-	ConfigName    string
-	GithubRepoURL string
-	MachineType   string
-	DiskSizeGB    string // string so "" can signal "don't emit"
-}
-
-func (p projectConfigYAML) marshal() string {
-	var b strings.Builder
-	emit := func(key, val string) {
-		if val != "" {
-			fmt.Fprintf(&b, "%s: %s\n", key, val)
-		}
-	}
-	emit("project_id", p.ProjectID)
-	emit("region", p.Region)
-	emit("cluster_name", p.ClusterName)
-	emit("config_name", p.ConfigName)
-	emit("github_repo_url", p.GithubRepoURL)
-	emit("machine_type", p.MachineType)
-	emit("disk_size_gb", p.DiskSizeGB)
-	return b.String()
-}
-
-type globalConfigYAML struct {
-	Region       string
-	GitUserName  string
-	GitUserEmail string
-}
-
-func (g globalConfigYAML) marshal() string {
-	var b strings.Builder
-	b.WriteString("defaults:\n")
-	emit := func(key, val string) {
-		if val != "" {
-			fmt.Fprintf(&b, "  %s: %s\n", key, val)
-		}
-	}
-	emit("region", g.Region)
-	emit("git_user_name", g.GitUserName)
-	emit("git_user_email", g.GitUserEmail)
-	return b.String()
 }
 
 func indent(s, prefix string) string {

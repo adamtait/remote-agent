@@ -58,7 +58,7 @@ func TestInteractiveScaffold_WritesBothFiles(t *testing.T) {
 	if !strings.Contains(string(global), "region: us-central1") {
 		t.Errorf("global config missing region:\n%s", global)
 	}
-	if !strings.Contains(string(global), "git_user_name: Alice") {
+	if !strings.Contains(string(global), `git_user_name:  "Alice"`) {
 		t.Errorf("global config missing git_user_name:\n%s", global)
 	}
 }
@@ -354,5 +354,119 @@ func TestTemplateScaffold_WritesBothFiles(t *testing.T) {
 	global, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
 	if !strings.Contains(string(global), "europe-west1") {
 		t.Errorf("global template missing region:\n%s", global)
+	}
+}
+
+func TestInteractiveScaffold_WritesAllKeysInTemplateForm(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+
+	stdin := strings.NewReader(strings.Join([]string{
+		"my-proj-123",
+		"https://github.com/a/b.git",
+		"us-central1",
+		"Alice",
+		"alice@example.com",
+		"y",
+	}, "\n") + "\n")
+	var stdout, stderr bytes.Buffer
+
+	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
+		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
+		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
+	})
+	if err != nil {
+		t.Fatalf("InteractiveScaffold: %v", err)
+	}
+
+	proj, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
+	// User-set keys: uncommented.
+	for _, want := range []string{
+		"project_id: my-proj-123",
+		"github_repo_url: https://github.com/a/b.git",
+	} {
+		if !strings.Contains(string(proj), want) {
+			t.Errorf("project config missing %q\ngot:\n%s", want, proj)
+		}
+	}
+	// Optional keys not prompted (no --advanced): commented.
+	for _, want := range []string{
+		"# region:",
+		"# cluster_name:",
+		"# config_name:",
+		"# machine_type:",
+		"# disk_size_gb:",
+		"# auto_sleep_hours:",
+		"# auto_shutdown_hours:",
+	} {
+		if !strings.Contains(string(proj), want) {
+			t.Errorf("project config missing commented %q\ngot:\n%s", want, proj)
+		}
+	}
+
+	global, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
+	// User-set keys under defaults:
+	for _, want := range []string{
+		"  region: us-central1",
+		`  git_user_name:  "Alice"`,
+		`  git_user_email: "alice@example.com"`,
+	} {
+		if !strings.Contains(string(global), want) {
+			t.Errorf("global config missing %q\ngot:\n%s", want, global)
+		}
+	}
+	// Not-prompted keys: commented.
+	for _, want := range []string{
+		"# auto_sleep_hours:",
+		"# auto_shutdown_hours:",
+		"# projects:",
+	} {
+		if !strings.Contains(string(global), want) {
+			t.Errorf("global config missing commented %q\ngot:\n%s", want, global)
+		}
+	}
+}
+
+func TestInteractiveScaffold_AdvancedUncommentsOptionalProjectKeys(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+
+	// --advanced: project_id, github_repo_url, region, cluster_name,
+	// config_name, machine_type, disk_size_gb, then global region,
+	// git_user_name, git_user_email, then confirm.
+	stdin := strings.NewReader(strings.Join([]string{
+		"my-proj-123",
+		"https://github.com/a/b.git",
+		"us-east1",
+		"my-cluster",
+		"my-config",
+		"e2-standard-8",
+		"100",
+		"us-east1",
+		"Alice",
+		"alice@example.com",
+		"y",
+	}, "\n") + "\n")
+	var stdout, stderr bytes.Buffer
+
+	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
+		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
+		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{}, Advanced: true,
+	})
+	if err != nil {
+		t.Fatalf("InteractiveScaffold: %v", err)
+	}
+
+	proj, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
+	for _, want := range []string{
+		"region: us-east1",
+		"cluster_name: my-cluster",
+		"config_name: my-config",
+		"machine_type: e2-standard-8",
+		"disk_size_gb: 100",
+	} {
+		if !strings.Contains(string(proj), want) {
+			t.Errorf("project config missing uncommented %q\ngot:\n%s", want, proj)
+		}
 	}
 }
