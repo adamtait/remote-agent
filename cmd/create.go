@@ -6,13 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/adamtait/remote-agent/internal/gcloud"
+	"github.com/adamtait/remote-agent/internal/naming"
 	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -21,7 +24,10 @@ import (
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Provision a Google Cloud Workstation with Claude Code",
-	Long: `Idempotent: safe to re-run. Each step checks for existence first.
+	Long: `Always provisions a new workstation. Cluster, config, image, secrets,
+and IAM setup remain idempotent; the workstation itself is freshly created on
+every run. Use --name to set the workstation name (auto-suffixed on collision);
+omit it for an auto-generated memorable name.
 Requires .ws.yaml in the project root with project_id and github_repo_url set.`,
 	RunE: runCreate,
 }
@@ -30,6 +36,7 @@ func init() {
 	rootCmd.AddCommand(createCmd)
 	createCmd.Flags().Int("auto-sleep", 0, "Hours idle before stopping (0=never sleep, omit=GCP default ~2h; max 24)")
 	createCmd.Flags().Int("auto-shutdown", 0, "Hours running before force-stop (omit=GCP default ~12h; 1–168)")
+	createCmd.Flags().String("name", "", "Workstation name (auto-suffixed on collision); auto-generated memorable name if unset")
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
@@ -288,24 +295,44 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 8 — Create and start workstation
-	logStep(fmt.Sprintf("Ensuring workstation '%s'...", cfg.WorkstationName))
-	if !r.Check("workstations", "describe", cfg.WorkstationName,
-		"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
-		"--region", cfg.Region, "--project", cfg.ProjectID) {
-		if err := r.Run("workstations", "create", cfg.WorkstationName,
-			"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
-			"--region", cfg.Region, "--project", cfg.ProjectID); err != nil {
-			return fmt.Errorf("creating workstation: %w", err)
+	// Step 8 — Resolve a unique workstation name and create it.
+	existing, err := client.List(cfg.ProjectID, cfg.Region, cfg.ClusterName)
+	if err != nil {
+		return fmt.Errorf("listing existing workstations: %w", err)
+	}
+	taken := make(map[string]bool, len(existing))
+	for _, w := range existing {
+		taken[w.Name] = true
+	}
+
+	var workstationName string
+	if requested, _ := cmd.Flags().GetString("name"); requested != "" {
+		workstationName = naming.UniqueSuffixed(requested, taken)
+		if workstationName != requested {
+			fmt.Printf("\033[1;33mWARN:\033[0m workstation %q exists — using %q instead\n", requested, workstationName)
+		}
+	} else {
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+		workstationName, err = naming.GenerateMemorable(cfg.WorkstationName, taken, rng)
+		if err != nil {
+			return fmt.Errorf("generating workstation name: %w", err)
 		}
 	}
-	wsInfo, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, cfg.WorkstationName)
+
+	logStep(fmt.Sprintf("Creating workstation '%s'...", workstationName))
+	if err := r.Run("workstations", "create", workstationName,
+		"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
+		"--region", cfg.Region, "--project", cfg.ProjectID); err != nil {
+		return fmt.Errorf("creating workstation: %w", err)
+	}
+
+	wsInfo, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, workstationName)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
 	}
 	if wsInfo.State != "STATE_RUNNING" && wsInfo.State != "STATE_STARTING" {
 		logStep("Starting workstation...")
-		if err := r.Run("workstations", "start", cfg.WorkstationName,
+		if err := r.Run("workstations", "start", workstationName,
 			"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
 			"--region", cfg.Region, "--project", cfg.ProjectID); err != nil {
 			return fmt.Errorf("starting workstation: %w", err)
@@ -313,7 +340,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 9 — Print access info
-	info, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, cfg.WorkstationName)
+	info, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, workstationName)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
 	}
@@ -336,12 +363,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 ================================================================
 `,
 		info.Host,
-		cfg.WorkstationName,
+		workstationName,
 		cfg.ClusterName,
 		cfg.ConfigName,
 		cfg.Region,
-		cfg.WorkstationName,
-		cfg.WorkstationName,
+		workstationName,
+		workstationName,
 	)
 
 	return nil
