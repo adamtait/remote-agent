@@ -45,3 +45,31 @@ func TestEmbedded_WaitScriptHasShebangAndTimeout(t *testing.T) {
 		t.Errorf("wait script should mention a timeout")
 	}
 }
+
+func TestEmbedded_EntrypointWritesRunWsEnv(t *testing.T) {
+	if !bytes.Contains(embeddedEntrypoint, []byte("/run/ws/env")) {
+		t.Errorf("expected entrypoint to write /run/ws/env")
+	}
+	if !bytes.Contains(embeddedEntrypoint, []byte("/run/ws/ready")) {
+		t.Errorf("expected entrypoint to create /run/ws/ready sentinel")
+	}
+	if bytes.Contains(embeddedEntrypoint, []byte("/etc/profile.d/claude-auth.sh")) {
+		t.Errorf("entrypoint should no longer write directly to /etc/profile.d/claude-auth.sh")
+	}
+}
+
+func TestEmbedded_EntrypointSentinelIsLast(t *testing.T) {
+	idxSentinel := bytes.LastIndex(embeddedEntrypoint, []byte("/run/ws/ready"))
+	idxEnvWrite := bytes.LastIndex(embeddedEntrypoint, []byte("/run/ws/env"))
+	idxEntrypointDone := bytes.LastIndex(embeddedEntrypoint, []byte("Entrypoint complete"))
+	if idxSentinel < 0 || idxEnvWrite < 0 || idxEntrypointDone < 0 {
+		t.Fatalf("expected markers missing: sentinel=%d env=%d done=%d",
+			idxSentinel, idxEnvWrite, idxEntrypointDone)
+	}
+	if idxSentinel < idxEnvWrite {
+		t.Errorf("sentinel creation must come after env write")
+	}
+	if idxSentinel > idxEntrypointDone {
+		t.Errorf("sentinel creation must precede the final 'Entrypoint complete' log")
+	}
+}
