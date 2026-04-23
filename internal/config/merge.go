@@ -121,7 +121,7 @@ func Merge(project *ProjectConfig, global *GlobalConfig) (*Config, error) {
 	// can host distinguishable workstations for multiple repos. Fall back to
 	// the project ID if the repo URL is unset or unparseable (e.g. when a
 	// command runs before .ws.yaml has been populated).
-	slug := scaffold.RepoSlugFromURL(scaffold.NormalizeGithubRepoURL(cfg.GithubRepoURL))
+	slug := scaffold.RepoSlugFromURL(cfg.GithubRepoURL)
 	if slug == "" {
 		slug = cfg.ProjectID
 	}
