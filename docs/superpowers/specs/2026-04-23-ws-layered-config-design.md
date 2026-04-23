@@ -176,7 +176,7 @@ GIT_USER_NAME=<git.user_name>
 GIT_USER_EMAIL=<git.user_email>
 
 # Secrets index + per-entry pair:
-WS_SECRETS=<comma-separated logical names>
+WS_SECRETS=<pipe-separated logical names>   # | not , (gcloud --container-env uses comma as outer delimiter)
 WS_SECRET_<UPPERCASED_NAME>_NAME=<secret_name>
 WS_SECRET_<UPPERCASED_NAME>_VAR=<env_var>
 # Optional sibling for claude_oauth:
