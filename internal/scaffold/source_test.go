@@ -123,3 +123,19 @@ func TestEmbeddedSeed_UnknownName_ReturnsError(t *testing.T) {
 		t.Fatal("expected error for unknown asset name")
 	}
 }
+
+func TestEmbeddedSeed_ProfileDWaitScript(t *testing.T) {
+	body, err := EmbeddedSeed("profile.d/00-ws-wait.sh")
+	if err != nil {
+		t.Fatalf("EmbeddedSeed: %v", err)
+	}
+	if len(body) == 0 {
+		t.Errorf("expected non-empty embedded body for profile.d/00-ws-wait.sh")
+	}
+	if !bytes.Contains(body, []byte("/run/ws/ready")) {
+		t.Errorf("expected body to reference sentinel path /run/ws/ready")
+	}
+	if !bytes.Contains(body, []byte("/run/ws/env")) {
+		t.Errorf("expected body to source /run/ws/env")
+	}
+}

@@ -41,4 +41,13 @@ RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && ex
 COPY .ws/entrypoint.sh /etc/workstation-startup.d/200_claude-setup.sh
 RUN chmod +x /etc/workstation-startup.d/200_claude-setup.sh
 
+# --- Login-shell profile.d scripts ------------------------------------------
+# `ws create` stages .ws/profile.d/ and ~/.config/ws/profile.d/ into
+# .ws/profile.d.staged/ just before invoking docker buildx (project
+# overrides user-global on filename collision). The staging helper chmods each
+# .sh to 0755 before COPY, so no RUN chmod is needed. In other build flows
+# (e.g. manual `docker build`) the caller is responsible for populating
+# .ws/profile.d.staged/ with executable scripts.
+COPY .ws/profile.d.staged/ /etc/profile.d/
+
 # The base image's ENTRYPOINT handles IDE startup; don't override it.

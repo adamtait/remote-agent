@@ -12,11 +12,11 @@ import (
 
 var setupScaffoldCmd = &cobra.Command{
 	Use:   "scaffold",
-	Short: "Write customizable .ws/Dockerfile and .ws/entrypoint.sh into the project",
-	Long: `Materialize the default build assets (Dockerfile, entrypoint.sh) into
-<project>/.ws/. Users (and AI agents) edit these files freely; ws does not
-modify them on upgrade. Re-run with --force to overwrite with current
-embedded defaults.
+	Short: "Write customizable .ws/Dockerfile, .ws/entrypoint.sh, and .ws/profile.d/ into the project",
+	Long: `Materialize the default build assets (Dockerfile, entrypoint.sh, and
+.ws/profile.d/00-ws-wait.sh) into <project>/.ws/. Users (and AI agents) edit
+these files freely; ws does not modify them on upgrade. Re-run with --force
+to overwrite with current embedded defaults.
 
 Source precedence per file: ~/.config/ws/template/<name> if present, else
 the embedded default compiled into the ws binary.`,

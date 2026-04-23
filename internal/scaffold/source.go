@@ -10,7 +10,7 @@ import (
 )
 
 // AssetNames enumerates the build assets ws knows how to scaffold.
-var AssetNames = []string{"Dockerfile", "entrypoint.sh"}
+var AssetNames = []string{"Dockerfile", "entrypoint.sh", "profile.d/00-ws-wait.sh"}
 
 // EmbeddedSeed returns the embedded default bytes for the named asset.
 // Used at setup time to materialize initial templates.
@@ -68,6 +68,8 @@ func embeddedFor(name string) ([]byte, bool) {
 		return embeddedDockerfile, true
 	case "entrypoint.sh":
 		return embeddedEntrypoint, true
+	case "profile.d/00-ws-wait.sh":
+		return embeddedWaitScript, true
 	default:
 		return nil, false
 	}

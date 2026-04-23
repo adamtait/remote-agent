@@ -25,12 +25,15 @@ USER_HOME="/home/${USER_NAME}"
 WORKSPACE_DIR="${USER_HOME}/workspace"
 
 APIKEY_HELPER_PATH="/usr/local/bin/claude-apikey-helper.sh"
-OAUTH_PROFILE_PATH="/etc/profile.d/claude-auth.sh"
 GIT_HELPER_PATH="/usr/local/bin/git-credential-gcp-secret"
 CLAUDE_SETTINGS_DIR="${USER_HOME}/.claude"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_DIR}/settings.json"
 CLAUDE_CONFIG_PATH="${USER_HOME}/.claude.json"
 CLAUDE_LOG_PATH="/var/log/claude-setup.log"
+
+WS_RUNTIME_DIR="/run/ws"
+WS_ENV_FILE="/run/ws/env"
+WS_READY_SENTINEL="/run/ws/ready"
 
 log() {
     local msg="[claude-setup] $(date -u +%H:%M:%S) $*"
@@ -53,7 +56,6 @@ command -v gcloud >/dev/null 2>&1 || {
 }
 
 # Clear stale auth state from any previous configuration.
-rm -f "${OAUTH_PROFILE_PATH}"
 rm -f "${APIKEY_HELPER_PATH}"
 rm -f "${GIT_HELPER_PATH}"
 sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/environment
@@ -134,6 +136,11 @@ seed_claude_onboarding() {
     fi
 }
 
+
+mkdir -p "${WS_RUNTIME_DIR}"
+chmod 0755 "${WS_RUNTIME_DIR}"
+rm -f "${WS_READY_SENTINEL}"
+
 # =============================================================================
 # Dispatch loop — iterate WS_SECRETS (pipe-separated) and handle each logical name.
 # =============================================================================
@@ -162,12 +169,11 @@ for logical in "${ws_secret_names[@]}"; do
             else
                 echo "${target_env_var}=${TOKEN}" >> /etc/environment
                 umask 077
-                cat > "${OAUTH_PROFILE_PATH}" <<EOF
-# Auto-generated at workstation boot. Do not edit.
-export ${target_env_var}='${TOKEN}'
-EOF
-                chmod 0644 "${OAUTH_PROFILE_PATH}"
-                log "Exported ${target_env_var} via /etc/environment and ${OAUTH_PROFILE_PATH}."
+                tmp=$(mktemp "${WS_RUNTIME_DIR}/.env.XXXXXX")
+                printf '%s=%s\n' "${target_env_var}" "${TOKEN}" > "${tmp}"
+                chmod 0644 "${tmp}"
+                mv "${tmp}" "${WS_ENV_FILE}"
+                log "Exported ${target_env_var} via /etc/environment and ${WS_ENV_FILE}."
 
                 oauth_account_var="WS_SECRET_${token}_OAUTH_ACCOUNT_SECRET_NAME"
                 seed_claude_onboarding "${TOKEN}" "${!oauth_account_var:-}"
@@ -230,7 +236,14 @@ EOF
                 --secret="${secret_name}" --project="${GCP_PROJECT_ID}" 2>/dev/null || true)
             if [[ -n "${pat_value}" ]]; then
                 echo "${target_env_var}=${pat_value}" >> /etc/environment
-                log "Exported ${target_env_var} for gh CLI."
+                umask 077
+                if [[ ! -f "${WS_ENV_FILE}" ]]; then
+                    : > "${WS_ENV_FILE}"
+                    chmod 0644 "${WS_ENV_FILE}"
+                fi
+                sed -i "/^${target_env_var}=/d" "${WS_ENV_FILE}"
+                printf '%s=%s\n' "${target_env_var}" "${pat_value}" >> "${WS_ENV_FILE}"
+                log "Exported ${target_env_var} via /etc/environment and ${WS_ENV_FILE}."
             fi
             ;;
 
@@ -272,4 +285,8 @@ if [[ ! -f "${FIRST_BOOT_MARKER}" ]]; then
     chown "${USER_NAME}:${USER_NAME}" "${FIRST_BOOT_MARKER}"
 fi
 
-log "claude-setup complete."
+touch "${WS_READY_SENTINEL}"
+chmod 0644 "${WS_READY_SENTINEL}"
+log "Sentinel ${WS_READY_SENTINEL} created; login shells unblocked."
+
+log "Entrypoint complete."

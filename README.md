@@ -13,10 +13,11 @@ runtime via its attached service account:
   result for ~5 minutes, so rotating propagates within that window with no
   restart.
 - **Claude OAuth** is fetched at each container boot and written to
-  `/etc/profile.d/claude-auth.sh`. Rotation → `workstations stop/start`.
-  In OAuth mode, the entrypoint also seeds `~/.claude.json` from a second
-  secret holding the `oauthAccount` block so interactive `claude` skips the
-  browser-based onboarding wizard (which can't complete on a headless VM).
+  `/run/ws/env` (a tmpfs) and `/etc/environment`. Rotation →
+  `workstations stop/start`. In OAuth mode, the entrypoint also seeds
+  `~/.claude.json` from a second secret holding the `oauthAccount` block
+  so interactive `claude` skips the browser-based onboarding wizard
+  (which can't complete on a headless VM).
 - **GitHub PAT** uses a custom `credential.helper` script that calls
   `gcloud secrets versions access` on every git operation. Rotations are
   picked up immediately on the next push/pull/clone, no restart.
@@ -31,6 +32,12 @@ selecting `claude_oauth` or `claude_apikey` as the Claude secret type.
 - `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
 - `.ws/Dockerfile` — custom image: code-oss + Node 20 + gh + Claude Code
 - `.ws/entrypoint.sh` — runs at container boot; sets up git, clones the repo
+- `.ws/profile.d/*.sh` — image-baked login-shell scripts. `00-ws-wait.sh`
+  (shipped by `ws setup scaffold`) blocks on the entrypoint's sentinel;
+  any additional `*.sh` file you drop here is baked into `/etc/profile.d/`.
+- `~/.config/ws/profile.d/*.sh` — same, but scoped to you across all
+  projects. On filename collision with a project-level script the
+  project-level version wins.
 
 ## Prerequisites
 
@@ -186,10 +193,16 @@ one-liner that shells out to `gcloud secrets versions access`) and adds
 every ~5 minutes, so rotating the secret is transparent.
 
 **Claude OAuth mode** (`claude_oauth` in secrets config). At every container
-boot, `entrypoint.sh` fetches the token from Secret Manager and exports it as
-`CLAUDE_CODE_OAUTH_TOKEN`. Because `apiKeyHelper` conflicts with OAuth tokens
-in Claude Code, the entrypoint also removes any stale `apiKeyHelper` entry from
-`settings.json` when running in this mode.
+boot, `entrypoint.sh` fetches the token from Secret Manager and writes it to
+`/run/ws/env` (alongside `GH_TOKEN`). `/run/ws` is a tmpfs, so the file never
+touches disk. Login shells are held at `/etc/profile.d/00-ws-wait.sh` until
+`entrypoint.sh` creates the `/run/ws/ready` sentinel, at which point
+`00-ws-wait.sh` sources `/run/ws/env` and the shell proceeds. This closes the
+race where sshd begins accepting connections before the entrypoint has written
+the token. Non-login sessions (IDE-spawned terminals) continue to read the
+token from `/etc/environment` via PAM. Because `apiKeyHelper` conflicts with
+OAuth tokens in Claude Code, the entrypoint also removes any stale
+`apiKeyHelper` entry from `settings.json` when running in this mode.
 
 In OAuth mode the entrypoint also pre-seeds `/home/user/.claude.json` with
 `hasCompletedOnboarding: true`, `lastOnboardingVersion` (from
@@ -230,10 +243,10 @@ only to the workstation's service account.
 
 In API-key mode, the Claude key is fetched into memory by `apiKeyHelper`
 on demand and never touches disk. In OAuth mode, the token is written to
-`/etc/profile.d/claude-auth.sh` (mode 0644) because exporting a value into
-login shells requires a file the shell can read; this is equivalent in
-exposure to an env var. The GitHub PAT is fetched per-operation by the git
-credential helper and never persisted.
+`/run/ws/env` (mode 0644) and to `/etc/environment`; `/run/ws` is a
+tmpfs so only `/etc/environment` survives a reboot — and that file is
+rewritten from Secret Manager on the very next boot. The GitHub PAT is
+fetched per-operation by the git credential helper and never persisted.
 
 To audit credential access, look at Secret Manager's data access audit
 logs — every fetch from `apiKeyHelper`, the OAuth boot fetch, and every

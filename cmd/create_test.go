@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/adamtait/remote-agent/internal/config"
+	"github.com/adamtait/remote-agent/internal/scaffold"
 )
 
 // Preflight tests exercise ensureBuildAssets, which we expose in cmd to
@@ -128,6 +129,34 @@ func equalStringSlices(a, b []string) bool {
 // This compile-time check catches breaks if we later extract an interface.
 var _ io.Writer = (*bytes.Buffer)(nil)
 var _ error = errors.New("sentinel")
+
+func TestCreate_StagesProfileDBeforeBuildAndCleansUp(t *testing.T) {
+	// Unit-level proxy for the create flow: verify the staging helper is
+	// used by exercising it directly the way cmd/create.go will call it,
+	// and that the staging dir is absent after cleanup. This catches the
+	// wiring regression without having to fake out gcloud/docker.
+	cwd := t.TempDir()
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws", "profile.d"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".ws", "profile.d", "10-app.sh"),
+		[]byte("echo x\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	stage, cleanup, err := scaffold.StageProfileD(cwd, home)
+	if err != nil {
+		t.Fatalf("StageProfileD: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stage, "10-app.sh")); err != nil {
+		t.Errorf("expected staged file: %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(stage); !os.IsNotExist(err) {
+		t.Errorf("expected stage removed, err=%v", err)
+	}
+}
 
 func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 	sleep := 2

@@ -184,3 +184,32 @@ func TestScaffoldAssets_PartialExisting_OnlyScaffoldsMissing(t *testing.T) {
 		t.Errorf("existing Dockerfile modified under OnlyMissing, got %q", data)
 	}
 }
+
+func TestScaffoldAssets_NestedPath_CreatesParentDir(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	var out bytes.Buffer
+
+	// Stub the AssetNames and embedded map just for this test by relying on
+	// a real nested asset added in Task 2. If that asset is not yet added,
+	// this test exists to drive that change — it will fail until the name
+	// "profile.d/00-ws-wait.sh" is in AssetNames.
+	wsDir := filepath.Join(cwd, ".ws")
+	res, err := ScaffoldAssets(ScaffoldAssetsOptions{
+		TargetDir: wsDir, Home: home, Stdout: &out,
+	})
+	if err != nil {
+		t.Fatalf("ScaffoldAssets: %v", err)
+	}
+	nested := filepath.Join(wsDir, "profile.d", "00-ws-wait.sh")
+	info, err := os.Stat(nested)
+	if err != nil {
+		t.Fatalf("expected %s to exist: %v", nested, err)
+	}
+	if info.Mode().Perm() != 0755 {
+		t.Errorf("nested asset mode = %o, want 0755", info.Mode().Perm())
+	}
+	if !res.Wrote("profile.d/00-ws-wait.sh") {
+		t.Errorf("result should record profile.d/00-ws-wait.sh written: %+v", res)
+	}
+}

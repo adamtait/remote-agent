@@ -24,7 +24,6 @@ USER_HOME="/home/${USER_NAME}"
 WORKSPACE_DIR="${USER_HOME}/workspace"
 
 APIKEY_HELPER_PATH="/usr/local/bin/claude-apikey-helper.sh"
-OAUTH_PROFILE_PATH="/etc/profile.d/claude-auth.sh"
 GIT_HELPER_PATH="/usr/local/bin/git-credential-gcp-secret"
 CLAUDE_SETTINGS_DIR="${USER_HOME}/.claude"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_DIR}/settings.json"
@@ -32,6 +31,10 @@ CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_DIR}/settings.json"
 CLAUDE_CONFIG_PATH="${USER_HOME}/.claude.json"
 
 CLAUDE_LOG_PATH="/var/log/claude-setup.log"
+
+WS_RUNTIME_DIR="/run/ws"
+WS_ENV_FILE="${WS_RUNTIME_DIR}/env"
+WS_READY_SENTINEL="${WS_RUNTIME_DIR}/ready"
 
 log() {
     local msg="[claude-setup] $(date -u +%H:%M:%S) $*"
@@ -116,6 +119,12 @@ seed_claude_onboarding() {
 : > "${CLAUDE_LOG_PATH}" 2>/dev/null || true
 chmod 0644 "${CLAUDE_LOG_PATH}" 2>/dev/null || true
 
+# Runtime state dir for login-shell secret delivery (/run/ws/env + /run/ws/ready
+# sentinel). See /etc/profile.d/00-ws-wait.sh for the consumer side.
+mkdir -p "${WS_RUNTIME_DIR}"
+chmod 0755 "${WS_RUNTIME_DIR}"
+rm -f "${WS_READY_SENTINEL}"
+
 # =============================================================================
 # Claude auth — runs EVERY boot so rotations are picked up.
 # =============================================================================
@@ -129,12 +138,10 @@ command -v gcloud >/dev/null 2>&1 || {
     exit 1
 }
 
-# Clear any stale auth state from a previous mode to prevent conflicts
-# (e.g. apiKeyHelper set + OAuth token exported would trigger auth conflict).
-rm -f "${OAUTH_PROFILE_PATH}"
+# Clear any stale auth state from a previous mode (only apikey-mode state
+# lives outside /run, which is tmpfs). OAuth token delivery is now entirely
+# via /run/ws/env; no /etc/profile.d/ cleanup needed.
 rm -f "${APIKEY_HELPER_PATH}"
-sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/environment
-sed -i '/^GH_TOKEN=/d' /etc/environment
 
 case "${CLAUDE_AUTH_MODE}" in
     apikey)
@@ -190,21 +197,21 @@ EOF
             log "WARNING: OAuth token fetch failed. Check SA permissions."
         else
             # /etc/environment is read by PAM and injected into every session
-            # (login, non-login interactive, and IDE-spawned terminals alike).
-            # This is the primary delivery mechanism for the token.
+            # (login, non-login interactive, IDE-spawned terminals alike).
+            # Re-pin cleanly so stale values from prior boots cannot survive.
             sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/environment
             echo "CLAUDE_CODE_OAUTH_TOKEN=${TOKEN}" >> /etc/environment
             log "OAuth token written to /etc/environment."
 
-            # /etc/profile.d/ is sourced by login shells (e.g. SSH).
-            # Keep this as a secondary path so SSH sessions also pick up the token.
+            # /run/ws/env is sourced by /etc/profile.d/00-ws-wait.sh *after*
+            # the sentinel appears — this is the race-free path for SSH/login
+            # shells. Atomic write so a concurrent login cannot read a partial.
             umask 077
-            cat > "${OAUTH_PROFILE_PATH}" <<EOF
-# Auto-generated at workstation boot. Do not edit.
-export CLAUDE_CODE_OAUTH_TOKEN='${TOKEN}'
-EOF
-            chmod 0644 "${OAUTH_PROFILE_PATH}"
-            log "OAuth token also exported via ${OAUTH_PROFILE_PATH} (login shells)."
+            tmp=$(mktemp "${WS_RUNTIME_DIR}/.env.XXXXXX")
+            printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "${TOKEN}" >> "${tmp}"
+            chmod 0644 "${tmp}"
+            mv "${tmp}" "${WS_ENV_FILE}"
+            log "OAuth token written to ${WS_ENV_FILE}."
         fi
 
         # Remove any stale apiKeyHelper from settings.json to prevent the
@@ -291,6 +298,18 @@ sed -i '/^GH_TOKEN=/d' /etc/environment
 if [[ -n "${GH_PAT}" ]]; then
     echo "GH_TOKEN=${GH_PAT}" >> /etc/environment
     log "GH_TOKEN written to /etc/environment."
+
+    # Append to /run/ws/env for login-shell delivery (OAuth-mode writes above
+    # created or overwrote the file; apikey-mode may not have).
+    umask 077
+    if [[ ! -f "${WS_ENV_FILE}" ]]; then
+        : > "${WS_ENV_FILE}"
+        chmod 0644 "${WS_ENV_FILE}"
+    fi
+    # Remove any stale line then append.
+    sed -i '/^GH_TOKEN=/d' "${WS_ENV_FILE}"
+    printf 'GH_TOKEN=%s\n' "${GH_PAT}" >> "${WS_ENV_FILE}"
+    log "GH_TOKEN written to ${WS_ENV_FILE}."
 else
     log "WARNING: GH_TOKEN fetch failed. Check SA permissions."
 fi
@@ -349,5 +368,12 @@ if [[ -n "${GITHUB_REPO_URL:-}" ]]; then
 else
     log "GITHUB_REPO_URL not set — skipping clone."
 fi
+
+# Signal to /etc/profile.d/00-ws-wait.sh that all runtime state in /run/ws/env
+# is ready by creating the /run/ws/ready sentinel. MUST be the last meaningful
+# step; any work after this is racey for the very first SSH login of the boot.
+touch "${WS_READY_SENTINEL}"
+chmod 0644 "${WS_READY_SENTINEL}"
+log "Sentinel ${WS_READY_SENTINEL} created; login shells unblocked."
 
 log "Entrypoint complete."
