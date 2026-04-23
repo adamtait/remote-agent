@@ -134,7 +134,6 @@ command -v gcloud >/dev/null 2>&1 || {
 rm -f "${OAUTH_PROFILE_PATH}"
 rm -f "${APIKEY_HELPER_PATH}"
 sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/environment
-sed -i '/^GH_TOKEN=/d' /etc/environment
 
 case "${CLAUDE_AUTH_MODE}" in
     apikey)
