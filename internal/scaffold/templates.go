@@ -108,17 +108,46 @@ func splitCommentedDefault(line string) (key, trailingComment string) {
 	return strings.TrimSpace(s), trailingComment
 }
 
+// UserGlobalValues holds global-config values the user explicitly chose.
+// Non-empty fields render uncommented under `defaults:` in the generated
+// YAML; empty fields stay commented.
+type UserGlobalValues struct {
+	Region       string
+	GitUserName  string
+	GitUserEmail string
+}
+
 // RenderGlobalTemplate returns a commented ~/.config/ws/config.yaml with
-// defaults and projects sections.
-func RenderGlobalTemplate(pv ProbedValues) string {
+// defaults and projects sections. Fields set in uv render uncommented.
+func RenderGlobalTemplate(pv ProbedValues, uv UserGlobalValues) string {
+	regionDefault := firstNonEmpty(pv.Region, "us-central1")
+	gitName := quoteOrPlaceholder(pv.GitUserName)
+	gitEmail := quoteOrPlaceholder(pv.GitUserEmail)
+
+	// For git_user_name / git_user_email: if the user provided a value,
+	// quote it and render uncommented. Otherwise keep the probed-or-
+	// placeholder form, commented.
+	renderRegion := "# region: " + regionDefault
+	if uv.Region != "" {
+		renderRegion = "region: " + uv.Region
+	}
+	renderGitName := "# git_user_name:  " + gitName
+	if uv.GitUserName != "" {
+		renderGitName = fmt.Sprintf("git_user_name:  %q", uv.GitUserName)
+	}
+	renderGitEmail := "# git_user_email: " + gitEmail
+	if uv.GitUserEmail != "" {
+		renderGitEmail = fmt.Sprintf("git_user_email: %q", uv.GitUserEmail)
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, `# ws global config — user-wide defaults and per-project overrides
 # All fields optional; uncomment what you want to set.
 
 defaults:
-  # region: %s
-  # git_user_name:  %s
-  # git_user_email: %s
+  %s
+  %s
+  %s
   # auto_sleep_hours: 2           # hours idle before stopping (0=never sleep; 1–24; GCP default: 2)
   # auto_shutdown_hours: 12       # hours running before force-stop (1–168; GCP default: ~12)
 
@@ -130,7 +159,7 @@ defaults:
 #     repo_name:            claude-workstation-images
 #     auto_sleep_hours:   1
 #     auto_shutdown_hours: 24
-`, firstNonEmpty(pv.Region, "us-central1"), quoteOrPlaceholder(pv.GitUserName), quoteOrPlaceholder(pv.GitUserEmail))
+`, renderRegion, renderGitName, renderGitEmail)
 	return b.String()
 }
 

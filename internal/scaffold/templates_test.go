@@ -42,7 +42,7 @@ func TestRenderGlobalTemplate_WithProbes(t *testing.T) {
 		GitUserName:  "Alice",
 		GitUserEmail: "alice@example.com",
 	}
-	got := scaffold.RenderGlobalTemplate(pv)
+	got := scaffold.RenderGlobalTemplate(pv, scaffold.UserGlobalValues{})
 
 	for _, want := range []string{
 		"defaults:",
@@ -60,14 +60,14 @@ func TestRenderGlobalTemplate_WithProbes(t *testing.T) {
 }
 
 func TestRenderGlobalTemplate_NoProbesStillRenders(t *testing.T) {
-	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{})
+	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{}, scaffold.UserGlobalValues{})
 	if !strings.Contains(got, "defaults:") {
 		t.Errorf("RenderGlobalTemplate missing 'defaults:'\ngot:\n%s", got)
 	}
 }
 
 func TestRenderGlobalTemplate_EmptyProbesDoNotMangleEnDash(t *testing.T) {
-	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{})
+	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{}, scaffold.UserGlobalValues{})
 	// The placeholder sentinel uses a literal en-dash (U+2014). Ensure we
 	// didn't %q-escape it into \u2014.
 	if strings.Contains(got, `\u2014`) {
@@ -80,7 +80,7 @@ func TestRenderGlobalTemplate_EmptyProbesDoNotMangleEnDash(t *testing.T) {
 
 func TestRenderGlobalTemplate_QuotesGitIdentity(t *testing.T) {
 	pv := scaffold.ProbedValues{GitUserName: "Alice Example"}
-	got := scaffold.RenderGlobalTemplate(pv)
+	got := scaffold.RenderGlobalTemplate(pv, scaffold.UserGlobalValues{})
 	if !strings.Contains(got, `"Alice Example"`) {
 		t.Errorf("expected quoted git_user_name, got:\n%s", got)
 	}
@@ -101,7 +101,7 @@ func TestRenderProjectTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
 }
 
 func TestRenderGlobalTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
-	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{})
+	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{}, scaffold.UserGlobalValues{})
 	for _, want := range []string{
 		"# auto_sleep_hours:",
 		"# auto_shutdown_hours:",
@@ -179,6 +179,61 @@ func TestRenderProjectTemplate_EmptyUserValuesStayCommented(t *testing.T) {
 		"\nconfig_name:",
 		"\nmachine_type:",
 		"\ndisk_size_gb:",
+	} {
+		if strings.Contains(got, unwant) {
+			t.Errorf("unexpected uncommented key %q\ngot:\n%s", unwant, got)
+		}
+	}
+}
+
+func TestRenderGlobalTemplate_UserValuesRenderUncommented(t *testing.T) {
+	uv := scaffold.UserGlobalValues{
+		Region:       "us-east1",
+		GitUserName:  "Alice Example",
+		GitUserEmail: "alice@example.com",
+	}
+	got := scaffold.RenderGlobalTemplate(scaffold.ProbedValues{}, uv)
+
+	for _, want := range []string{
+		"  region: us-east1",
+		`  git_user_name:  "Alice Example"`,
+		`  git_user_email: "alice@example.com"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing uncommented %q\ngot:\n%s", want, got)
+		}
+	}
+	// Optional-but-not-prompted keys stay commented.
+	for _, want := range []string{
+		"# auto_sleep_hours:",
+		"# auto_shutdown_hours:",
+		"# projects:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing commented %q\ngot:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderGlobalTemplate_EmptyUserValuesStayCommented(t *testing.T) {
+	got := scaffold.RenderGlobalTemplate(
+		scaffold.ProbedValues{Region: "us-central1"},
+		scaffold.UserGlobalValues{},
+	)
+	for _, want := range []string{
+		"# region: us-central1",
+		"# git_user_name:",
+		"# git_user_email:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing commented %q\ngot:\n%s", want, got)
+		}
+	}
+	// Negative: no uncommented two-space-indented versions.
+	for _, unwant := range []string{
+		"\n  region:",
+		"\n  git_user_name:",
+		"\n  git_user_email:",
 	} {
 		if strings.Contains(got, unwant) {
 			t.Errorf("unexpected uncommented key %q\ngot:\n%s", unwant, got)
