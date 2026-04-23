@@ -16,25 +16,26 @@ import (
 // is tried; if not found and exactly one workstation exists, that one is used; if multiple
 // exist, the user is prompted to choose.
 func resolveWorkstationName(cfg *config.Config, client *gcloud.Client, name string) (string, error) {
+	ws := cfg.Gcloud.Workstation
 	if name != "" {
 		return name, nil
 	}
 
 	// Try the default workstation name.
-	if client.Exists(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, cfg.WorkstationName) {
-		info, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, cfg.WorkstationName)
+	if client.Exists(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, cfg.WorkstationName) {
+		info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, cfg.WorkstationName)
 		if err == nil {
 			return info.Name, nil
 		}
 	}
 
 	// Fall back: list all workstations in the cluster.
-	workstations, err := client.List(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName)
+	workstations, err := client.List(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName)
 	if err != nil {
 		return "", fmt.Errorf("listing workstations: %w", err)
 	}
 	if len(workstations) == 0 {
-		return "", fmt.Errorf("no workstations found in cluster %q", cfg.ClusterName)
+		return "", fmt.Errorf("no workstations found in cluster %q", ws.ClusterName)
 	}
 	if len(workstations) == 1 {
 		return workstations[0].Name, nil

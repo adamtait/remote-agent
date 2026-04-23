@@ -29,21 +29,21 @@ func Validate(cfg *Config) error {
 		label string
 		empty bool
 	}{
-		{"project.id", cfg.ProjectID == ""},
-		{"project.github_repo_url", cfg.GithubRepoURL == ""},
-		{"git.user_name", cfg.GitUserName == ""},
-		{"git.user_email", cfg.GitUserEmail == ""},
-		{"workstation.region", cfg.Region == ""},
-		{"workstation.machine_type", cfg.MachineType == ""},
-		{"workstation.disk_size_gb", cfg.DiskSizeGB == 0},
-		{"workstation.cluster_name", cfg.ClusterName == ""},
-		{"workstation.config_name", cfg.ConfigName == ""},
-		{"workstation.service_account_name", cfg.ServiceAccountName == ""},
-		{"workstation.image_name", cfg.ImageName == ""},
-		{"workstation.image_tag", cfg.ImageTag == ""},
-		{"workstation.repo_name", cfg.RepoName == ""},
-		{"workstation.auto_sleep_hours", cfg.AutoSleepHours == nil},
-		{"workstation.auto_shutdown_hours", cfg.AutoShutdownHours == 0},
+		{"gcloud.project", cfg.Gcloud.Project == ""},
+		{"git.github_repo_url", cfg.Git.GithubRepoURL == ""},
+		{"git.user_name", cfg.Git.UserName == ""},
+		{"git.user_email", cfg.Git.UserEmail == ""},
+		{"gcloud.workstation.region", cfg.Gcloud.Workstation.Region == ""},
+		{"gcloud.workstation.machine_type", cfg.Gcloud.Workstation.MachineType == ""},
+		{"gcloud.workstation.disk_size_gb", cfg.Gcloud.Workstation.DiskSizeGB == 0},
+		{"gcloud.workstation.cluster_name", cfg.Gcloud.Workstation.ClusterName == ""},
+		{"gcloud.workstation.config_name", cfg.Gcloud.Workstation.ConfigName == ""},
+		{"gcloud.workstation.service_account_name", cfg.Gcloud.Workstation.ServiceAccountName == ""},
+		{"gcloud.workstation.image_name", cfg.Gcloud.Workstation.ImageName == ""},
+		{"gcloud.workstation.image_tag", cfg.Gcloud.Workstation.ImageTag == ""},
+		{"gcloud.workstation.repo_name", cfg.Gcloud.Workstation.RepoName == ""},
+		{"gcloud.workstation.auto_sleep_hours", cfg.Gcloud.Workstation.AutoSleepHours == nil},
+		{"gcloud.workstation.auto_shutdown_hours", cfg.Gcloud.Workstation.AutoShutdownHours == 0},
 	}
 	for _, r := range required {
 		if r.empty {

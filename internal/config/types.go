@@ -2,13 +2,8 @@ package config
 
 // GitConfig is the "git:" section of ~/.config/ws/config.yaml.
 type GitConfig struct {
-	UserName  string `yaml:"user_name"`
-	UserEmail string `yaml:"user_email"`
-}
-
-// ProjectSection is the "project:" section of .ws/config.yaml.
-type ProjectSection struct {
-	ID            string `yaml:"id"`
+	UserName      string `yaml:"user_name"`
+	UserEmail     string `yaml:"user_email"`
 	GithubRepoURL string `yaml:"github_repo_url"`
 }
 
@@ -34,42 +29,32 @@ type SecretEntry struct {
 	OAuthAccountSecretName string `yaml:"oauth_account_secret_name,omitempty"`
 }
 
+// GcloudConfig is the "gcloud:" section of config.yaml.
+type GcloudConfig struct {
+	Project     string            `yaml:"project"`
+	Workstation WorkstationConfig `yaml:"workstation"`
+}
+
 // UserConfig is ~/.config/ws/config.yaml — the exhaustive baseline.
 type UserConfig struct {
-	Git         GitConfig              `yaml:"git"`
-	Workstation WorkstationConfig      `yaml:"workstation"`
-	Secrets     map[string]SecretEntry `yaml:"secrets"`
-	Env         map[string]string      `yaml:"env"`
+	Git     GitConfig              `yaml:"git"`
+	Gcloud  GcloudConfig           `yaml:"gcloud"`
+	Secrets map[string]SecretEntry `yaml:"secrets"`
+	Env     map[string]string      `yaml:"env"`
 }
 
 // ProjectConfig is .ws/config.yaml — required project keys + overrides.
 type ProjectConfig struct {
-	Project     ProjectSection         `yaml:"project"`
-	Workstation WorkstationConfig      `yaml:"workstation"`
-	Secrets     map[string]SecretEntry `yaml:"secrets"`
-	Env         map[string]string      `yaml:"env"`
+	Git     GitConfig              `yaml:"git"`
+	Gcloud  GcloudConfig           `yaml:"gcloud"`
+	Secrets map[string]SecretEntry `yaml:"secrets"`
+	Env     map[string]string      `yaml:"env"`
 }
 
-// Config is the post-merge, flat configuration consumed by every ws command.
-// Merge lifts the grouped inputs into these flat fields.
+// Config is the post-merge configuration consumed by every ws command.
 type Config struct {
-	ProjectID     string
-	GithubRepoURL string
-
-	GitUserName  string
-	GitUserEmail string
-
-	Region             string
-	MachineType        string
-	DiskSizeGB         int
-	ClusterName        string
-	ConfigName         string
-	ServiceAccountName string
-	ImageName          string
-	ImageTag           string
-	RepoName           string
-	AutoSleepHours     *int
-	AutoShutdownHours  int
+	Git    GitConfig
+	Gcloud GcloudConfig
 
 	Secrets map[string]SecretEntry
 	Env     map[string]string

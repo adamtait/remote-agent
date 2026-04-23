@@ -37,18 +37,21 @@ func TestLoadUserConfig_Roundtrip(t *testing.T) {
 git:
   user_name: "Alice"
   user_email: "alice@example.com"
-workstation:
-  region: us-central1
-  machine_type: e2-standard-4
-  disk_size_gb: 50
-  cluster_name: claude-dev-cluster
-  config_name: claude-dev-config
-  service_account_name: claude-workstation-sa
-  image_name: claude-code-workstation
-  image_tag: latest
-  repo_name: claude-workstation-images
-  auto_sleep_hours: 2
-  auto_shutdown_hours: 12
+  github_repo_url: https://example.com/user.git
+gcloud:
+  project: user-proj
+  workstation:
+    region: us-central1
+    machine_type: e2-standard-4
+    disk_size_gb: 50
+    cluster_name: claude-dev-cluster
+    config_name: claude-dev-config
+    service_account_name: claude-workstation-sa
+    image_name: claude-code-workstation
+    image_tag: latest
+    repo_name: claude-workstation-images
+    auto_sleep_hours: 2
+    auto_shutdown_hours: 12
 secrets:
   claude_oauth:
     secret_name: claude-auth
@@ -66,8 +69,9 @@ env:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Git.UserName != "Alice" || cfg.Workstation.Region != "us-central1" ||
-		cfg.Workstation.AutoSleepHours == nil || *cfg.Workstation.AutoSleepHours != 2 {
+	if cfg.Git.UserName != "Alice" || cfg.Git.GithubRepoURL != "https://example.com/user.git" ||
+		cfg.Gcloud.Project != "user-proj" || cfg.Gcloud.Workstation.Region != "us-central1" ||
+		cfg.Gcloud.Workstation.AutoSleepHours == nil || *cfg.Gcloud.Workstation.AutoSleepHours != 2 {
 		t.Errorf("parsed wrong: %+v", cfg)
 	}
 	if got := cfg.Secrets["claude_oauth"].EnvVar; got != "CLAUDE_CODE_OAUTH_TOKEN" {
@@ -81,11 +85,12 @@ env:
 func TestLoadProjectConfig_Roundtrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	contents := `
-project:
-  id: my-proj
+git:
   github_repo_url: https://example.com/x.git
-workstation:
-  machine_type: e2-standard-8
+gcloud:
+  project: my-proj
+  workstation:
+    machine_type: e2-standard-8
 secrets:
   my_extra:
     secret_name: my-extra
@@ -100,11 +105,11 @@ env:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Project.ID != "my-proj" || cfg.Project.GithubRepoURL == "" {
-		t.Errorf("project section parsed wrong: %+v", cfg.Project)
+	if cfg.Gcloud.Project != "my-proj" || cfg.Git.GithubRepoURL == "" {
+		t.Errorf("config parsed wrong: %+v", cfg)
 	}
-	if cfg.Workstation.MachineType != "e2-standard-8" {
-		t.Errorf("project workstation override lost: %+v", cfg.Workstation)
+	if cfg.Gcloud.Workstation.MachineType != "e2-standard-8" {
+		t.Errorf("project workstation override lost: %+v", cfg.Gcloud.Workstation)
 	}
 	if cfg.Secrets["my_extra"].EnvVar != "MY_EXTRA" || cfg.Env["MY_VAR"] != "1" {
 		t.Errorf("maps not parsed: %+v", cfg)

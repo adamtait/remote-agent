@@ -28,17 +28,18 @@ func runConnect(cfg *config.Config, client *gcloud.Client, name string, errOut i
 	if err != nil {
 		return err
 	}
-	info, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, resolved)
+	ws := cfg.Gcloud.Workstation
+	info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
 	}
 	if info.State != "STATE_RUNNING" && info.State != "STATE_STARTING" {
 		fmt.Fprintf(errOut, "Workstation %q is %s; starting...\n", resolved, strings.TrimPrefix(info.State, "STATE_"))
-		if err := client.Start(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, resolved); err != nil {
+		if err := client.Start(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved); err != nil {
 			return fmt.Errorf("starting workstation: %w", err)
 		}
 	}
-	return client.SSH(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, resolved)
+	return client.SSH(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
 }
 
 func init() {

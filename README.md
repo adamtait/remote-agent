@@ -96,13 +96,16 @@ under a minute.
 git:
   user_name: "Alice"
   user_email: "alice@example.com"
+  github_repo_url: https://github.com/org/repo.git
 
-workstation:
-  region: us-central1
-  machine_type: e2-standard-4
-  disk_size_gb: 50
-  cluster_name: claude-dev-cluster
-  # ... other workstation parameters
+gcloud:
+  project: my-gcp-project
+  workstation:
+    region: us-central1
+    machine_type: e2-standard-4
+    disk_size_gb: 50
+    cluster_name: claude-dev-cluster
+    # ... other workstation parameters
 
 secrets:
   claude_oauth:            # or claude_apikey — exactly one required
@@ -117,13 +120,16 @@ env: {}
 
 **`.ws/config.yaml`** (project-specific, thin overrides):
 ```yaml
-project:
-  id: my-gcp-project
+git:
   github_repo_url: https://github.com/org/repo.git
 
+gcloud:
+  project: my-gcp-project
+
 # Optional per-project overrides:
-# workstation:
-#   machine_type: e2-standard-8
+# gcloud:
+#   workstation:
+#     machine_type: e2-standard-8
 # secrets:
 #   my_api:
 #     secret_name: my-api-key

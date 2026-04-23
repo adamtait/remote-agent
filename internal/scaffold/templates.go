@@ -10,14 +10,16 @@ import (
 type ClaudeAuthMode int
 
 const (
-	ClaudeAuthOAuth  ClaudeAuthMode = iota
+	ClaudeAuthOAuth ClaudeAuthMode = iota
 	ClaudeAuthAPIKey
 )
 
 // UserValues are the prompt-gathered inputs for ~/.config/ws/config.yaml.
 type UserValues struct {
-	GitUserName  string
-	GitUserEmail string
+	GitUserName   string
+	GitUserEmail  string
+	GithubRepoURL string
+	GcloudProject string
 
 	Region             string
 	MachineType        string
@@ -77,6 +79,8 @@ func orInt(v, seed int) int {
 func RenderUserConfig(uv UserValues) string {
 	gitName := orStr(uv.GitUserName, placeholderGitUserName)
 	gitEmail := orStr(uv.GitUserEmail, placeholderGitEmail)
+	repoURL := orStr(uv.GithubRepoURL, placeholderRepoURL)
+	projectID := orStr(uv.GcloudProject, placeholderProjectID)
 
 	region := orStr(uv.Region, seedRegion)
 	machine := orStr(uv.MachineType, seedMachineType)
@@ -111,19 +115,22 @@ func RenderUserConfig(uv UserValues) string {
 git:
   user_name: %q
   user_email: %q
+  github_repo_url: %s
 
-workstation:
-  region: %s
-  machine_type: %s
-  disk_size_gb: %d
-  cluster_name: %s
-  config_name: %s
-  service_account_name: %s
-  image_name: %s
-  image_tag: %s
-  repo_name: %s
-  auto_sleep_hours: %d
-  auto_shutdown_hours: %d
+gcloud:
+  project: %s
+  workstation:
+    region: %s
+    machine_type: %s
+    disk_size_gb: %d
+    cluster_name: %s
+    config_name: %s
+    service_account_name: %s
+    image_name: %s
+    image_tag: %s
+    repo_name: %s
+    auto_sleep_hours: %d
+    auto_shutdown_hours: %d
 
 # secrets — map GCP Secret Manager secrets to container env vars. Each
 # entry has the same {secret_name, env_var} shape. ws recognizes three
@@ -151,7 +158,8 @@ secrets:
 # env — plain static env vars forwarded to the container (no secret fetch).
 env: {}
 `,
-		gitName, gitEmail,
+		gitName, gitEmail, repoURL,
+		projectID,
 		region, machine, disk, cluster, conf, sa, img, tag, repo, sleep, shutdown,
 		claudeEntry)
 	return b.String()
@@ -168,16 +176,19 @@ func RenderProjectConfig(pv ProjectValues) string {
 # Precedence: project overrides user. See user config for defaults and
 # the full secrets/env schema.
 
-project:
-  id: %s
+git:
   github_repo_url: %s
+
+gcloud:
+  project: %s
 
 # Uncomment any of the groups below to override user values for this project.
 #
-# workstation:
-#   machine_type: e2-standard-8
-#   disk_size_gb: 100
-#   auto_sleep_hours: 1
+# gcloud:
+#   workstation:
+#     machine_type: e2-standard-8
+#     disk_size_gb: 100
+#     auto_sleep_hours: 1
 #
 # secrets:
 #   my_extra_secret:
@@ -186,7 +197,7 @@ project:
 #
 # env:
 #   MY_STATIC_VAR: foo
-`, projectID, repoURL)
+`, repoURL, projectID)
 	return b.String()
 }
 

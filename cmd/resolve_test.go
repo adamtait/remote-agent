@@ -27,7 +27,7 @@ func (f *testRunner) Run(args ...string) error {
 	}
 	return nil
 }
-func (f *testRunner) RunWithStdin(_ io.Reader, _ ...string) error          { return nil }
+func (f *testRunner) RunWithStdin(_ io.Reader, _ ...string) error { return nil }
 func (f *testRunner) Check(args ...string) bool {
 	if v, ok := f.checks[f.key(args)]; ok {
 		return v
@@ -42,7 +42,7 @@ func (f *testRunner) Output(args ...string) ([]byte, error) {
 }
 
 func TestResolveWorkstationName_ExplicitName(t *testing.T) {
-	cfg := &config.Config{ProjectID: "p", Region: "r", ClusterName: "cl", ConfigName: "cfg", WorkstationName: "p-user"}
+	cfg := &config.Config{Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{Region: "r", ClusterName: "cl", ConfigName: "cfg"}}, WorkstationName: "p-user"}
 	client := gcloud.NewClient(&testRunner{})
 	name, err := resolveWorkstationName(cfg, client, "explicit-name")
 	if err != nil {
@@ -62,7 +62,7 @@ func TestResolveWorkstationName_UsesDefaultWhenExists(t *testing.T) {
 			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_RUNNING\thost\n"),
 		},
 	}
-	cfg := &config.Config{ProjectID: "p", Region: "r", ClusterName: "cl", ConfigName: "cfg", WorkstationName: "p-user"}
+	cfg := &config.Config{Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{Region: "r", ClusterName: "cl", ConfigName: "cfg"}}, WorkstationName: "p-user"}
 	client := gcloud.NewClient(runner)
 	name, err := resolveWorkstationName(cfg, client, "")
 	if err != nil {
@@ -82,7 +82,7 @@ func TestResolveWorkstationName_SingleFallback(t *testing.T) {
 			"workstations list --cluster cl --config cfg --region r --project p --format value(name,state)": []byte("other-ws\tSTATE_STOPPED\n"),
 		},
 	}
-	cfg := &config.Config{ProjectID: "p", Region: "r", ClusterName: "cl", ConfigName: "cfg", WorkstationName: "p-user"}
+	cfg := &config.Config{Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{Region: "r", ClusterName: "cl", ConfigName: "cfg"}}, WorkstationName: "p-user"}
 	client := gcloud.NewClient(runner)
 	name, err := resolveWorkstationName(cfg, client, "")
 	if err != nil {

@@ -19,7 +19,8 @@ var urlCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		info, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, resolved)
+		ws := cfg.Gcloud.Workstation
+		info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
 		if err != nil {
 			return err
 		}

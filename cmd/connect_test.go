@@ -12,10 +12,14 @@ import (
 
 func newConnectCfg() *config.Config {
 	return &config.Config{
-		ProjectID:       "p",
-		Region:          "r",
-		ClusterName:     "cl",
-		ConfigName:      "cfg",
+		Gcloud: config.GcloudConfig{
+			Project: "p",
+			Workstation: config.WorkstationConfig{
+				Region:      "r",
+				ClusterName: "cl",
+				ConfigName:  "cfg",
+			},
+		},
 		WorkstationName: "p-user",
 	}
 }

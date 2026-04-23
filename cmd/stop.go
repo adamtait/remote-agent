@@ -17,7 +17,8 @@ var stopCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return client.Stop(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, resolved)
+		ws := cfg.Gcloud.Workstation
+		return client.Stop(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
 	},
 }
 
