@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/adamtait/remote-agent/internal/config"
 )
 
 // Preflight tests exercise ensureBuildAssets, which we expose in cmd to
@@ -126,3 +128,39 @@ func equalStringSlices(a, b []string) bool {
 // This compile-time check catches breaks if we later extract an interface.
 var _ io.Writer = (*bytes.Buffer)(nil)
 var _ error = errors.New("sentinel")
+
+func TestEnsureWorkstationAbsent_Absent_NoError(t *testing.T) {
+	runner := &testRunner{checks: map[string]bool{}}
+	cfg := &config.Config{
+		ProjectID:       "p",
+		Region:          "r",
+		ClusterName:     "cl",
+		ConfigName:      "cfg",
+		WorkstationName: "remote-agent-user",
+	}
+	if err := ensureWorkstationAbsent(runner, cfg); err != nil {
+		t.Fatalf("expected no error when workstation is absent, got: %v", err)
+	}
+}
+
+func TestEnsureWorkstationAbsent_Present_Errors(t *testing.T) {
+	key := "workstations describe remote-agent-user --cluster cl --config cfg --region r --project p"
+	runner := &testRunner{checks: map[string]bool{key: true}}
+	cfg := &config.Config{
+		ProjectID:       "p",
+		Region:          "r",
+		ClusterName:     "cl",
+		ConfigName:      "cfg",
+		WorkstationName: "remote-agent-user",
+	}
+	err := ensureWorkstationAbsent(runner, cfg)
+	if err == nil {
+		t.Fatal("expected error when workstation already exists")
+	}
+	if !strings.Contains(err.Error(), "remote-agent-user") {
+		t.Errorf("error should name the workstation, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ws delete") {
+		t.Errorf("error should suggest `ws delete`, got: %v", err)
+	}
+}

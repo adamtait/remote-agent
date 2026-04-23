@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/spf13/cobra"
@@ -21,7 +22,8 @@ import (
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Provision a Google Cloud Workstation with Claude Code",
-	Long: `Idempotent: safe to re-run. Each step checks for existence first.
+	Long: `Create a new GCP Workstation for this repo. Errors if a workstation
+with the derived name already exists; delete it first with 'ws delete'.
 Requires .ws.yaml in the project root with project_id and github_repo_url set.`,
 	RunE: runCreate,
 }
@@ -91,6 +93,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	r := runner
+
+	// `ws create` is for creating new workstations. If one with this name
+	// already exists, bail out before enabling APIs or building images.
+	if err := ensureWorkstationAbsent(r, cfg); err != nil {
+		return err
+	}
 
 	imageURI := fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
 		cfg.Region, cfg.ProjectID, cfg.RepoName, cfg.ImageName, cfg.ImageTag)
@@ -282,16 +290,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 8 — Create and start workstation
-	logStep(fmt.Sprintf("Ensuring workstation '%s'...", cfg.WorkstationName))
-	if !r.Check("workstations", "describe", cfg.WorkstationName,
+	// Step 8 — Create and start workstation. `ensureWorkstationAbsent` already
+	// guaranteed it doesn't exist, so just create it.
+	logStep(fmt.Sprintf("Creating workstation '%s'...", cfg.WorkstationName))
+	if err := r.Run("workstations", "create", cfg.WorkstationName,
 		"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
-		"--region", cfg.Region, "--project", cfg.ProjectID) {
-		if err := r.Run("workstations", "create", cfg.WorkstationName,
-			"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
-			"--region", cfg.Region, "--project", cfg.ProjectID); err != nil {
-			return fmt.Errorf("creating workstation: %w", err)
-		}
+		"--region", cfg.Region, "--project", cfg.ProjectID); err != nil {
+		return fmt.Errorf("creating workstation: %w", err)
 	}
 	wsInfo, err := client.Describe(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName, cfg.WorkstationName)
 	if err != nil {
@@ -338,6 +343,19 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		cfg.WorkstationName,
 	)
 
+	return nil
+}
+
+// ensureWorkstationAbsent returns an error if a workstation with cfg.WorkstationName
+// already exists. `ws create` is for *creating* new workstations; updating an
+// existing one is out of scope. Users delete the existing workstation first.
+func ensureWorkstationAbsent(r gcloud.Runner, cfg *config.Config) error {
+	if r.Check("workstations", "describe", cfg.WorkstationName,
+		"--cluster", cfg.ClusterName, "--config", cfg.ConfigName,
+		"--region", cfg.Region, "--project", cfg.ProjectID) {
+		return fmt.Errorf("workstation %q already exists — delete it first with `ws delete %s`",
+			cfg.WorkstationName, cfg.WorkstationName)
+	}
 	return nil
 }
 
