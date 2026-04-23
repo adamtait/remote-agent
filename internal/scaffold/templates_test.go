@@ -141,6 +141,10 @@ func TestRenderProjectTemplate_UserValuesRenderUncommented(t *testing.T) {
 			t.Errorf("missing uncommented %q\ngot:\n%s", want, got)
 		}
 	}
+	// region line must preserve its trailing inline comment.
+	if !strings.Contains(got, "region: us-east1  # optional; falls back to global default, then us-central1") {
+		t.Errorf("region line missing trailing comment:\n%s", got)
+	}
 	// Probed hint still surfaces even when user overrides.
 	if !strings.Contains(got, "probed: probed-proj") {
 		t.Errorf("probed hint lost:\n%s", got)
@@ -172,6 +176,7 @@ func TestRenderProjectTemplate_EmptyUserValuesStayCommented(t *testing.T) {
 	for _, unwant := range []string{
 		"\nregion:",
 		"\ncluster_name:",
+		"\nconfig_name:",
 		"\nmachine_type:",
 		"\ndisk_size_gb:",
 	} {
