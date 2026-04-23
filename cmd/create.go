@@ -455,7 +455,7 @@ func ensureBuildAssets(cwd, home string, stdin io.Reader, out io.Writer, isTTY b
 	}
 
 	_, err = scaffold.ScaffoldAssets(scaffold.ScaffoldAssetsOptions{
-		Cwd: cwd, Home: home, Stdout: out,
+		TargetDir: filepath.Join(cwd, ".ws"), Home: home, Stdout: out,
 		OnlyMissing: true,
 	})
 	return err

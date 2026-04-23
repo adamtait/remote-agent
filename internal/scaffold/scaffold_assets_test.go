@@ -11,17 +11,18 @@ import (
 func TestScaffoldAssets_WritesBothFromEmbedded(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
+	wsDir := filepath.Join(cwd, ".ws")
 	var out bytes.Buffer
 
 	res, err := ScaffoldAssets(ScaffoldAssetsOptions{
-		Cwd: cwd, Home: home, Stdout: &out,
+		TargetDir: wsDir, Home: home, Stdout: &out,
 	})
 	if err != nil {
 		t.Fatalf("ScaffoldAssets: %v", err)
 	}
 
-	dockerPath := filepath.Join(cwd, ".ws", "Dockerfile")
-	entPath := filepath.Join(cwd, ".ws", "entrypoint.sh")
+	dockerPath := filepath.Join(wsDir, "Dockerfile")
+	entPath := filepath.Join(wsDir, "entrypoint.sh")
 
 	for _, p := range []string{dockerPath, entPath} {
 		if _, err := os.Stat(p); err != nil {
@@ -49,17 +50,18 @@ func TestScaffoldAssets_WritesBothFromEmbedded(t *testing.T) {
 func TestScaffoldAssets_RefusesExistingWithoutForce(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+	wsDir := filepath.Join(cwd, ".ws")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	existing := filepath.Join(cwd, ".ws", "Dockerfile")
+	existing := filepath.Join(wsDir, "Dockerfile")
 	if err := os.WriteFile(existing, []byte("old\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	var out bytes.Buffer
 	_, err := ScaffoldAssets(ScaffoldAssetsOptions{
-		Cwd: cwd, Home: home, Stdout: &out,
+		TargetDir: wsDir, Home: home, Stdout: &out,
 	})
 	if err == nil {
 		t.Fatal("expected error for existing file without --force")
@@ -77,17 +79,18 @@ func TestScaffoldAssets_RefusesExistingWithoutForce(t *testing.T) {
 func TestScaffoldAssets_ForceOverwrites(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+	wsDir := filepath.Join(cwd, ".ws")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(cwd, ".ws", "Dockerfile")
+	path := filepath.Join(wsDir, "Dockerfile")
 	if err := os.WriteFile(path, []byte("old\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	var out bytes.Buffer
 	if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
-		Cwd: cwd, Home: home, Stdout: &out, Force: true,
+		TargetDir: wsDir, Home: home, Stdout: &out, Force: true,
 	}); err != nil {
 		t.Fatalf("ScaffoldAssets with --force: %v", err)
 	}
@@ -101,14 +104,15 @@ func TestScaffoldAssets_ForceOverwrites(t *testing.T) {
 func TestScaffoldAssets_DryRun_WritesNothing(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
+	wsDir := filepath.Join(cwd, ".ws")
 	var out bytes.Buffer
 	if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
-		Cwd: cwd, Home: home, Stdout: &out, DryRun: true,
+		TargetDir: wsDir, Home: home, Stdout: &out, DryRun: true,
 	}); err != nil {
 		t.Fatalf("ScaffoldAssets dry-run: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(cwd, ".ws", "Dockerfile")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(wsDir, "Dockerfile")); !os.IsNotExist(err) {
 		t.Errorf(".ws/Dockerfile should not exist after dry-run, err=%v", err)
 	}
 	if !strings.Contains(out.String(), "would write") {
@@ -119,6 +123,7 @@ func TestScaffoldAssets_DryRun_WritesNothing(t *testing.T) {
 func TestScaffoldAssets_UserTemplatePrecedence(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
+	wsDir := filepath.Join(cwd, ".ws")
 	tmplDir := filepath.Join(home, ".config", "ws", "template")
 	if err := os.MkdirAll(tmplDir, 0755); err != nil {
 		t.Fatal(err)
@@ -130,13 +135,13 @@ func TestScaffoldAssets_UserTemplatePrecedence(t *testing.T) {
 
 	var out bytes.Buffer
 	res, err := ScaffoldAssets(ScaffoldAssetsOptions{
-		Cwd: cwd, Home: home, Stdout: &out,
+		TargetDir: wsDir, Home: home, Stdout: &out,
 	})
 	if err != nil {
 		t.Fatalf("ScaffoldAssets: %v", err)
 	}
 
-	dockerContents, _ := os.ReadFile(filepath.Join(cwd, ".ws", "Dockerfile"))
+	dockerContents, _ := os.ReadFile(filepath.Join(wsDir, "Dockerfile"))
 	if !bytes.Equal(dockerContents, customDocker) {
 		t.Errorf("Dockerfile bytes = %q, want user-template bytes", dockerContents)
 	}
@@ -162,7 +167,7 @@ func TestScaffoldAssets_PartialExisting_OnlyScaffoldsMissing(t *testing.T) {
 
 	var out bytes.Buffer
 	res, err := ScaffoldAssets(ScaffoldAssetsOptions{
-		Cwd: cwd, Home: home, Stdout: &out, OnlyMissing: true,
+		TargetDir: wsDir, Home: home, Stdout: &out, OnlyMissing: true,
 	})
 	if err != nil {
 		t.Fatalf("ScaffoldAssets OnlyMissing: %v", err)

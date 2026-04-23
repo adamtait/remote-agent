@@ -39,14 +39,15 @@ is set.`,
 		if err != nil {
 			return fmt.Errorf("determining working directory: %w", err)
 		}
-		f := readFlags(cmd, "force", "project-only", "global-only", "advanced")
+		f := readFlags(cmd, "force", "project-only", "global-only", "advanced", "with-project-assets")
 		return scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 			Stdin: cmd.InOrStdin(), Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr(),
 			Cwd: cwd, Home: home, Prober: scaffold.RealProber{},
-			Force:       f["force"],
-			ProjectOnly: f["project-only"],
-			GlobalOnly:  f["global-only"],
-			Advanced:    f["advanced"],
+			Force:             f["force"],
+			ProjectOnly:       f["project-only"],
+			GlobalOnly:        f["global-only"],
+			Advanced:          f["advanced"],
+			WithProjectAssets: f["with-project-assets"],
 		})
 	},
 }
@@ -63,13 +64,14 @@ var setupTemplateCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("determining working directory: %w", err)
 		}
-		f := readFlags(cmd, "force", "project-only", "global-only")
+		f := readFlags(cmd, "force", "project-only", "global-only", "with-project-assets")
 		return scaffold.TemplateScaffold(scaffold.TemplateOptions{
 			Stdout: cmd.OutOrStdout(),
 			Cwd:    cwd, Home: home, Prober: scaffold.RealProber{},
-			Force:       f["force"],
-			ProjectOnly: f["project-only"],
-			GlobalOnly:  f["global-only"],
+			Force:             f["force"],
+			ProjectOnly:       f["project-only"],
+			GlobalOnly:        f["global-only"],
+			WithProjectAssets: f["with-project-assets"],
 		})
 	},
 }
@@ -81,6 +83,7 @@ func addSharedSetupFlags(c *cobra.Command) {
 	c.Flags().Bool("force", false, "overwrite existing config files")
 	c.Flags().Bool("project-only", false, "scaffold only .ws/config.yaml")
 	c.Flags().Bool("global-only", false, "scaffold only ~/.config/ws/config.yaml")
+	c.Flags().Bool("with-project-assets", false, "also copy Dockerfile/entrypoint.sh into .ws/")
 }
 
 func init() {

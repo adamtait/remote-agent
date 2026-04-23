@@ -125,7 +125,7 @@ func TestSetupTemplate_WritesAssets(t *testing.T) {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		p := filepath.Join(cwd, ".ws", name)
+		p := filepath.Join(home, ".config", "ws", "template", name)
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
@@ -168,7 +168,7 @@ func TestSetupTemplate_ProjectOnly_WritesAssets(t *testing.T) {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(cwd, ".ws", name)); err != nil {
+		if _, err := os.Stat(filepath.Join(home, ".config", "ws", "template", name)); err != nil {
 			t.Errorf("missing %s: %v", name, err)
 		}
 	}
@@ -189,12 +189,12 @@ func TestSetupInteractive_AlwaysScaffoldsAssets(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
 	// Pipe pre-canned answers for every prompt in order:
-	//   project_id, github_repo_url, region, git_user_name, git_user_email,
+	//   project_id, github_repo_url, auth_mode, git_user_name, git_user_email,
 	//   Proceed? [Y/n]
 	input := strings.Join([]string{
 		"my-project",
 		"https://github.com/a/b.git",
-		"us-central1",
+		"1", // oauth
 		"Alice",
 		"a@example.com",
 		"Y", // Proceed?
@@ -208,9 +208,14 @@ func TestSetupInteractive_AlwaysScaffoldsAssets(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d. stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
-	for _, name := range []string{"config.yaml", "Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(cwd, ".ws", name)); err != nil {
-			t.Errorf("missing .ws/%s: %v", name, err)
+	// config.yaml still in .ws/
+	if _, err := os.Stat(filepath.Join(cwd, ".ws", "config.yaml")); err != nil {
+		t.Errorf("missing .ws/config.yaml: %v", err)
+	}
+	// assets in user template dir
+	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+		if _, err := os.Stat(filepath.Join(home, ".config", "ws", "template", name)); err != nil {
+			t.Errorf("missing user template %s: %v", name, err)
 		}
 	}
 }
@@ -227,17 +232,18 @@ func TestSetupInteractive_RerunSkipsExistingAssets(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	// Pre-create a customized Dockerfile that must survive setup.
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+	// Pre-create a customized Dockerfile in user template dir that must survive setup.
+	userTemplateDir := filepath.Join(home, ".config", "ws", "template")
+	if err := os.MkdirAll(userTemplateDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	custom := []byte("# user customization\n")
-	if err := os.WriteFile(filepath.Join(cwd, ".ws", "Dockerfile"), custom, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(userTemplateDir, "Dockerfile"), custom, 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	input := strings.Join([]string{
-		"my-project", "https://github.com/a/b.git", "us-central1",
+		"my-project", "https://github.com/a/b.git", "1",
 		"Alice", "a@example.com", "Y", "",
 	}, "\n")
 	var stdin bytes.Buffer
@@ -247,11 +253,11 @@ func TestSetupInteractive_RerunSkipsExistingAssets(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
-	got, _ := os.ReadFile(filepath.Join(cwd, ".ws", "Dockerfile"))
+	got, _ := os.ReadFile(filepath.Join(userTemplateDir, "Dockerfile"))
 	if string(got) != string(custom) {
 		t.Errorf("custom Dockerfile was overwritten:\n%s", got)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".ws", "entrypoint.sh")); err != nil {
+	if _, err := os.Stat(filepath.Join(userTemplateDir, "entrypoint.sh")); err != nil {
 		t.Errorf("entrypoint.sh should still be scaffolded: %v", err)
 	}
 }
