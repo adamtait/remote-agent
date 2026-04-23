@@ -17,13 +17,14 @@ func TestInteractiveScaffold_WritesBothFiles(t *testing.T) {
 	home := t.TempDir()
 
 	// Inputs (in order): project_id, github_repo_url, region, git_user_name,
-	// git_user_email, then "y" to confirm.
+	// git_user_email, then "y" to confirm, then "y" to scaffold.
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
 		"https://github.com/a/b.git",
 		"us-central1",
 		"Alice",
 		"alice@example.com",
+		"y",
 		"y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
@@ -39,15 +40,15 @@ func TestInteractiveScaffold_WritesBothFiles(t *testing.T) {
 	}
 
 	// Project file
-	proj, err := os.ReadFile(filepath.Join(cwd, ".ws.yaml"))
+	proj, err := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(proj), "project_id: my-proj-123") {
-		t.Errorf(".ws.yaml missing project_id:\n%s", proj)
+		t.Errorf(".ws/config.yaml missing project_id:\n%s", proj)
 	}
 	if !strings.Contains(string(proj), "github_repo_url: https://github.com/a/b.git") {
-		t.Errorf(".ws.yaml missing github_repo_url:\n%s", proj)
+		t.Errorf(".ws/config.yaml missing github_repo_url:\n%s", proj)
 	}
 
 	// Global file
@@ -66,7 +67,10 @@ func TestInteractiveScaffold_WritesBothFiles(t *testing.T) {
 func TestInteractiveScaffold_RefusesIfProjectFileExists(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(cwd, ".ws.yaml"), []byte("existing: true\n"), 0644); err != nil {
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("existing: true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	stdin := strings.NewReader(strings.Join([]string{
@@ -81,7 +85,7 @@ func TestInteractiveScaffold_RefusesIfProjectFileExists(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	// File unchanged
-	got, _ := os.ReadFile(filepath.Join(cwd, ".ws.yaml"))
+	got, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
 	if string(got) != "existing: true\n" {
 		t.Errorf("file modified: %q", got)
 	}
@@ -90,11 +94,14 @@ func TestInteractiveScaffold_RefusesIfProjectFileExists(t *testing.T) {
 func TestInteractiveScaffold_ForceOverwrites(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(cwd, ".ws.yaml"), []byte("existing: true\n"), 0644); err != nil {
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("existing: true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "us-central1", "Alice", "alice@example.com", "y",
+		"my-proj-123", "https://github.com/a/b.git", "us-central1", "Alice", "alice@example.com", "y", "n",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
@@ -104,7 +111,7 @@ func TestInteractiveScaffold_ForceOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _ := os.ReadFile(filepath.Join(cwd, ".ws.yaml"))
+	got, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
 	if !strings.Contains(string(got), "my-proj-123") {
 		t.Errorf("file not overwritten: %q", got)
 	}
@@ -114,7 +121,7 @@ func TestInteractiveScaffold_ProjectOnlySkipsGlobal(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "y",
+		"my-proj-123", "https://github.com/a/b.git", "y", "n",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
@@ -124,7 +131,7 @@ func TestInteractiveScaffold_ProjectOnlySkipsGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".ws.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(cwd, ".ws", "config.yaml")); err != nil {
 		t.Errorf("project file not written: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".config", "ws", "config.yaml")); !errors.Is(err, os.ErrNotExist) {
@@ -162,7 +169,7 @@ func TestInteractiveScaffold_NoCancelsOnProceed(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected cancellation error, got nil")
 	}
-	if _, statErr := os.Stat(filepath.Join(cwd, ".ws.yaml")); !errors.Is(statErr, os.ErrNotExist) {
+	if _, statErr := os.Stat(filepath.Join(cwd, ".ws", "config.yaml")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Error("project file should not exist after cancel")
 	}
 }
@@ -201,7 +208,8 @@ func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
 		"us-central1",
 		"Alice",
 		"alice@example.com",
-		"y",
+		"y", // Proceed?
+		"n", // Scaffold .ws/ assets?
 	}, "\n") + "\n")
 	var stdout bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
@@ -229,7 +237,7 @@ func TestTemplateScaffold_WritesBothFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, _ := os.ReadFile(filepath.Join(cwd, ".ws.yaml"))
+	proj, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
 	if !strings.Contains(string(proj), "probed: probed-proj") {
 		t.Errorf("template missing probed project id:\n%s", proj)
 	}

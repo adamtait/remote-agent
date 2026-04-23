@@ -3,9 +3,12 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -136,10 +139,24 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	// Step 3 — Build and push image
 	logStep(fmt.Sprintf("Building image %s...", imageURI))
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("determining home directory: %w", err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("determining working directory: %w", err)
+	}
+	isTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	if err := ensureBuildAssets(cwd, home, os.Stdin, os.Stdout, isTTY); err != nil {
+		return err
+	}
+
 	if err := r.Run("auth", "configure-docker", fmt.Sprintf("%s-docker.pkg.dev", cfg.Region), "--quiet"); err != nil {
 		return fmt.Errorf("configuring docker auth: %w", err)
 	}
-	if err := (dockerRunner{}).Run("buildx", "build", "--platform", "linux/amd64", "-t", imageURI, "--push", "."); err != nil {
+	if err := (dockerRunner{}).Run(dockerBuildArgs(imageURI)...); err != nil {
 		return fmt.Errorf("building and pushing image: %w", err)
 	}
 
@@ -411,4 +428,54 @@ func (d dockerRunner) Run(args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// ensureBuildAssets verifies .ws/Dockerfile and .ws/entrypoint.sh exist in
+// cwd. If missing and stdin is a TTY, prompts to scaffold. If missing and
+// non-TTY, returns an error directing the user to run 'ws setup scaffold'.
+func ensureBuildAssets(cwd, home string, stdin io.Reader, out io.Writer, isTTY bool) error {
+	missing := []string{}
+	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
+		if _, err := os.Stat(filepath.Join(cwd, ".ws", n)); err != nil {
+			missing = append(missing, n)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if !isTTY {
+		return fmt.Errorf(".ws/ not initialized (missing: %s) — run 'ws setup scaffold' first",
+			strings.Join(missing, ", "))
+	}
+
+	reader := bufio.NewReader(stdin)
+	fmt.Fprintf(out, "No .ws/ assets (missing: %s). Scaffold defaults now? [Y/n] ",
+		strings.Join(missing, ", "))
+	line, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("reading stdin: %w", err)
+	}
+	ans := strings.ToLower(strings.TrimSpace(line))
+	if ans == "n" || ans == "no" {
+		return fmt.Errorf(".ws/ not initialized — re-run 'ws create' after 'ws setup scaffold'")
+	}
+
+	_, err = scaffold.ScaffoldAssets(scaffold.ScaffoldAssetsOptions{
+		Cwd: cwd, Home: home, Stdout: out,
+		OnlyMissing: true,
+	})
+	return err
+}
+
+// dockerBuildArgs returns the buildx args used by `ws create`, centralized so
+// tests can assert on the exact flags.
+func dockerBuildArgs(imageURI string) []string {
+	return []string{
+		"buildx", "build",
+		"--platform", "linux/amd64",
+		"-t", imageURI,
+		"-f", ".ws/Dockerfile",
+		"--push",
+		".",
+	}
 }

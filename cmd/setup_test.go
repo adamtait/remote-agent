@@ -29,7 +29,7 @@ func TestSetupTemplate_WritesFiles(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d. stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
 
-	projectPath := filepath.Join(cwd, ".ws.yaml")
+	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
 	if _, err := os.Stat(projectPath); err != nil {
 		t.Fatalf("expected %s to exist: %v", projectPath, err)
 	}
@@ -50,7 +50,10 @@ func TestSetupTemplate_RefusesExistingWithoutForce(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	projectPath := filepath.Join(cwd, ".ws.yaml")
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
 	if err := os.WriteFile(projectPath, []byte("old: content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -76,8 +79,11 @@ func TestSetupTemplate_ErrorPrintedOnce(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	// Pre-write .ws.yaml so the command errors.
-	if err := os.WriteFile(filepath.Join(cwd, ".ws.yaml"), []byte("old\n"), 0644); err != nil {
+	// Pre-write .ws/config.yaml so the command errors.
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("old\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,7 +110,10 @@ func TestSetupTemplate_ForceOverwrites(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	projectPath := filepath.Join(cwd, ".ws.yaml")
+	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
 	if err := os.WriteFile(projectPath, []byte("old: content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -122,5 +131,150 @@ func TestSetupTemplate_ForceOverwrites(t *testing.T) {
 	}
 	if strings.Contains(string(data), "old") {
 		t.Fatalf("expected %s to be overwritten, still contains 'old': %q", projectPath, string(data))
+	}
+}
+
+func TestSetupTemplate_WritesAssets(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	var stdin, stdout, stderr bytes.Buffer
+	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup", "template"})
+	if code != 0 {
+		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
+	}
+	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+		p := filepath.Join(cwd, ".ws", name)
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("missing %s: %v", p, err)
+		}
+	}
+}
+
+func TestSetupTemplate_GlobalOnly_SkipsAssets(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	var stdin, stdout, stderr bytes.Buffer
+	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup", "template", "--global-only"})
+	if code != 0 {
+		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".ws", "Dockerfile")); !os.IsNotExist(err) {
+		t.Error("--global-only should not write .ws/Dockerfile")
+	}
+}
+
+func TestSetupTemplate_ProjectOnly_WritesAssets(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	var stdin, stdout, stderr bytes.Buffer
+	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup", "template", "--project-only"})
+	if code != 0 {
+		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
+	}
+	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+		if _, err := os.Stat(filepath.Join(cwd, ".ws", name)); err != nil {
+			t.Errorf("missing %s: %v", name, err)
+		}
+	}
+	// Global config should not exist under --project-only.
+	if _, err := os.Stat(filepath.Join(home, ".config", "ws", "config.yaml")); !os.IsNotExist(err) {
+		t.Error("--project-only should not write ~/.config/ws/config.yaml")
+	}
+}
+
+func TestSetupInteractive_ScaffoldPromptYes(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	// Pipe pre-canned answers for every prompt in order:
+	//   project_id, github_repo_url, region, git_user_name, git_user_email,
+	//   Proceed? [Y/n], Scaffold? [Y/n]
+	input := strings.Join([]string{
+		"my-project",                 // project_id
+		"https://github.com/a/b.git", // github_repo_url
+		"us-central1",                // region (global defaults)
+		"Alice",                      // git_user_name
+		"a@example.com",              // git_user_email
+		"Y",                          // Proceed?
+		"Y",                          // Scaffold .ws/ assets?
+		"",                           // trailing newline
+	}, "\n")
+	var stdin bytes.Buffer
+	stdin.WriteString(input)
+
+	var stdout, stderr bytes.Buffer
+	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup"})
+	if code != 0 {
+		t.Fatalf("exit %d. stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+		if _, err := os.Stat(filepath.Join(cwd, ".ws", name)); err != nil {
+			t.Errorf("missing %s: %v", name, err)
+		}
+	}
+}
+
+func TestSetupInteractive_ScaffoldPromptNo(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	input := strings.Join([]string{
+		"my-project",
+		"https://github.com/a/b.git",
+		"us-central1",
+		"Alice",
+		"a@example.com",
+		"Y", // Proceed
+		"n", // Scaffold? NO
+		"",
+	}, "\n")
+	var stdin bytes.Buffer
+	stdin.WriteString(input)
+
+	var stdout, stderr bytes.Buffer
+	code := cmd.ExecuteWithIO(&stdin, &stdout, &stderr, []string{"setup"})
+	if code != 0 {
+		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
+	}
+	// Config must exist…
+	if _, err := os.Stat(filepath.Join(cwd, ".ws", "config.yaml")); err != nil {
+		t.Errorf("config.yaml should exist: %v", err)
+	}
+	// …but assets must NOT.
+	if _, err := os.Stat(filepath.Join(cwd, ".ws", "Dockerfile")); !os.IsNotExist(err) {
+		t.Error("Dockerfile should not be scaffolded when user answered 'n'")
 	}
 }

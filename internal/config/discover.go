@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 )
 
-// FindProjectConfig walks up from startDir looking for .ws.yaml,
-// stopping when it reaches stopDir or the filesystem root.
+// FindProjectConfig walks up from startDir looking for .ws/config.yaml,
+// stopping at stopDir or the filesystem root.
 func FindProjectConfig(startDir, stopDir string) (string, error) {
 	dir := startDir
 	for {
-		candidate := filepath.Join(dir, ".ws.yaml")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
+		path := filepath.Join(dir, ".ws", "config.yaml")
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
 		}
 		if dir == stopDir || dir == "/" {
 			break
@@ -25,5 +25,5 @@ func FindProjectConfig(startDir, stopDir string) (string, error) {
 		}
 		dir = parent
 	}
-	return "", fmt.Errorf("no .ws.yaml found; create one in your project root (see README)")
+	return "", fmt.Errorf("no .ws/config.yaml found; create one with 'ws setup' in your project root")
 }

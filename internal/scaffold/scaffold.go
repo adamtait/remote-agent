@@ -119,7 +119,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 
 	fmt.Fprintln(opts.Stdout)
 	if writeProject {
-		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Cwd, ".ws.yaml")+":")
+		fmt.Fprintln(opts.Stdout, "About to write "+filepath.Join(opts.Cwd, ".ws", "config.yaml")+":")
 		fmt.Fprintln(opts.Stdout, indent(project.marshal(), "  "))
 	}
 	if writeGlobal {
@@ -137,13 +137,32 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	}
 
 	if writeProject {
-		if err := WriteAtomic(filepath.Join(opts.Cwd, ".ws.yaml"), []byte(project.marshal()), opts.Force); err != nil {
+		if err := WriteAtomic(filepath.Join(opts.Cwd, ".ws", "config.yaml"), []byte(project.marshal()), opts.Force); err != nil {
 			return err
 		}
 	}
 	if writeGlobal {
 		if err := WriteAtomic(filepath.Join(opts.Home, ".config", "ws", "config.yaml"), []byte(global.marshal()), opts.Force); err != nil {
 			return err
+		}
+	}
+
+	// Scaffold prompt — only when project assets would apply.
+	if writeProject {
+		answer, err := Prompt(stdin, opts.Stdout,
+			"Scaffold customizable .ws/Dockerfile and .ws/entrypoint.sh? [Y/n]",
+			"Y", nil)
+		if err != nil {
+			return err
+		}
+		ans := strings.ToLower(strings.TrimSpace(answer))
+		if ans != "n" && ans != "no" {
+			if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
+				Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
+				Force: opts.Force,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -165,7 +184,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 	}
 
 	if !opts.GlobalOnly {
-		path := filepath.Join(opts.Cwd, ".ws.yaml")
+		path := filepath.Join(opts.Cwd, ".ws", "config.yaml")
 		if err := WriteAtomic(path, []byte(RenderProjectTemplate(pv)), opts.Force); err != nil {
 			return err
 		}
@@ -177,6 +196,14 @@ func TemplateScaffold(opts TemplateOptions) error {
 			return err
 		}
 		fmt.Fprintln(opts.Stdout, "Wrote "+path)
+	}
+	if !opts.GlobalOnly {
+		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
+			Cwd: opts.Cwd, Home: opts.Home, Stdout: opts.Stdout,
+			Force: opts.Force,
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
