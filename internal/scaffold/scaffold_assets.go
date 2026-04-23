@@ -54,6 +54,11 @@ func ScaffoldAssets(opts ScaffoldAssetsOptions) (AssetResult, error) {
 
 	for _, name := range AssetNames {
 		target := filepath.Join(wsDir, name)
+		if !opts.DryRun {
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return res, fmt.Errorf("creating parent dir for %s: %w", target, err)
+			}
+		}
 
 		_, statErr := os.Stat(target)
 		exists := statErr == nil
