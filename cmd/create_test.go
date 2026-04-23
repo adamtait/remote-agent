@@ -14,87 +14,98 @@ import (
 	"github.com/adamtait/remote-agent/internal/scaffold"
 )
 
-// Preflight tests exercise ensureBuildAssets, which we expose in cmd to
+// Preflight tests exercise materializeBuildAssets, which we expose in cmd to
 // test without running the whole create flow.
-func TestEnsureBuildAssets_Present_ReturnsNil(t *testing.T) {
+func TestMaterializeBuildAssets_BothPresent_NoWrite(t *testing.T) {
 	cwd := t.TempDir()
 	ws := filepath.Join(cwd, ".ws")
 	if err := os.MkdirAll(ws, 0755); err != nil {
 		t.Fatal(err)
 	}
 	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
-		if err := os.WriteFile(filepath.Join(ws, n), []byte("x"), 0644); err != nil {
+		content := []byte("existing-" + n)
+		if err := os.WriteFile(filepath.Join(ws, n), content, 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	var stdin bytes.Buffer
-	var out bytes.Buffer
-	if err := ensureBuildAssets(cwd, cwd, &stdin, &out, false); err != nil {
+	cleanup, err := materializeBuildAssets(cwd, t.TempDir())
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
-
-func TestEnsureBuildAssets_MissingNonTTY_Errors(t *testing.T) {
-	cwd := t.TempDir()
-	var stdin bytes.Buffer // not a TTY
-	var out bytes.Buffer
-	err := ensureBuildAssets(cwd, t.TempDir(), &stdin, &out, false)
-	if err == nil {
-		t.Fatal("expected error when missing + non-TTY")
-	}
-	if !strings.Contains(err.Error(), "ws setup scaffold") {
-		t.Errorf("error should mention 'ws setup scaffold', got: %v", err)
-	}
-}
-
-func TestEnsureBuildAssets_MissingTTYAnswerYes_Scaffolds(t *testing.T) {
-	cwd := t.TempDir()
-	home := t.TempDir()
-	stdin := bytes.NewBufferString("Y\n")
-	var out bytes.Buffer
-	if err := ensureBuildAssets(cwd, home, stdin, &out, true); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	defer cleanup()
+	// files should still have original content — materialize must not overwrite
 	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
-		p := filepath.Join(cwd, ".ws", n)
-		if _, err := os.Stat(p); err != nil {
-			t.Errorf("expected %s to exist after prompt=yes: %v", p, err)
+		data, err := os.ReadFile(filepath.Join(ws, n))
+		if err != nil {
+			t.Fatalf("reading %s: %v", n, err)
+		}
+		if string(data) != "existing-"+n {
+			t.Errorf("%s content changed: got %q", n, data)
+		}
+	}
+	// cleanup is a no-op when nothing was written — files still present
+	cleanup()
+	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
+		if _, err := os.Stat(filepath.Join(ws, n)); err != nil {
+			t.Errorf("existing file %s should survive cleanup: %v", n, err)
 		}
 	}
 }
 
-func TestEnsureBuildAssets_MissingTTYAnswerNo_Errors(t *testing.T) {
+func TestMaterializeBuildAssets_BothMissing_WritesAndCleansUp(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	stdin := bytes.NewBufferString("n\n")
-	var out bytes.Buffer
-	err := ensureBuildAssets(cwd, home, stdin, &out, true)
-	if err == nil {
-		t.Fatal("expected error when user answered 'n'")
+	cleanup, err := materializeBuildAssets(cwd, home)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// files should exist after materialize
+	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
+		if _, err := os.Stat(filepath.Join(cwd, ".ws", n)); err != nil {
+			t.Errorf("expected %s to be materialized: %v", n, err)
+		}
+	}
+	cleanup()
+	// cleanup should remove only the files that were written
+	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
+		if _, err := os.Stat(filepath.Join(cwd, ".ws", n)); !os.IsNotExist(err) {
+			t.Errorf("expected %s removed by cleanup, err=%v", n, err)
+		}
 	}
 }
 
-func TestEnsureBuildAssets_PartialExistingTTYYes_ScaffoldsOnlyMissing(t *testing.T) {
+func TestMaterializeBuildAssets_PartialExisting_WritesOnlyMissing(t *testing.T) {
 	cwd := t.TempDir()
 	ws := filepath.Join(cwd, ".ws")
 	if err := os.MkdirAll(ws, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(ws, "Dockerfile"), []byte("USER\n"), 0644); err != nil {
+	original := []byte("FROM existing\n")
+	if err := os.WriteFile(filepath.Join(ws, "Dockerfile"), original, 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	stdin := bytes.NewBufferString("Y\n")
-	var out bytes.Buffer
-	if err := ensureBuildAssets(cwd, t.TempDir(), stdin, &out, true); err != nil {
+	cleanup, err := materializeBuildAssets(cwd, t.TempDir())
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// Dockerfile unchanged
 	data, _ := os.ReadFile(filepath.Join(ws, "Dockerfile"))
-	if string(data) != "USER\n" {
-		t.Errorf("existing Dockerfile should not be overwritten, got %q", data)
+	if !bytes.Equal(data, original) {
+		t.Errorf("Dockerfile should not be overwritten, got %q", data)
 	}
+	// entrypoint.sh written
 	if _, err := os.Stat(filepath.Join(ws, "entrypoint.sh")); err != nil {
-		t.Errorf("missing entrypoint.sh should have been scaffolded: %v", err)
+		t.Errorf("missing entrypoint.sh should have been materialized: %v", err)
+	}
+	cleanup()
+	// Dockerfile survives cleanup (we didn't write it)
+	if _, err := os.Stat(filepath.Join(ws, "Dockerfile")); err != nil {
+		t.Errorf("pre-existing Dockerfile should survive cleanup: %v", err)
+	}
+	// entrypoint.sh removed by cleanup
+	if _, err := os.Stat(filepath.Join(ws, "entrypoint.sh")); !os.IsNotExist(err) {
+		t.Errorf("materialized entrypoint.sh should be removed by cleanup, err=%v", err)
 	}
 }
 
