@@ -59,17 +59,16 @@ func TestEmbedded_EntrypointWritesRunWsEnv(t *testing.T) {
 }
 
 func TestEmbedded_EntrypointSentinelIsLast(t *testing.T) {
-	idxSentinel := bytes.LastIndex(embeddedEntrypoint, []byte("/run/ws/ready"))
-	idxEnvWrite := bytes.LastIndex(embeddedEntrypoint, []byte("/run/ws/env"))
-	idxEntrypointDone := bytes.LastIndex(embeddedEntrypoint, []byte("Entrypoint complete"))
-	if idxSentinel < 0 || idxEnvWrite < 0 || idxEntrypointDone < 0 {
-		t.Fatalf("expected markers missing: sentinel=%d env=%d done=%d",
-			idxSentinel, idxEnvWrite, idxEntrypointDone)
+	idxTouch := bytes.LastIndex(embeddedEntrypoint, []byte(`touch "${WS_READY_SENTINEL}"`))
+	idxEnvWrite := bytes.LastIndex(embeddedEntrypoint, []byte(`"${WS_ENV_FILE}"`))
+	idxDone := bytes.LastIndex(embeddedEntrypoint, []byte("Entrypoint complete"))
+	if idxTouch < 0 || idxEnvWrite < 0 || idxDone < 0 {
+		t.Fatalf("markers missing: touch=%d env=%d done=%d", idxTouch, idxEnvWrite, idxDone)
 	}
-	if idxSentinel < idxEnvWrite {
-		t.Errorf("sentinel creation must come after env write")
+	if idxTouch < idxEnvWrite {
+		t.Errorf("sentinel touch (byte %d) must come after last env write (byte %d)", idxTouch, idxEnvWrite)
 	}
-	if idxSentinel > idxEntrypointDone {
-		t.Errorf("sentinel creation must precede the final 'Entrypoint complete' log")
+	if idxTouch > idxDone {
+		t.Errorf("sentinel touch (byte %d) must precede 'Entrypoint complete' log (byte %d)", idxTouch, idxDone)
 	}
 }
