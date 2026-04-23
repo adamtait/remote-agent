@@ -299,12 +299,11 @@ sed -i '/^GH_TOKEN=/d' /etc/environment
 cat > "${GH_WRAPPER_PATH}" <<EOF
 #!/bin/bash
 # Auto-generated at workstation boot. Do not edit.
-# Fetches the current GitHub PAT from Secret Manager and forwards to the
-# real gh CLI. Token never persists; rotations are picked up on the next
-# invocation.
+# A failed fetch leaves GH_TOKEN empty; we still exec gh so the user sees
+# its native "not logged in" error rather than a silent wrapper failure.
 GH_TOKEN=\$(gcloud secrets versions access latest \\
     --secret='${GITHUB_PAT_SECRET_NAME}' \\
-    --project='${GCP_PROJECT_ID}' 2>/dev/null) || true
+    --project='${GCP_PROJECT_ID}' 2>/dev/null)
 exec env GH_TOKEN="\${GH_TOKEN}" /usr/bin/gh "\$@"
 EOF
 chmod 0755 "${GH_WRAPPER_PATH}"
