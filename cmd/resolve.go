@@ -29,7 +29,7 @@ func resolveWorkstationName(cfg *config.Config, client *gcloud.Client, name stri
 	}
 
 	// Fall back: list all workstations in the cluster.
-	workstations, err := client.List(cfg.ProjectID, cfg.Region, cfg.ClusterName)
+	workstations, err := client.List(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName)
 	if err != nil {
 		return "", fmt.Errorf("listing workstations: %w", err)
 	}

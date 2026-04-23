@@ -12,7 +12,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List workstations in the cluster",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		workstations, err := client.List(cfg.ProjectID, cfg.Region, cfg.ClusterName)
+		workstations, err := client.List(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName)
 		if err != nil {
 			return err
 		}
