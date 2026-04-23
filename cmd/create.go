@@ -296,7 +296,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 8 — Resolve a unique workstation name and create it.
-	existing, err := client.List(cfg.ProjectID, cfg.Region, cfg.ClusterName)
+	existing, err := client.List(cfg.ProjectID, cfg.Region, cfg.ClusterName, cfg.ConfigName)
 	if err != nil {
 		return fmt.Errorf("listing existing workstations: %w", err)
 	}

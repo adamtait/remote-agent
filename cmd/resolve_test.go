@@ -79,7 +79,7 @@ func TestResolveWorkstationName_SingleFallback(t *testing.T) {
 			"workstations describe p-user --cluster cl --config cfg --region r --project p": false,
 		},
 		outputs: map[string][]byte{
-			"workstations list --cluster cl --region r --project p --format value(name,state)": []byte("other-ws\tSTATE_STOPPED\n"),
+			"workstations list --cluster cl --config cfg --region r --project p --format value(name,state)": []byte("other-ws\tSTATE_STOPPED\n"),
 		},
 	}
 	cfg := &config.Config{ProjectID: "p", Region: "r", ClusterName: "cl", ConfigName: "cfg", WorkstationName: "p-user"}

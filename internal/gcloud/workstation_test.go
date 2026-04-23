@@ -46,13 +46,13 @@ func (f *fakeRunner) Check(args ...string) bool {
 func TestClient_List_ParsesTabSeparatedOutput(t *testing.T) {
 	fake := &fakeRunner{
 		outputs: map[string][]byte{
-			"workstations list --cluster cl --region us-central1 --project proj --format value(name,state)": []byte(
+			"workstations list --cluster cl --config cfg --region us-central1 --project proj --format value(name,state)": []byte(
 				"proj-adam\tSTATE_RUNNING\nproj-bob\tSTATE_STOPPED\n",
 			),
 		},
 	}
 	client := gcloud.NewClient(fake)
-	list, err := client.List("proj", "us-central1", "cl")
+	list, err := client.List("proj", "us-central1", "cl", "cfg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,11 +70,11 @@ func TestClient_List_ParsesTabSeparatedOutput(t *testing.T) {
 func TestClient_List_EmptyOutput(t *testing.T) {
 	fake := &fakeRunner{
 		outputs: map[string][]byte{
-			"workstations list --cluster cl --region us-central1 --project proj --format value(name,state)": []byte(""),
+			"workstations list --cluster cl --config cfg --region us-central1 --project proj --format value(name,state)": []byte(""),
 		},
 	}
 	client := gcloud.NewClient(fake)
-	list, err := client.List("proj", "us-central1", "cl")
+	list, err := client.List("proj", "us-central1", "cl", "cfg")
 	if err != nil {
 		t.Fatal(err)
 	}

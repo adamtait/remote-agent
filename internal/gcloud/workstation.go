@@ -23,11 +23,12 @@ func NewClient(r Runner) *Client {
 	return &Client{runner: r}
 }
 
-// List returns all workstations in the given cluster (across all configs).
-func (c *Client) List(project, region, cluster string) ([]WorkstationInfo, error) {
+// List returns all workstations in the given config.
+func (c *Client) List(project, region, cluster, cfgName string) ([]WorkstationInfo, error) {
 	out, err := c.runner.Output(
 		"workstations", "list",
 		"--cluster", cluster,
+		"--config", cfgName,
 		"--region", region,
 		"--project", project,
 		"--format", "value(name,state)",
