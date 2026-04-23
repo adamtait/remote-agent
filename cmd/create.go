@@ -10,16 +10,59 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/naming"
 	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+func logicalNameToEnvToken(logical string) string {
+	return strings.ToUpper(logical)
+}
+
+func buildContainerEnv(cfg *config.Config) string {
+	var pairs []string
+	add := func(k, v string) { pairs = append(pairs, k+"="+v) }
+
+	add("GCP_PROJECT_ID", cfg.ProjectID)
+	add("GITHUB_REPO_URL", cfg.GithubRepoURL)
+	add("GIT_USER_NAME", cfg.GitUserName)
+	add("GIT_USER_EMAIL", cfg.GitUserEmail)
+
+	logicalNames := make([]string, 0, len(cfg.Secrets))
+	for k := range cfg.Secrets {
+		logicalNames = append(logicalNames, k)
+	}
+	sort.Strings(logicalNames)
+	add("WS_SECRETS", strings.Join(logicalNames, "|"))
+	for _, logical := range logicalNames {
+		s := cfg.Secrets[logical]
+		tok := logicalNameToEnvToken(logical)
+		add("WS_SECRET_"+tok+"_NAME", s.SecretName)
+		add("WS_SECRET_"+tok+"_VAR", s.EnvVar)
+		if s.OAuthAccountSecretName != "" {
+			add("WS_SECRET_"+tok+"_OAUTH_ACCOUNT_SECRET_NAME", s.OAuthAccountSecretName)
+		}
+	}
+
+	envKeys := make([]string, 0, len(cfg.Env))
+	for k := range cfg.Env {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, k := range envKeys {
+		add(k, cfg.Env[k])
+	}
+
+	return strings.Join(pairs, ",")
+}
 
 var createCmd = &cobra.Command{
 	Use:   "create",
@@ -40,18 +83,6 @@ func init() {
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
-	if cfg.ProjectID == "" {
-		cfg.ProjectID = os.Getenv("PROJECT_ID")
-	}
-	if cfg.GithubRepoURL == "" {
-		cfg.GithubRepoURL = os.Getenv("GITHUB_REPO_URL")
-	}
-	if cfg.ProjectID == "" {
-		return fmt.Errorf("project_id is required: set it in .ws.yaml or PROJECT_ID env var")
-	}
-	if cfg.GithubRepoURL == "" {
-		return fmt.Errorf("github_repo_url is required: set it in .ws.yaml or GITHUB_REPO_URL env var")
-	}
 	// The workstation image ships HTTPS-only credentials (PAT via git helper) —
 	// no SSH keys, no known_hosts. Rewrite SSH URLs so the clone inside the
 	// container doesn't die with "Host key verification failed".
@@ -60,16 +91,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			cfg.GithubRepoURL, normalized)
 		cfg.GithubRepoURL = normalized
 	}
-	if cfg.GitUserName == "" {
-		cfg.GitUserName = "Developer"
-	}
-	if cfg.GitUserEmail == "" {
-		cfg.GitUserEmail = "dev@example.com"
-	}
 	for field, val := range map[string]string{
-		"git_user_name":    cfg.GitUserName,
-		"git_user_email":   cfg.GitUserEmail,
-		"github_repo_url":  cfg.GithubRepoURL,
+		"git_user_name":   cfg.GitUserName,
+		"git_user_email":  cfg.GitUserEmail,
+		"github_repo_url": cfg.GithubRepoURL,
 	} {
 		if strings.ContainsAny(val, ",=") {
 			return fmt.Errorf("%s must not contain ',' or '=' (gcloud --container-env limitation): %q", field, val)
@@ -173,15 +198,25 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("building and pushing image: %w", err)
 	}
 
-	// Step 4 — Secrets
-	logStep("Ensuring Claude secret...")
-	claudeAuthMode, claudeSecretName, err := ensureClaudeSecret(r, cfg.ProjectID)
-	if err != nil {
-		return fmt.Errorf("ensuring Claude secret: %w", err)
+	// Step 4 — Secrets: ensure every configured secret exists in GCP.
+	logStep(fmt.Sprintf("Ensuring %d GCP secret(s)...", len(cfg.Secrets)))
+	secretLogicalOrder := make([]string, 0, len(cfg.Secrets))
+	for k := range cfg.Secrets {
+		secretLogicalOrder = append(secretLogicalOrder, k)
 	}
-	logStep("Ensuring GitHub PAT secret...")
-	if err := ensureSecret(r, cfg.ProjectID, "github-pat", "Enter GitHub PAT (fine-grained, repo-scoped)"); err != nil {
-		return fmt.Errorf("ensuring github-pat secret: %w", err)
+	sort.Strings(secretLogicalOrder)
+	for _, logical := range secretLogicalOrder {
+		s := cfg.Secrets[logical]
+		prompt := fmt.Sprintf("Enter value for secret %q (env var %s)", s.SecretName, s.EnvVar)
+		if err := ensureSecret(r, cfg.ProjectID, s.SecretName, prompt); err != nil {
+			return fmt.Errorf("ensuring secret %s: %w", s.SecretName, err)
+		}
+		if s.OAuthAccountSecretName != "" {
+			p := fmt.Sprintf("Enter value for oauth_account secret %q", s.OAuthAccountSecretName)
+			if err := ensureSecret(r, cfg.ProjectID, s.OAuthAccountSecretName, p); err != nil {
+				return fmt.Errorf("ensuring oauth_account secret %s: %w", s.OAuthAccountSecretName, err)
+			}
+		}
 	}
 
 	// Step 5 — Service account and IAM
@@ -195,7 +230,20 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Bind secrets
-	for _, secret := range []string{claudeSecretName, "github-pat"} {
+	secretNames := make([]string, 0, len(cfg.Secrets))
+	seen := map[string]bool{}
+	for _, logical := range secretLogicalOrder {
+		s := cfg.Secrets[logical]
+		if !seen[s.SecretName] {
+			secretNames = append(secretNames, s.SecretName)
+			seen[s.SecretName] = true
+		}
+		if s.OAuthAccountSecretName != "" && !seen[s.OAuthAccountSecretName] {
+			secretNames = append(secretNames, s.OAuthAccountSecretName)
+			seen[s.OAuthAccountSecretName] = true
+		}
+	}
+	for _, secret := range secretNames {
 		if err := r.Run("secrets", "add-iam-policy-binding", secret,
 			"--member=serviceAccount:"+serviceAccountEmail,
 			"--role=roles/secretmanager.secretAccessor",
@@ -239,16 +287,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 7 — Workstations config
-	logStep(fmt.Sprintf("Ensuring workstations config '%s' (auth: %s)...", cfg.ConfigName, claudeAuthMode))
-	containerEnv := strings.Join([]string{
-		"CLAUDE_AUTH_MODE=" + claudeAuthMode,
-		"CLAUDE_AUTH_SECRET_NAME=" + claudeSecretName,
-		"GITHUB_PAT_SECRET_NAME=github-pat",
-		"GCP_PROJECT_ID=" + cfg.ProjectID,
-		"GITHUB_REPO_URL=" + cfg.GithubRepoURL,
-		"GIT_USER_NAME=" + cfg.GitUserName,
-		"GIT_USER_EMAIL=" + cfg.GitUserEmail,
-	}, ",")
+	logStep(fmt.Sprintf("Ensuring workstations config '%s'...", cfg.ConfigName))
+	containerEnv := buildContainerEnv(cfg)
 
 	configExists := r.Check("workstations", "configs", "describe", cfg.ConfigName,
 		"--cluster", cfg.ClusterName, "--region", cfg.Region, "--project", cfg.ProjectID)
@@ -374,52 +414,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ensureClaudeSecret checks for existing Claude auth secrets and prompts to create one if needed.
-// Returns (claudeAuthMode, claudeSecretName, error).
-func ensureClaudeSecret(r gcloud.Runner, projectID string) (string, string, error) {
-	if r.Check("secrets", "describe", "claude-code-oauth-token", "--project", projectID) {
-		fmt.Println("Found existing 'claude-code-oauth-token' secret — using Claude subscription auth.")
-		return "oauth", "claude-code-oauth-token", nil
-	}
-	if r.Check("secrets", "describe", "anthropic-api-key", "--project", projectID) {
-		fmt.Println("Found existing 'anthropic-api-key' secret — using API key auth.")
-		return "apikey", "anthropic-api-key", nil
-	}
-
-	fmt.Print(`
-Choose Claude Code authentication:
-  1) Claude Pro/Max/Team OAuth token  (recommended for subscribers — uses your plan)
-  2) Anthropic API key                (pay-as-you-go API billing)
-
-To generate an OAuth token: run ` + "`claude setup-token`" + ` locally, authorize in
-the browser, and copy the printed sk-ant-oat01-... token. Tokens are valid
-for ~1 year and can be rotated with ` + "`gcloud secrets versions add`" + `.
-`)
-
-	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Fprint(os.Stderr, "Enter choice [1/2]: ")
-	var choice string
-	if scanner.Scan() {
-		choice = strings.TrimSpace(scanner.Text())
-	}
-
-	switch choice {
-	case "1":
-		if err := ensureSecret(r, projectID, "claude-code-oauth-token",
-			"Paste CLAUDE_CODE_OAUTH_TOKEN (sk-ant-oat01-...)"); err != nil {
-			return "", "", err
-		}
-		return "oauth", "claude-code-oauth-token", nil
-	case "2":
-		if err := ensureSecret(r, projectID, "anthropic-api-key", "Enter ANTHROPIC_API_KEY"); err != nil {
-			return "", "", err
-		}
-		return "apikey", "anthropic-api-key", nil
-	default:
-		return "", "", fmt.Errorf("invalid choice: %s", choice)
-	}
-}
-
 // ensureSecret checks if a secret exists and creates it if not, prompting the user for the value.
 func ensureSecret(r gcloud.Runner, projectID, name, prompt string) error {
 	if r.Check("secrets", "describe", name, "--project", projectID) {
@@ -494,7 +488,7 @@ func ensureBuildAssets(cwd, home string, stdin io.Reader, out io.Writer, isTTY b
 	}
 
 	_, err = scaffold.ScaffoldAssets(scaffold.ScaffoldAssetsOptions{
-		Cwd: cwd, Home: home, Stdout: out,
+		TargetDir: filepath.Join(cwd, ".ws"), Home: home, Stdout: out,
 		OnlyMissing: true,
 	})
 	return err

@@ -6,124 +6,119 @@ import (
 	"os/user"
 	"regexp"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
-// LoadProjectConfig reads and parses a .ws.yaml file.
-func LoadProjectConfig(path string) (*ProjectConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+// Merge combines user and project configs into a flat Config.
+// Precedence: project > user. No hardcoded defaults; missing required
+// fields are caught by Validate, not Merge.
+func Merge(u *UserConfig, project *ProjectConfig) (*Config, error) {
+	if u == nil {
+		u = &UserConfig{}
 	}
-	var cfg ProjectConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+	if project == nil {
+		project = &ProjectConfig{}
 	}
-	return &cfg, nil
+
+	cfg := &Config{
+		// project-only fields
+		ProjectID:     project.Project.ID,
+		GithubRepoURL: project.Project.GithubRepoURL,
+
+		// git — user only (never read from project)
+		GitUserName:  u.Git.UserName,
+		GitUserEmail: u.Git.UserEmail,
+	}
+
+	// workstation: user is the baseline, project overrides per field.
+	lift := func(ur, p WorkstationConfig) {
+		cfg.Region = pick(p.Region, ur.Region)
+		cfg.MachineType = pick(p.MachineType, ur.MachineType)
+		cfg.DiskSizeGB = pickInt(p.DiskSizeGB, ur.DiskSizeGB)
+		cfg.ClusterName = pick(p.ClusterName, ur.ClusterName)
+		cfg.ConfigName = pick(p.ConfigName, ur.ConfigName)
+		cfg.ServiceAccountName = pick(p.ServiceAccountName, ur.ServiceAccountName)
+		cfg.ImageName = pick(p.ImageName, ur.ImageName)
+		cfg.ImageTag = pick(p.ImageTag, ur.ImageTag)
+		cfg.RepoName = pick(p.RepoName, ur.RepoName)
+		cfg.AutoSleepHours = pickIntPtr(p.AutoSleepHours, ur.AutoSleepHours)
+		cfg.AutoShutdownHours = pickInt(p.AutoShutdownHours, ur.AutoShutdownHours)
+	}
+	lift(u.Workstation, project.Workstation)
+
+	// Secrets: user map seeds, project entries override or add by logical name.
+	cfg.Secrets = mergeSecretMap(u.Secrets, project.Secrets)
+	cfg.Env = mergeStringMap(u.Env, project.Env)
+
+	cfg.WorkstationName = WorkstationName(cfg.ProjectID, currentUsername())
+	return cfg, nil
 }
 
-// Merge combines a project config and global config into a single Config,
-// applying precedence: global project overrides > project config > global defaults > hardcoded defaults.
-func Merge(project *ProjectConfig, global *GlobalConfig) (*Config, error) {
-	cfg := &Config{}
+// pick returns p if non-empty, else u. Project-over-user for strings.
+func pick(p, u string) string {
+	if p != "" {
+		return p
+	}
+	return u
+}
 
-	// Hardcoded defaults
-	cfg.MachineType = "e2-standard-4"
-	cfg.DiskSizeGB = 50
-	cfg.ImageTag = "latest"
-	cfg.ClusterName = "claude-dev-cluster"
-	cfg.ConfigName = "claude-dev-config"
-	cfg.ServiceAccountName = "claude-workstation-sa"
-	cfg.ImageName = "claude-code-workstation"
-	cfg.RepoName = "claude-workstation-images"
+// pickInt returns p if non-zero, else u. Project-over-user for ints.
+func pickInt(p, u int) int {
+	if p != 0 {
+		return p
+	}
+	return u
+}
 
-	// Global defaults
-	if global.Defaults.Region != "" {
-		cfg.Region = global.Defaults.Region
+// pickIntPtr: *int lets us distinguish "unset" (nil) from 0.
+// Project override only applies if project's pointer is non-nil.
+func pickIntPtr(p, u *int) *int {
+	if p != nil {
+		v := *p
+		return &v
 	}
-	cfg.GitUserName = global.Defaults.GitUserName
-	cfg.GitUserEmail = global.Defaults.GitUserEmail
-	if global.Defaults.AutoSleepHours != nil {
-		v := *global.Defaults.AutoSleepHours
-		cfg.AutoSleepHours = &v
+	if u != nil {
+		v := *u
+		return &v
 	}
-	if global.Defaults.AutoShutdownHours != 0 {
-		cfg.AutoShutdownHours = global.Defaults.AutoShutdownHours
-	}
+	return nil
+}
 
-	// Project config
-	if project.ProjectID != "" {
-		cfg.ProjectID = project.ProjectID
+func mergeSecretMap(u, project map[string]SecretEntry) map[string]SecretEntry {
+	out := map[string]SecretEntry{}
+	for k, v := range u {
+		out[k] = v
 	}
-	if project.Region != "" {
-		cfg.Region = project.Region
+	for k, v := range project {
+		out[k] = v
 	}
-	if project.ClusterName != "" {
-		cfg.ClusterName = project.ClusterName
-	}
-	if project.ConfigName != "" {
-		cfg.ConfigName = project.ConfigName
-	}
-	if project.GithubRepoURL != "" {
-		cfg.GithubRepoURL = project.GithubRepoURL
-	}
-	if project.MachineType != "" {
-		cfg.MachineType = project.MachineType
-	}
-	if project.DiskSizeGB != 0 {
-		cfg.DiskSizeGB = project.DiskSizeGB
-	}
-	if project.AutoSleepHours != nil {
-		v := *project.AutoSleepHours
-		cfg.AutoSleepHours = &v
-	}
-	if project.AutoShutdownHours != 0 {
-		cfg.AutoShutdownHours = project.AutoShutdownHours
-	}
+	return out
+}
 
-	// Global project overrides (highest precedence)
-	if override, ok := global.Projects[cfg.ProjectID]; ok {
-		if override.ServiceAccountName != "" {
-			cfg.ServiceAccountName = override.ServiceAccountName
-		}
-		if override.ImageName != "" {
-			cfg.ImageName = override.ImageName
-		}
-		if override.ImageTag != "" {
-			cfg.ImageTag = override.ImageTag
-		}
-		if override.RepoName != "" {
-			cfg.RepoName = override.RepoName
-		}
-		if override.AutoSleepHours != nil {
-			v := *override.AutoSleepHours
-			cfg.AutoSleepHours = &v
-		}
-		if override.AutoShutdownHours != 0 {
-			cfg.AutoShutdownHours = override.AutoShutdownHours
-		}
+func mergeStringMap(u, project map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range u {
+		out[k] = v
 	}
+	for k, v := range project {
+		out[k] = v
+	}
+	return out
+}
 
-	// Derive username for workstation name; os/user.Current is more reliable than $USER.
-	var username string
+// currentUsername returns the username used to derive WorkstationName.
+func currentUsername() string {
 	if u, err := user.Current(); err == nil && u.Username != "" {
-		username = u.Username
-	} else {
-		username = os.Getenv("USER")
+		return u.Username
 	}
-	if username == "" {
-		username = "user"
+	if v := os.Getenv("USER"); v != "" {
+		return v
 	}
-	cfg.WorkstationName = WorkstationName(cfg.ProjectID, username)
-
-	return cfg, nil
+	return "user"
 }
 
 var nonAlphanumHyphen = regexp.MustCompile(`[^a-z0-9]+`)
 
 // WorkstationName returns the default workstation name for a project/user pair.
-// Exported so it can be tested directly.
 func WorkstationName(projectID, username string) string {
 	clean := func(s string) string {
 		s = strings.ToLower(s)

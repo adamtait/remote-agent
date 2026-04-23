@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/spf13/cobra"
@@ -32,7 +33,7 @@ the embedded default compiled into the ws binary.`,
 		}
 		f := readFlags(cmd, "force", "dry-run")
 		_, err = scaffold.ScaffoldAssets(scaffold.ScaffoldAssetsOptions{
-			Cwd: cwd, Home: home, Stdout: cmd.OutOrStdout(),
+			TargetDir: filepath.Join(cwd, ".ws"), Home: home, Stdout: cmd.OutOrStdout(),
 			Force:  f["force"],
 			DryRun: f["dry-run"],
 		})

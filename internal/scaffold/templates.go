@@ -6,90 +6,188 @@ import (
 	"strings"
 )
 
-// ProbedValues carries values discovered from the user's environment,
-// used to pre-fill both templates and interactive defaults.
-type ProbedValues struct {
+// ClaudeAuthMode selects which "claude_*" logical secret the user config writes.
+type ClaudeAuthMode int
+
+const (
+	ClaudeAuthOAuth  ClaudeAuthMode = iota
+	ClaudeAuthAPIKey
+)
+
+// UserValues are the prompt-gathered inputs for ~/.config/ws/config.yaml.
+type UserValues struct {
+	GitUserName  string
+	GitUserEmail string
+
+	Region             string
+	MachineType        string
+	DiskSizeGB         int
+	ClusterName        string
+	ConfigName         string
+	ServiceAccountName string
+	ImageName          string
+	ImageTag           string
+	RepoName           string
+	AutoSleepHours     int
+	AutoShutdownHours  int
+
+	ClaudeAuthMode ClaudeAuthMode
+}
+
+// ProjectValues are the prompt-gathered inputs for .ws/config.yaml.
+type ProjectValues struct {
 	ProjectID     string
-	Region        string
-	GitUserName   string
-	GitUserEmail  string
 	GithubRepoURL string
 }
 
-const probedNone = "(none — set manually)"
+// Seed defaults applied when a UserValues field is zero.
+const (
+	seedRegion             = "us-central1"
+	seedMachineType        = "e2-standard-4"
+	seedDiskSizeGB         = 50
+	seedClusterName        = "claude-dev-cluster"
+	seedConfigName         = "claude-dev-config"
+	seedServiceAccountName = "claude-workstation-sa"
+	seedImageName          = "claude-code-workstation"
+	seedImageTag           = "latest"
+	seedRepoName           = "claude-workstation-images"
+	seedAutoSleepHours     = 2
+	seedAutoShutdownHours  = 12
+	placeholderGitUserName = "your-name"
+	placeholderGitEmail    = "your-email@example.com"
+	placeholderProjectID   = "my-gcp-project"
+	placeholderRepoURL     = "https://github.com/my-org/my-repo.git"
+)
 
-func probedOr(v string) string {
+func orStr(v, seed string) string {
 	if v == "" {
-		return probedNone
+		return seed
 	}
 	return v
 }
 
-// RenderProjectTemplate returns a commented .ws.yaml with required
-// fields filled from probes (or placeholders) and optional fields commented.
-func RenderProjectTemplate(pv ProbedValues) string {
-	projectID := pv.ProjectID
-	if projectID == "" {
-		projectID = "my-gcp-project"
+func orInt(v, seed int) int {
+	if v == 0 {
+		return seed
 	}
-	repoURL := pv.GithubRepoURL
-	if repoURL == "" {
-		repoURL = "https://github.com/my-org/my-repo.git"
+	return v
+}
+
+// RenderUserConfig returns a fully-populated ~/.config/ws/config.yaml.
+func RenderUserConfig(uv UserValues) string {
+	gitName := orStr(uv.GitUserName, placeholderGitUserName)
+	gitEmail := orStr(uv.GitUserEmail, placeholderGitEmail)
+
+	region := orStr(uv.Region, seedRegion)
+	machine := orStr(uv.MachineType, seedMachineType)
+	disk := orInt(uv.DiskSizeGB, seedDiskSizeGB)
+	cluster := orStr(uv.ClusterName, seedClusterName)
+	conf := orStr(uv.ConfigName, seedConfigName)
+	sa := orStr(uv.ServiceAccountName, seedServiceAccountName)
+	img := orStr(uv.ImageName, seedImageName)
+	tag := orStr(uv.ImageTag, seedImageTag)
+	repo := orStr(uv.RepoName, seedRepoName)
+	sleep := orInt(uv.AutoSleepHours, seedAutoSleepHours)
+	shutdown := orInt(uv.AutoShutdownHours, seedAutoShutdownHours)
+
+	var claudeEntry string
+	switch uv.ClaudeAuthMode {
+	case ClaudeAuthAPIKey:
+		claudeEntry = `  claude_apikey:
+    secret_name: anthropic-api-key
+    env_var: ANTHROPIC_API_KEY`
+	default:
+		claudeEntry = `  claude_oauth:
+    secret_name: claude-code-oauth-token
+    env_var: CLAUDE_CODE_OAUTH_TOKEN
+    # oauth_account_secret_name: claude-oauth-account   # optional`
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `# ws project config (.ws/config.yaml) — committed to git
-# Required fields have no default; uncomment and fill them in.
-# Optional fields show the default ws will apply if left unset.
+	fmt.Fprintf(&b, `# ws user config — baseline for all ws commands.
+# Every required key is set here. Project configs (.ws/config.yaml)
+# override per-key.
 
-project_id: %s        # REQUIRED — probed: %s
-github_repo_url: %s   # REQUIRED — probed: %s
+git:
+  user_name: %q
+  user_email: %q
 
-# region: us-central1             # optional; falls back to global default, then us-central1
-# cluster_name: claude-dev-cluster
-# config_name:  claude-dev-config
-# machine_type: e2-standard-4
-# disk_size_gb: 50
-# auto_sleep_hours: 2             # hours idle before stopping (0=never sleep; 1–24; GCP default: 2)
-# auto_shutdown_hours: 12         # hours running before force-stop (1–168; GCP default: ~12)
-`, projectID, probedOr(pv.ProjectID), repoURL, probedOr(pv.GithubRepoURL))
+workstation:
+  region: %s
+  machine_type: %s
+  disk_size_gb: %d
+  cluster_name: %s
+  config_name: %s
+  service_account_name: %s
+  image_name: %s
+  image_tag: %s
+  repo_name: %s
+  auto_sleep_hours: %d
+  auto_shutdown_hours: %d
+
+# secrets — map GCP Secret Manager secrets to container env vars. Each
+# entry has the same {secret_name, env_var} shape. ws recognizes three
+# logical names and wires them into credential helpers; any other name
+# is treated generically (fetched at boot, exported as env_var).
+#
+#   claude_oauth  → fetches at boot, exports env_var (CLAUDE_CODE_OAUTH_TOKEN).
+#                   Also seeds ~/.claude.json onboarding if
+#                   oauth_account_secret_name is set.
+#   claude_apikey → installs Claude Code's apiKeyHelper — re-fetches every
+#                   ~5 min (rotation without restart). env_var is the
+#                   canonical name (ANTHROPIC_API_KEY) for documentation.
+#   github_pat    → installs git's credential helper (fresh fetch per git
+#                   op) AND exports env_var (GH_TOKEN) for `+"`gh`"+` CLI.
+#                   Env var is stale on rotation; git operations stay fresh.
+#
+# Other logical names: plain fetch + export. Rotation requires ws stop/start.
+# Exactly one of {claude_oauth, claude_apikey} must be present.
+secrets:
+%s
+  github_pat:
+    secret_name: github-pat
+    env_var: GH_TOKEN
+
+# env — plain static env vars forwarded to the container (no secret fetch).
+env: {}
+`,
+		gitName, gitEmail,
+		region, machine, disk, cluster, conf, sa, img, tag, repo, sleep, shutdown,
+		claudeEntry)
 	return b.String()
 }
 
-// RenderGlobalTemplate returns a commented ~/.config/ws/config.yaml with
-// defaults and projects sections.
-func RenderGlobalTemplate(pv ProbedValues) string {
+// RenderProjectConfig returns a minimal .ws/config.yaml with the two
+// required project keys and commented-out override examples.
+func RenderProjectConfig(pv ProjectValues) string {
+	projectID := orStr(pv.ProjectID, placeholderProjectID)
+	repoURL := orStr(pv.GithubRepoURL, placeholderRepoURL)
+
 	var b strings.Builder
-	fmt.Fprintf(&b, `# ws global config — user-wide defaults and per-project overrides
-# All fields optional; uncomment what you want to set.
+	fmt.Fprintf(&b, `# ws project config — committed to source control.
+# Precedence: project overrides user. See user config for defaults and
+# the full secrets/env schema.
 
-defaults:
-  # region: %s
-  # git_user_name:  %s
-  # git_user_email: %s
-  # auto_sleep_hours: 2           # hours idle before stopping (0=never sleep; 1–24; GCP default: 2)
-  # auto_shutdown_hours: 12       # hours running before force-stop (1–168; GCP default: ~12)
+project:
+  id: %s
+  github_repo_url: %s
 
-# projects:
-#   my-gcp-project:
-#     service_account_name: claude-workstation-sa
-#     image_name:           claude-code-workstation
-#     image_tag:            latest
-#     repo_name:            claude-workstation-images
-#     auto_sleep_hours:   1
-#     auto_shutdown_hours: 24
-`, firstNonEmpty(pv.Region, "us-central1"), quoteOrPlaceholder(pv.GitUserName), quoteOrPlaceholder(pv.GitUserEmail))
+# Uncomment any of the groups below to override user values for this project.
+#
+# workstation:
+#   machine_type: e2-standard-8
+#   disk_size_gb: 100
+#   auto_sleep_hours: 1
+#
+# secrets:
+#   my_extra_secret:
+#     secret_name: my-extra-secret
+#     env_var: MY_EXTRA
+#
+# env:
+#   MY_STATIC_VAR: foo
+`, projectID, repoURL)
 	return b.String()
-}
-
-// quoteOrPlaceholder returns Go-quoted v for YAML-safe output when v is
-// non-empty; otherwise it returns the unquoted probedNone sentinel (so the
-// en-dash isn't mangled into \u2014).
-func quoteOrPlaceholder(v string) string {
-	if v == "" {
-		return probedNone
-	}
-	return fmt.Sprintf("%q", v)
 }
 
 func firstNonEmpty(values ...string) string {

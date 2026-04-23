@@ -1,4 +1,3 @@
-// ws/internal/config/global_test.go
 package config_test
 
 import (
@@ -9,49 +8,111 @@ import (
 	"github.com/adamtait/remote-agent/internal/config"
 )
 
-func TestLoadGlobalConfig_ParsesAllFields(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
-	content := `
-defaults:
-  region: us-west1
-  git_user_name: Test User
-  git_user_email: test@example.com
-projects:
-  my-project:
-    service_account_name: my-sa
-    image_name: my-image
-    image_tag: v1
-    repo_name: my-repo
-`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.LoadGlobalConfig(path)
+func TestLoadUserConfig_Missing_ReturnsEmpty(t *testing.T) {
+	cfg, err := config.LoadUserConfig(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("LoadUserConfig on missing file: got %v, want nil", err)
 	}
-	if cfg.Defaults.Region != "us-west1" {
-		t.Errorf("region: got %q, want %q", cfg.Defaults.Region, "us-west1")
+	if cfg == nil {
+		t.Fatal("expected non-nil empty UserConfig")
 	}
-	if cfg.Defaults.GitUserName != "Test User" {
-		t.Errorf("git_user_name: got %q, want %q", cfg.Defaults.GitUserName, "Test User")
-	}
-	override := cfg.Projects["my-project"]
-	if override.ServiceAccountName != "my-sa" {
-		t.Errorf("service_account_name: got %q, want %q", override.ServiceAccountName, "my-sa")
-	}
-	if override.ImageTag != "v1" {
-		t.Errorf("image_tag: got %q, want %q", override.ImageTag, "v1")
+	if cfg.Git.UserName != "" || len(cfg.Secrets) != 0 {
+		t.Errorf("want zero-value UserConfig, got %+v", cfg)
 	}
 }
 
-func TestLoadGlobalConfig_MissingFileReturnsEmpty(t *testing.T) {
-	cfg, err := config.LoadGlobalConfig("/nonexistent/path/config.yaml")
-	if err != nil {
-		t.Fatalf("unexpected error for missing file: %v", err)
+func TestLoadUserConfig_Malformed_ReturnsError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(p, []byte("git:\n  user_name: [unterminated"), 0644); err != nil {
+		t.Fatal(err)
 	}
-	if cfg.Defaults.Region != "" {
-		t.Errorf("expected empty config, got region %q", cfg.Defaults.Region)
+	if _, err := config.LoadUserConfig(p); err == nil {
+		t.Fatal("expected YAML parse error, got nil")
+	}
+}
+
+func TestLoadUserConfig_Roundtrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	contents := `
+git:
+  user_name: "Alice"
+  user_email: "alice@example.com"
+workstation:
+  region: us-central1
+  machine_type: e2-standard-4
+  disk_size_gb: 50
+  cluster_name: claude-dev-cluster
+  config_name: claude-dev-config
+  service_account_name: claude-workstation-sa
+  image_name: claude-code-workstation
+  image_tag: latest
+  repo_name: claude-workstation-images
+  auto_sleep_hours: 2
+  auto_shutdown_hours: 12
+secrets:
+  claude_oauth:
+    secret_name: claude-auth
+    env_var: CLAUDE_CODE_OAUTH_TOKEN
+  github_pat:
+    secret_name: github-pat
+    env_var: GH_TOKEN
+env:
+  EXTRA_KEY: extra_value
+`
+	if err := os.WriteFile(p, []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadUserConfig(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Git.UserName != "Alice" || cfg.Workstation.Region != "us-central1" ||
+		cfg.Workstation.AutoSleepHours == nil || *cfg.Workstation.AutoSleepHours != 2 {
+		t.Errorf("parsed wrong: %+v", cfg)
+	}
+	if got := cfg.Secrets["claude_oauth"].EnvVar; got != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Errorf("claude_oauth.env_var: got %q", got)
+	}
+	if cfg.Env["EXTRA_KEY"] != "extra_value" {
+		t.Errorf("env map not parsed: %+v", cfg.Env)
+	}
+}
+
+func TestLoadProjectConfig_Roundtrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	contents := `
+project:
+  id: my-proj
+  github_repo_url: https://example.com/x.git
+workstation:
+  machine_type: e2-standard-8
+secrets:
+  my_extra:
+    secret_name: my-extra
+    env_var: MY_EXTRA
+env:
+  MY_VAR: 1
+`
+	if err := os.WriteFile(p, []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadProjectConfig(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Project.ID != "my-proj" || cfg.Project.GithubRepoURL == "" {
+		t.Errorf("project section parsed wrong: %+v", cfg.Project)
+	}
+	if cfg.Workstation.MachineType != "e2-standard-8" {
+		t.Errorf("project workstation override lost: %+v", cfg.Workstation)
+	}
+	if cfg.Secrets["my_extra"].EnvVar != "MY_EXTRA" || cfg.Env["MY_VAR"] != "1" {
+		t.Errorf("maps not parsed: %+v", cfg)
+	}
+}
+
+func TestLoadProjectConfig_Missing_ReturnsError(t *testing.T) {
+	if _, err := config.LoadProjectConfig(filepath.Join(t.TempDir(), "none.yaml")); err == nil {
+		t.Fatal("expected error for missing project config, got nil")
 	}
 }

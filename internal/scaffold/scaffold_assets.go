@@ -11,13 +11,17 @@ import (
 )
 
 type ScaffoldAssetsOptions struct {
-	Cwd    string    // project root
-	Home   string    // user home (for ~/.config/ws/template/ lookup)
-	Stdout io.Writer // log target
+	// TargetDir is the absolute directory that will hold the materialized
+	// assets (e.g. /home/alice/.config/ws/template or /path/to/project/.ws).
+	TargetDir string
 
-	Force       bool // overwrite existing files
-	DryRun      bool // print what would be written, touch nothing
-	OnlyMissing bool // skip files that already exist without erroring
+	Home string // needed so ResolveSource can find user-template overrides
+
+	Stdout io.Writer
+
+	Force       bool
+	DryRun      bool
+	OnlyMissing bool
 }
 
 // AssetResult records, per asset name, whether the file was (or would be)
@@ -40,22 +44,21 @@ func assetMode(name string) os.FileMode {
 	}
 }
 
-// ScaffoldAssets writes each asset in AssetNames to <Cwd>/.ws/<name>.
+// ScaffoldAssets writes each asset in AssetNames to opts.TargetDir/<name>.
 func ScaffoldAssets(opts ScaffoldAssetsOptions) (AssetResult, error) {
 	res := AssetResult{
 		wrote:  map[string]bool{},
 		source: map[string]string{},
 	}
 
-	wsDir := filepath.Join(opts.Cwd, ".ws")
 	if !opts.DryRun {
-		if err := os.MkdirAll(wsDir, 0755); err != nil {
-			return res, fmt.Errorf("creating %s: %w", wsDir, err)
+		if err := os.MkdirAll(opts.TargetDir, 0755); err != nil {
+			return res, fmt.Errorf("creating %s: %w", opts.TargetDir, err)
 		}
 	}
 
 	for _, name := range AssetNames {
-		target := filepath.Join(wsDir, name)
+		target := filepath.Join(opts.TargetDir, name)
 		if !opts.DryRun {
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return res, fmt.Errorf("creating parent dir for %s: %w", target, err)
@@ -72,21 +75,22 @@ func ScaffoldAssets(opts ScaffoldAssetsOptions) (AssetResult, error) {
 			switch {
 			case opts.OnlyMissing:
 				res.source[name] = "preexisting"
-				fmt.Fprintf(opts.Stdout, "skip .ws/%s (already present)\n", name)
+				fmt.Fprintf(opts.Stdout, "skip %s (already present)\n", name)
 				continue
 			case !opts.Force:
 				return res, fmt.Errorf("%s already exists; re-run with --force to overwrite", target)
 			}
 		}
 
-		body, source, err := ResolveSource(opts.Home, name)
+		body, err := EmbeddedSeed(name)
 		if err != nil {
 			return res, err
 		}
+		source := "embedded-default"
 		res.source[name] = source
 
 		if opts.DryRun {
-			fmt.Fprintf(opts.Stdout, "would write .ws/%s (%d bytes, from %s)\n", name, len(body), source)
+			fmt.Fprintf(opts.Stdout, "would write %s (%d bytes, from %s)\n", name, len(body), source)
 			continue
 		}
 
@@ -94,7 +98,7 @@ func ScaffoldAssets(opts ScaffoldAssetsOptions) (AssetResult, error) {
 			return res, err
 		}
 		res.wrote[name] = true
-		fmt.Fprintf(opts.Stdout, "wrote .ws/%s (from %s)\n", name, source)
+		fmt.Fprintf(opts.Stdout, "wrote %s (from %s)\n", name, source)
 	}
 
 	return res, nil
