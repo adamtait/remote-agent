@@ -42,3 +42,22 @@ func NormalizeGithubRepoURL(url string) string {
 	}
 	return url
 }
+
+// repoSlugHTTPSRe matches https://github.com/<owner>/<repo>[.git][/] and captures <repo>.
+var repoSlugHTTPSRe = regexp.MustCompile(`^https://github\.com/[^/]+/([^/]+?)(?:\.git)?/?$`)
+
+// repoSlugSSHRe matches git@github.com:<owner>/<repo>[.git] and captures <repo>.
+var repoSlugSSHRe = regexp.MustCompile(`^git@github\.com:[^/]+/([^/]+?)(?:\.git)?$`)
+
+// RepoSlugFromURL returns the repository name from a GitHub URL, or "" if the
+// URL is empty, malformed, or not a GitHub URL. HTTPS and SSH forms are both
+// supported; an optional ".git" suffix and trailing slash are stripped.
+func RepoSlugFromURL(url string) string {
+	if m := repoSlugHTTPSRe.FindStringSubmatch(url); m != nil {
+		return m[1]
+	}
+	if m := repoSlugSSHRe.FindStringSubmatch(url); m != nil {
+		return m[1]
+	}
+	return ""
+}

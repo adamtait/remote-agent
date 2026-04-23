@@ -90,3 +90,30 @@ func TestNormalizeGithubRepoURL(t *testing.T) {
 		})
 	}
 }
+
+func TestRepoSlugFromURL(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "https with .git", input: "https://github.com/owner/repo.git", want: "repo"},
+		{name: "https without .git", input: "https://github.com/owner/repo", want: "repo"},
+		{name: "https hyphenated", input: "https://github.com/adamtait/remote-agent.git", want: "remote-agent"},
+		{name: "https with trailing slash", input: "https://github.com/owner/repo/", want: "repo"},
+		{name: "ssh with .git", input: "git@github.com:owner/repo.git", want: "repo"},
+		{name: "ssh without .git", input: "git@github.com:adamtait/remote-agent", want: "remote-agent"},
+		{name: "empty", input: "", want: ""},
+		{name: "garbage", input: "not-a-url", want: ""},
+		{name: "https no repo segment", input: "https://github.com/owner", want: ""},
+		{name: "non-github host", input: "https://gitlab.com/owner/repo.git", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := scaffold.RepoSlugFromURL(tc.input)
+			if got != tc.want {
+				t.Errorf("RepoSlugFromURL(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
