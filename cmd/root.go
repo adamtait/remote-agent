@@ -39,15 +39,15 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("loading %s: %w", projectCfgPath, err)
 		}
-		globalCfgPath, err := config.GlobalConfigPath()
+		userCfgPath, err := config.UserConfigPath()
 		if err != nil {
-			return fmt.Errorf("determining global config path: %w", err)
+			return fmt.Errorf("determining user config path: %w", err)
 		}
-		globalCfg, err := config.LoadGlobalConfig(globalCfgPath)
+		userCfg, err := config.LoadUserConfig(userCfgPath)
 		if err != nil {
-			return fmt.Errorf("loading global config: %w", err)
+			return fmt.Errorf("loading user config: %w", err)
 		}
-		cfg, err = config.Merge(projectCfg, globalCfg)
+		cfg, err = config.Merge(userCfg, projectCfg)
 		if err != nil {
 			return err
 		}

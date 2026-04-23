@@ -10,8 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// GlobalConfigPath returns the default path for the global user config.
-func GlobalConfigPath() (string, error) {
+// UserConfigPath returns the default path for the user-wide config.
+func UserConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("unable to determine home directory: %w", err)
@@ -19,17 +19,31 @@ func GlobalConfigPath() (string, error) {
 	return filepath.Join(home, ".config", "ws", "config.yaml"), nil
 }
 
-// LoadGlobalConfig reads and parses the global config file.
-// Returns an empty GlobalConfig (no error) if the file does not exist.
-func LoadGlobalConfig(path string) (*GlobalConfig, error) {
+// LoadUserConfig reads and parses the user config file.
+// Returns an empty UserConfig (no error) if the file does not exist —
+// validation (not loading) is responsible for flagging missing required keys.
+func LoadUserConfig(path string) (*UserConfig, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return &GlobalConfig{}, nil
+		return &UserConfig{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	var cfg GlobalConfig
+	var cfg UserConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// LoadProjectConfig reads and parses a .ws/config.yaml file.
+func LoadProjectConfig(path string) (*ProjectConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cfg ProjectConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
