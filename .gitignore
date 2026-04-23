@@ -2,3 +2,4 @@
 .worktrees/
 ws
 .ws/**/*
+.ws/profile.d.staged/
