@@ -20,6 +20,10 @@ runtime via its attached service account:
 - **GitHub PAT** uses a custom `credential.helper` script that calls
   `gcloud secrets versions access` on every git operation. Rotations are
   picked up immediately on the next push/pull/clone, no restart.
+- **GitHub `gh` CLI** uses a wrapper at `/usr/local/bin/gh` (shadows the
+  real `/usr/bin/gh` via PATH precedence) that fetches the same PAT from
+  Secret Manager per invocation and forwards via `GH_TOKEN`. No env var
+  on the workstation; rotations propagate on the next `gh` call.
 
 The `--container-env` block now contains only pointers
 (`CLAUDE_AUTH_SECRET_NAME`, `CLAUDE_OAUTH_ACCOUNT_SECRET_NAME` (OAuth only),
@@ -184,6 +188,16 @@ ignores other hosts and never persists credentials. `~/.gitconfig` (on
 the persistent home disk) points at this helper via
 `credential.helper = /usr/local/bin/git-credential-gcp-secret`.
 
+**GitHub `gh` CLI.** At every container boot, `entrypoint.sh` writes
+`/usr/local/bin/gh`, a wrapper that fetches the current PAT from Secret
+Manager and exec's the real `/usr/bin/gh` with `GH_TOKEN` set in the
+child process only. Because `/usr/local/bin` is ahead of `/usr/bin` on
+`PATH`, every `gh` invocation — from a terminal, from Claude Code, from
+a script — goes through the wrapper. The token never persists in env
+or on disk, and rotating the PAT secret propagates on the next `gh`
+call. A boot-time `gh auth status` smoke test logs a WARNING if the
+service account can't reach the secret.
+
 ## Cost notes
 
 - Cluster: no standby cost when no workstations are running
@@ -203,8 +217,9 @@ In API-key mode, the Claude key is fetched into memory by `apiKeyHelper`
 on demand and never touches disk. In OAuth mode, the token is written to
 `/etc/profile.d/claude-auth.sh` (mode 0644) because exporting a value into
 login shells requires a file the shell can read; this is equivalent in
-exposure to an env var. The GitHub PAT is fetched per-operation by the git
-credential helper and never persisted.
+exposure to an env var. The GitHub PAT is fetched per-operation — by the
+git credential helper for git operations, and by the `/usr/local/bin/gh`
+wrapper for `gh` CLI calls — and is never persisted to env or disk.
 
 To audit credential access, look at Secret Manager's data access audit
 logs — every fetch from `apiKeyHelper`, the OAuth boot fetch, and every
