@@ -221,7 +221,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 		if !opts.Force && fileExists(path) {
 			fmt.Fprintf(opts.Stdout, "skip %s (already present); re-run with --force to regenerate\n", path)
 		} else {
-			if err := WriteAtomic(path, []byte(RenderProjectTemplate(pv)), opts.Force); err != nil {
+			if err := WriteAtomic(path, []byte(RenderProjectTemplate(pv, UserProjectValues{})), opts.Force); err != nil {
 				return err
 			}
 			fmt.Fprintln(opts.Stdout, "Wrote "+path)

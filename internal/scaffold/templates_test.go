@@ -13,7 +13,7 @@ func TestRenderProjectTemplate_WithProbes(t *testing.T) {
 		ProjectID:     "my-proj",
 		GithubRepoURL: "https://github.com/a/b.git",
 	}
-	got := scaffold.RenderProjectTemplate(pv)
+	got := scaffold.RenderProjectTemplate(pv, scaffold.UserProjectValues{})
 
 	for _, want := range []string{
 		"project_id: my-proj",
@@ -30,7 +30,7 @@ func TestRenderProjectTemplate_WithProbes(t *testing.T) {
 }
 
 func TestRenderProjectTemplate_EmptyProbesShowPlaceholder(t *testing.T) {
-	got := scaffold.RenderProjectTemplate(scaffold.ProbedValues{})
+	got := scaffold.RenderProjectTemplate(scaffold.ProbedValues{}, scaffold.UserProjectValues{})
 	if !strings.Contains(got, "(none — set manually)") {
 		t.Errorf("RenderProjectTemplate missing placeholder\ngot:\n%s", got)
 	}
@@ -87,7 +87,7 @@ func TestRenderGlobalTemplate_QuotesGitIdentity(t *testing.T) {
 }
 
 func TestRenderProjectTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
-	got := scaffold.RenderProjectTemplate(scaffold.ProbedValues{})
+	got := scaffold.RenderProjectTemplate(scaffold.ProbedValues{}, scaffold.UserProjectValues{})
 	for _, want := range []string{
 		"# auto_sleep_hours:",
 		"# auto_shutdown_hours:",
@@ -110,6 +110,73 @@ func TestRenderGlobalTemplate_IncludesAutoSleepAndShutdown(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("RenderGlobalTemplate missing %q\ngot:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderProjectTemplate_UserValuesRenderUncommented(t *testing.T) {
+	pv := scaffold.ProbedValues{ProjectID: "probed-proj"}
+	uv := scaffold.UserProjectValues{
+		ProjectID:     "chosen-proj",
+		GithubRepoURL: "https://github.com/a/b.git",
+		Region:        "us-east1",
+		ClusterName:   "my-cluster",
+		ConfigName:    "my-config",
+		MachineType:   "e2-standard-8",
+		DiskSizeGB:    "100",
+	}
+	got := scaffold.RenderProjectTemplate(pv, uv)
+
+	// User-provided values: uncommented.
+	for _, want := range []string{
+		"project_id: chosen-proj",
+		"github_repo_url: https://github.com/a/b.git",
+		"region: us-east1",
+		"cluster_name: my-cluster",
+		"config_name: my-config",
+		"machine_type: e2-standard-8",
+		"disk_size_gb: 100",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing uncommented %q\ngot:\n%s", want, got)
+		}
+	}
+	// Probed hint still surfaces even when user overrides.
+	if !strings.Contains(got, "probed: probed-proj") {
+		t.Errorf("probed hint lost:\n%s", got)
+	}
+}
+
+func TestRenderProjectTemplate_EmptyUserValuesStayCommented(t *testing.T) {
+	got := scaffold.RenderProjectTemplate(
+		scaffold.ProbedValues{},
+		scaffold.UserProjectValues{
+			ProjectID:     "chosen-proj",
+			GithubRepoURL: "https://github.com/a/b.git",
+		},
+	)
+	for _, want := range []string{
+		"# region:",
+		"# cluster_name:",
+		"# config_name:",
+		"# machine_type:",
+		"# disk_size_gb:",
+		"# auto_sleep_hours:",
+		"# auto_shutdown_hours:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing commented default %q\ngot:\n%s", want, got)
+		}
+	}
+	// Negative check: no uncommented versions of these keys.
+	for _, unwant := range []string{
+		"\nregion:",
+		"\ncluster_name:",
+		"\nmachine_type:",
+		"\ndisk_size_gb:",
+	} {
+		if strings.Contains(got, unwant) {
+			t.Errorf("unexpected uncommented key %q\ngot:\n%s", unwant, got)
 		}
 	}
 }

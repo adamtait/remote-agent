@@ -25,16 +25,41 @@ func probedOr(v string) string {
 	return v
 }
 
-// RenderProjectTemplate returns a commented .ws.yaml with required
-// fields filled from probes (or placeholders) and optional fields commented.
-func RenderProjectTemplate(pv ProbedValues) string {
-	projectID := pv.ProjectID
-	if projectID == "" {
-		projectID = "my-gcp-project"
-	}
-	repoURL := pv.GithubRepoURL
-	if repoURL == "" {
-		repoURL = "https://github.com/my-org/my-repo.git"
+// UserProjectValues holds project-config values the user explicitly chose
+// (e.g. via interactive prompts). Non-empty fields render uncommented in
+// the generated YAML; empty fields fall back to the commented default
+// shown by `ws setup template`.
+type UserProjectValues struct {
+	ProjectID     string
+	GithubRepoURL string
+	Region        string
+	ClusterName   string
+	ConfigName    string
+	MachineType   string
+	DiskSizeGB    string
+}
+
+// RenderProjectTemplate returns a commented .ws/config.yaml. Required
+// fields (project_id, github_repo_url) are always uncommented. Optional
+// fields render uncommented when set in uv, else commented with defaults.
+func RenderProjectTemplate(pv ProbedValues, uv UserProjectValues) string {
+	projectID := firstNonEmpty(uv.ProjectID, pv.ProjectID, "my-gcp-project")
+	repoURL := firstNonEmpty(uv.GithubRepoURL, pv.GithubRepoURL, "https://github.com/my-org/my-repo.git")
+
+	// optional renders "key: val" uncommented when user provided val,
+	// else "# <commentedDefault>" (a full line already including the `# `).
+	optional := func(userVal, commentedDefault string) string {
+		if userVal != "" {
+			// Preserve the trailing comment on the commented-default line
+			// (e.g. "# region: us-central1             # optional; ...")
+			// by splitting on the first `#` boundary that isn't the leading one.
+			key, trailingComment := splitCommentedDefault(commentedDefault)
+			if trailingComment != "" {
+				return fmt.Sprintf("%s: %s  %s", key, userVal, trailingComment)
+			}
+			return fmt.Sprintf("%s: %s", key, userVal)
+		}
+		return commentedDefault
 	}
 
 	var b strings.Builder
@@ -45,15 +70,42 @@ func RenderProjectTemplate(pv ProbedValues) string {
 project_id: %s        # REQUIRED — probed: %s
 github_repo_url: %s   # REQUIRED — probed: %s
 
-# region: us-central1             # optional; falls back to global default, then us-central1
-# cluster_name: claude-dev-cluster
-# config_name:  claude-dev-config
-# machine_type: e2-standard-4
-# disk_size_gb: 50
+%s
+%s
+%s
+%s
+%s
 # auto_sleep_hours: 2             # hours idle before stopping (0=never sleep; 1–24; GCP default: 2)
 # auto_shutdown_hours: 12         # hours running before force-stop (1–168; GCP default: ~12)
-`, projectID, probedOr(pv.ProjectID), repoURL, probedOr(pv.GithubRepoURL))
+`,
+		projectID, probedOr(pv.ProjectID),
+		repoURL, probedOr(pv.GithubRepoURL),
+		optional(uv.Region, "# region: us-central1             # optional; falls back to global default, then us-central1"),
+		optional(uv.ClusterName, "# cluster_name: claude-dev-cluster"),
+		optional(uv.ConfigName, "# config_name:  claude-dev-config"),
+		optional(uv.MachineType, "# machine_type: e2-standard-4"),
+		optional(uv.DiskSizeGB, "# disk_size_gb: 50"),
+	)
 	return b.String()
+}
+
+// splitCommentedDefault parses a commented default line of the form
+// "# key: val [  # trailing comment]" and returns ("key", "# trailing comment")
+// (trailingComment may be empty). The returned key has no leading `# `.
+func splitCommentedDefault(line string) (key, trailingComment string) {
+	// Strip leading "# " (or "#").
+	s := strings.TrimPrefix(line, "# ")
+	s = strings.TrimPrefix(s, "#")
+	// Split on a `#` preceded by whitespace to find trailing comment.
+	if i := strings.Index(s, "  #"); i >= 0 {
+		trailingComment = strings.TrimSpace(s[i:])
+		s = s[:i]
+	}
+	// key is everything before the first `:`.
+	if c := strings.Index(s, ":"); c >= 0 {
+		return strings.TrimSpace(s[:c]), trailingComment
+	}
+	return strings.TrimSpace(s), trailingComment
 }
 
 // RenderGlobalTemplate returns a commented ~/.config/ws/config.yaml with
