@@ -21,10 +21,9 @@ runtime via its attached service account:
   `gcloud secrets versions access` on every git operation. Rotations are
   picked up immediately on the next push/pull/clone, no restart.
 
-The `--container-env` block now contains only pointers
-(`CLAUDE_AUTH_SECRET_NAME`, `CLAUDE_OAUTH_ACCOUNT_SECRET_NAME` (OAuth only),
-`GITHUB_PAT_SECRET_NAME`, `GCP_PROJECT_ID`, `GITHUB_REPO_URL`,
-`GIT_USER_NAME`, `GIT_USER_EMAIL`) — no sensitive values.
+The workstation config carries only pointers (GCP secret names and env var
+names) — no sensitive values. Auth mode is chosen at `ws setup` time by
+selecting `claude_oauth` or `claude_apikey` as the Claude secret type.
 
 ## Files
 
@@ -58,27 +57,76 @@ token and silently bypass your subscription.
 
 ## One-time setup
 
-Build and install the `ws` CLI, then scaffold a project config and run
-`ws create`:
+Build and install the `ws` CLI, then scaffold configs and run `ws create`:
 
 ```bash
 make install                # installs ws to ~/.local/bin
-ws setup                   # writes .ws.yaml + ~/.config/ws/config.yaml
+ws setup                   # writes .ws/config.yaml + ~/.config/ws/config.yaml
 ws create                  # provisions the workstation
 ```
 
-`ws setup` probes gcloud/git for defaults and prompts for each required
-field. `project_id` and `github_repo_url` can also be supplied via env vars
-(`PROJECT_ID`, `GITHUB_REPO_URL`) as a fallback.
+`ws setup` prompts for:
+1. **GCP project ID** — the project where the workstation cluster lives
+2. **GitHub repo URL** — the repo to clone inside the workstation
+3. **Claude auth mode** — `1` for OAuth token, `2` for API key
+4. **Git identity** — name and email for commits inside the workstation
 
-First run of `ws create` takes ~20 minutes (the cluster provisioning is the
-slow part). You'll be prompted to choose OAuth token vs API key, then for
-the value and your GitHub PAT — these go straight into Secret Manager, not
-your shell history.
+It writes two config files:
+- **`.ws/config.yaml`** (committed to source control) — project ID, repo URL,
+  and optional per-project overrides
+- **`~/.config/ws/config.yaml`** (personal baseline) — all workstation
+  parameters, git identity, and secret references
 
-Subsequent runs skip everything that already exists and finish in under a
-minute. Re-run after rotating a secret to pick up the new value in the
-workstation config.
+After setup, secrets are pushed to Secret Manager the first time you run
+`ws create`. First run takes ~20 minutes (cluster provisioning is the slow
+part). Subsequent runs skip everything that already exists and finish in
+under a minute.
+
+### Config schema
+
+**`~/.config/ws/config.yaml`** (personal, exhaustive baseline):
+```yaml
+git:
+  user_name: "Alice"
+  user_email: "alice@example.com"
+
+workstation:
+  region: us-central1
+  machine_type: e2-standard-4
+  disk_size_gb: 50
+  cluster_name: claude-dev-cluster
+  # ... other workstation parameters
+
+secrets:
+  claude_oauth:            # or claude_apikey — exactly one required
+    secret_name: claude-code-oauth-token
+    env_var: CLAUDE_CODE_OAUTH_TOKEN
+  github_pat:
+    secret_name: github-pat
+    env_var: GH_TOKEN
+
+env: {}
+```
+
+**`.ws/config.yaml`** (project-specific, thin overrides):
+```yaml
+project:
+  id: my-gcp-project
+  github_repo_url: https://github.com/org/repo.git
+
+# Optional per-project overrides:
+# workstation:
+#   machine_type: e2-standard-8
+# secrets:
+#   my_api:
+#     secret_name: my-api-key
+#     env_var: MY_API_KEY
+# env:
+#   MY_VAR: value
+```
+
+Config is layered: CLI args override project config, which overrides user
+config.
 
 ## Day-to-day
 
@@ -100,47 +148,48 @@ Open the printed browser IDE URL, launch a terminal, `cd ~/workspace`, run
 ## Rotating credentials
 
 All rotations happen via Secret Manager — no need to re-run `ws create`.
+The GCP secret names are the `secret_name` values from your
+`~/.config/ws/config.yaml` (defaults shown below).
 
 ```bash
 # Claude API key — auto-picked up within ~5 min, no restart
-echo -n 'sk-ant-newvalue' | gcloud secrets versions add anthropic-api-key \
+echo -n 'sk-ant-newvalue' | gcloud secrets versions add <claude_apikey secret_name> \
     --data-file=- --project=$PROJECT_ID
 
 # Claude OAuth token — picked up on next `workstations start`
-echo -n 'sk-ant-oat01-newvalue' | gcloud secrets versions add claude-code-oauth-token \
+echo -n 'sk-ant-oat01-newvalue' | gcloud secrets versions add <claude_oauth secret_name> \
     --data-file=- --project=$PROJECT_ID
 ws stop
 ws create    # starts the workstation back up
 
 # GitHub PAT — picked up on next git operation, no restart
-echo -n 'ghp_newvalue' | gcloud secrets versions add github-pat \
+echo -n 'ghp_newvalue' | gcloud secrets versions add <github_pat secret_name> \
     --data-file=- --project=$PROJECT_ID
 ```
 
-To switch Claude auth modes (OAuth ↔ API key), delete the old secret first
-and re-run `ws create`:
-
-```bash
-gcloud secrets delete anthropic-api-key --project=$PROJECT_ID
-ws create                 # will prompt for OAuth token
-ws stop && ws create     # restart so the container picks up the new mode
-```
+To switch Claude auth modes (OAuth ↔ API key), re-run `ws setup` to update
+the secret type in `~/.config/ws/config.yaml`, then re-run `ws create` and
+restart the workstation.
 
 ## How auth actually works at runtime
 
-**Claude API key mode.** At every container boot, `entrypoint.sh` writes
-`/usr/local/bin/claude-apikey-helper.sh` (a one-liner that shells out to
-`gcloud secrets versions access latest --secret=anthropic-api-key`) and adds
+Auth mode is determined at `ws setup` time by which logical secret name you
+configure in `~/.config/ws/config.yaml`: `claude_oauth` or `claude_apikey`.
+The container receives the chosen secret name(s) via environment variables at
+boot.
+
+**Claude API key mode** (`claude_apikey` in secrets config). At every container
+boot, `entrypoint.sh` writes `/usr/local/bin/claude-apikey-helper.sh` (a
+one-liner that shells out to `gcloud secrets versions access`) and adds
 `"apiKeyHelper": "/usr/local/bin/claude-apikey-helper.sh"` to
 `~/.claude/settings.json`. Claude Code calls this script on startup and then
 every ~5 minutes, so rotating the secret is transparent.
 
-**Claude OAuth mode.** At every container boot, `entrypoint.sh` fetches the
-token from Secret Manager and writes it to `/etc/profile.d/claude-auth.sh`
-as `export CLAUDE_CODE_OAUTH_TOKEN=...`. The code-oss terminal is a login
-shell so it picks this up automatically. Because `apiKeyHelper` conflicts
-with OAuth tokens in Claude Code, the entrypoint also removes any stale
-`apiKeyHelper` entry from `settings.json` when running in this mode.
+**Claude OAuth mode** (`claude_oauth` in secrets config). At every container
+boot, `entrypoint.sh` fetches the token from Secret Manager and exports it as
+`CLAUDE_CODE_OAUTH_TOKEN`. Because `apiKeyHelper` conflicts with OAuth tokens
+in Claude Code, the entrypoint also removes any stale `apiKeyHelper` entry from
+`settings.json` when running in this mode.
 
 In OAuth mode the entrypoint also pre-seeds `/home/user/.claude.json` with
 `hasCompletedOnboarding: true`, `lastOnboardingVersion` (from
@@ -151,38 +200,18 @@ even though the OAuth token itself is valid and `claude -p` works. The
 seed is merged into any existing `~/.claude.json` so project state
 (trusted dirs, MCP servers, etc.) is preserved across boots.
 
-### Populating the oauthAccount secret (one-time, per user)
-
-On a machine where `claude` has already completed interactive login
-(typically your laptop), extract the account metadata:
-
-```bash
-jq '.oauthAccount' ~/.claude.json
-# => {"accountUuid":"...","emailAddress":"...","organizationUuid":"..."}
-```
-
-Store that JSON verbatim as a Secret Manager secret:
-
-```bash
-jq '.oauthAccount' ~/.claude.json | \
-    gcloud secrets create claude-oauth-account \
-        --data-file=- --project=$PROJECT_ID
-```
-
-Then make sure the workstation config sets
-`CLAUDE_OAUTH_ACCOUNT_SECRET_NAME=claude-oauth-account` in `--container-env`
-and the workstation service account has `secretmanager.secretAccessor` on
-the secret. Rotating this secret is picked up on the next
-`workstations stop/start`, same as the OAuth token.
-
-**GitHub PAT.** At every container boot, `entrypoint.sh` writes
-`/usr/local/bin/git-credential-gcp-secret`, a script implementing git's
-credential helper protocol. On each git operation against `github.com`,
-git invokes the helper, which fetches the current PAT from Secret Manager
-and prints `username=oauth2\npassword=<token>` to stdout. The helper
-ignores other hosts and never persists credentials. `~/.gitconfig` (on
+**GitHub PAT** (`github_pat` in secrets config). At every container boot,
+`entrypoint.sh` writes `/usr/local/bin/git-credential-gcp-secret`, a script
+implementing git's credential helper protocol. On each git operation against
+`github.com`, git invokes the helper, which fetches the current PAT from
+Secret Manager and prints `username=oauth2\npassword=<token>` to stdout. The
+helper ignores other hosts and never persists credentials. `~/.gitconfig` (on
 the persistent home disk) points at this helper via
 `credential.helper = /usr/local/bin/git-credential-gcp-secret`.
+
+**Additional secrets.** Any other logical name defined in the `secrets:` block
+of your config is fetched at boot and exported as the configured `env_var`.
+Rotation requires a workstation restart.
 
 ## Cost notes
 

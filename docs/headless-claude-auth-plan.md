@@ -13,16 +13,17 @@ Pre-seed `/home/user/.claude.json` with:
 
 - `hasCompletedOnboarding: true`
 - `lastOnboardingVersion` matching installed `claude --version`
-- `oauthAccount` block: `{accountUuid, emailAddress, organizationUuid}` *(optional — only written if `CLAUDE_OAUTH_ACCOUNT_SECRET_NAME` is set)*
+- `oauthAccount` block: `{accountUuid, emailAddress, organizationUuid}` *(optional — only written if the oauth account secret name is present in the wire protocol env)*
 
 `oauthAccount` is not required to suppress the wizard; it enriches `/status`
 display. The wizard gate is `hasCompletedOnboarding: true` alone.
 
 ## Scope
 
-- Applies only when `CLAUDE_AUTH_MODE=oauth`.
-- `apikey` mode is out of scope (uses `apiKeyHelper`; wizard behavior there
-  may differ and no user report exists yet).
+- Applies only when `claude_oauth` is configured as the Claude secret type in
+  `~/.config/ws/config.yaml` (chosen at `ws setup` time).
+- `claude_apikey` mode is out of scope (uses `apiKeyHelper`; wizard behavior
+  there may differ and no user report exists yet).
 - Runs at every workstation boot so rotations and upgrades are absorbed.
 
 ## Repo context that shapes the design
@@ -37,10 +38,9 @@ display. The wizard gate is `hasCompletedOnboarding: true` alone.
 
 ## Simplest viable version
 
-A new `seed_claude_onboarding()` function inside the existing `oauth)` branch
+A new `seed_claude_onboarding()` function inside the existing oauth branch
 of `entrypoint.sh`. One new Secret Manager secret holding the `oauthAccount`
-JSON. One new flag on `create-workstation.sh` to plumb the secret name. No
-new files in the image.
+JSON. No new files in the image.
 
 ## Architecture
 
@@ -55,9 +55,9 @@ One-time (operator, per user)
                          ▼
             ┌────────────────────────┐
             │ GCP Secret Manager     │
-            │  ├─ claude-oauth-token │  (existing)
-            │  └─ claude-oauth-acct  │  (NEW: JSON blob)
-            │  └─ github-pat         │  (existing)
+            │  ├─ <claude_oauth secret_name>  │  (existing)
+            │  └─ claude-oauth-acct          │  (NEW: JSON blob)
+            │  └─ <github_pat secret_name>   │  (existing)
             └────────────┬───────────┘
                          │ fetched every boot via SA
                          ▼
@@ -84,12 +84,9 @@ Every boot (workstation VM)
 2. **`README.md`** — short operator section:
    - one-time laptop `jq` snippet
    - `gcloud secrets create claude-oauth-account --data-file=-`
-   - note the `CLAUDE_OAUTH_ACCOUNT_SECRET_NAME` env var the workstation
-     config must set
 
-Plumbing the new env var onto the workstation config is handled by the Go
-tool in `cws/` and is out of scope for this plan. `create-workstation.sh`
-is being replaced and is not touched.
+The `ws` CLI plumbs the oauth account secret name onto the workstation config
+automatically based on the `secrets:` block in `~/.config/ws/config.yaml`.
 
 No new standalone scripts shipped in the image.
 
@@ -112,7 +109,7 @@ if it proves painful.
 ## Data flow (per boot, oauth mode)
 
 ```
-/etc/environment has CLAUDE_OAUTH_ACCOUNT_SECRET_NAME
+Container env has WS_SECRET_CLAUDE_OAUTH_NAME (from ws create wire protocol)
         │
         ▼
 gcloud secrets access → JSON string
@@ -151,10 +148,9 @@ No new runtime dependencies.
 1. **Schema decision** — separate secret for account metadata. Document the
    JSON shape in README.
 2. **`seed_claude_onboarding()` in `entrypoint.sh`** — new function, called
-   at the end of the `oauth)` branch. Guarded by
-   `[[ -n "${CLAUDE_OAUTH_ACCOUNT_SECRET_NAME:-}" ]]`; logs a WARNING and
-   continues if unset, so pre-existing workstations keep working on image
-   rebuild.
+   at the end of the oauth branch. Guarded by the presence of the oauth
+   account secret name in the wire protocol env; logs a WARNING and continues
+   if unset, so pre-existing workstations keep working on image rebuild.
 3. **Merge vs create** — mirror the existing settings.json pattern at
    entrypoint.sh:94-108. File missing → write fresh. File exists + `jq`
    present → merge. Else warn.
@@ -163,12 +159,9 @@ No new runtime dependencies.
 5. **Smoke test** — `sudo -u user bash -c 'claude -p "respond OK" | grep -q
    OK'`. Log WARNING on failure, do not exit; a failed smoke test is
    diagnostic, not fatal (token fetch already succeeded upstream).
-6. **README update** — laptop extraction snippet, `gcloud secrets create`,
-   note the new env var (`CLAUDE_OAUTH_ACCOUNT_SECRET_NAME`) that the
-   workstation config must set.
-7. **Coordinate with `cws/`** — the Go tool owns plumbing the env var onto
-   the workstation config. Out of scope for this plan; flagged as a
-   handoff.
+6. **README update** — laptop extraction snippet, `gcloud secrets create`.
+   The `ws` CLI plumbs secret names onto the workstation config automatically
+   via the wire protocol.
 8. **Manual test** — rebuild image, recreate workstation via `cws`, SSH in,
    run `claude` interactively, confirm no wizard. Run `/status` to confirm
    subscription-based auth.
@@ -184,8 +177,7 @@ No new runtime dependencies.
   write config.
 - **Secret rotated to a different account** — merge overwrites
   `oauthAccount`. Correct: token rotation likely implies account rotation.
-- **`CLAUDE_AUTH_MODE=apikey`** — bypass not applied. Extend later if
-  reported.
+- **`claude_apikey` mode** — bypass not applied. Extend later if reported.
 - **Token fetch ok but account fetch fails** — log WARNING, skip onboarding
   write. `-p` still works; interactive will show the wizard. Degraded, not
   broken.
