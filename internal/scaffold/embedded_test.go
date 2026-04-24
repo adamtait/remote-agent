@@ -116,22 +116,31 @@ func TestEmbeddedEntrypoint_NoClaudeSpecifics(t *testing.T) {
 	}
 }
 
-func TestEmbeddedDockerfile_HasClaudeInstallHook(t *testing.T) {
+func TestEmbeddedDockerfile_CopiesClaudeScripts(t *testing.T) {
 	s := embeddedDockerfile
 	for _, want := range []string{
-		"ARG WS_CLAUDE_ENABLED",
 		"COPY .ws/claude/install.sh",
 		"COPY .ws/claude/setup.sh",
+		"/etc/ws/claude-install.sh",
 		"/etc/ws/claude-setup.sh",
 	} {
 		if !bytes.Contains(s, []byte(want)) {
 			t.Errorf("Dockerfile missing %q", want)
 		}
 	}
-	// The inline `npm install -g @anthropic-ai/claude-code` must NOT be in
-	// the Dockerfile anymore — it lives in assets/claude/install.sh.
+	// Claude install moved to runtime (the 'user' account does not exist
+	// in /etc/passwd at docker build time). The Dockerfile must not invoke
+	// the npm install at build time, nor rely on a build arg to gate it.
 	if bytes.Contains(s, []byte("npm install -g @anthropic-ai/claude-code")) {
-		t.Errorf("Dockerfile should delegate Claude npm install to claude/install.sh, not inline it")
+		t.Errorf("Dockerfile should delegate Claude npm install to runtime, not inline it")
+	}
+	// The runtime gate may be mentioned in comments, but the Dockerfile must
+	// not declare it as a build arg or branch on it inside a RUN.
+	if bytes.Contains(s, []byte("ARG WS_CLAUDE_ENABLED")) {
+		t.Errorf("Dockerfile should not declare ARG WS_CLAUDE_ENABLED — install is runtime-gated, not build-gated")
+	}
+	if bytes.Contains(s, []byte("$WS_CLAUDE_ENABLED")) {
+		t.Errorf("Dockerfile should not branch on $WS_CLAUDE_ENABLED — install is runtime-gated")
 	}
 }
 
@@ -143,6 +152,17 @@ func TestEmbeddedEntrypoint_HasClaudeSourceHook(t *testing.T) {
 	} {
 		if !bytes.Contains(embeddedEntrypoint, []byte(want)) {
 			t.Errorf("entrypoint.sh missing %q — Claude harness hook broken", want)
+		}
+	}
+}
+
+func TestEmbeddedClaudeSetup_InstallsOnFirstBoot(t *testing.T) {
+	for _, want := range []string{
+		"_ws_claude_install_if_missing",
+		"/etc/ws/claude-install.sh",
+	} {
+		if !bytes.Contains(embeddedClaudeSetup, []byte(want)) {
+			t.Errorf("setup.sh missing %q — first-boot install hook broken", want)
 		}
 	}
 }

@@ -3,11 +3,12 @@
 #
 # The base image runs every executable in /etc/workstation-startup.d/ at boot;
 # we drop our setup script in there. Per-harness setup (e.g. Claude Code) is
-# opt-in via build args and sourced at runtime.
+# opt-in: harness scripts are always baked into the image and gated at runtime
+# by container env vars (e.g. WS_CLAUDE_ENABLED). Harness install steps run
+# at first-boot rather than at docker build, because the base image creates
+# the unprivileged 'user' account via runtime startup hooks — it does not
+# exist in /etc/passwd at build time, so build-time `chown user:user` fails.
 FROM us-central1-docker.pkg.dev/cloud-workstations-images/predefined/code-oss:latest
-
-# Build-time harness toggles. `ws create` passes these from cfg.Claude.IsEnabled().
-ARG WS_CLAUDE_ENABLED=false
 
 USER root
 
@@ -37,25 +38,18 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && exit 1)
 
 # --- Optional: Claude Code harness -----------------------------------------
-# install.sh runs as root at build time, but only when WS_CLAUDE_ENABLED=true.
-# It npm-installs @anthropic-ai/claude-code as the unprivileged 'user' so the
-# package lives in /home/user/.npm-global (required for auto-update).
-COPY .ws/claude/install.sh /tmp/ws-claude-install.sh
-RUN if [ "$WS_CLAUDE_ENABLED" = "true" ]; then \
-        bash /tmp/ws-claude-install.sh; \
-    fi \
-    && rm -f /tmp/ws-claude-install.sh
-
-# setup.sh is always copied into the image; the runtime entrypoint sources it
-# iff WS_CLAUDE_ENABLED=true (via container env). Keeping setup.sh present in
-# both enabled and disabled builds means flipping the flag doesn't need an
-# image rebuild if the harness is simply switched off.
+# Both scripts are always baked into the image; the runtime entrypoint sources
+# claude-setup.sh iff WS_CLAUDE_ENABLED=true (via container env). On first
+# boot, claude-setup.sh shells out to claude-install.sh to npm-install
+# @anthropic-ai/claude-code under /home/user/.npm-global so the package can
+# self-update under the 'user' account.
 RUN mkdir -p /etc/ws
+COPY .ws/claude/install.sh /etc/ws/claude-install.sh
 COPY .ws/claude/setup.sh /etc/ws/claude-setup.sh
-RUN chmod 0755 /etc/ws/claude-setup.sh
+RUN chmod 0755 /etc/ws/claude-install.sh /etc/ws/claude-setup.sh
 
-# Kept unconditionally. In Claude-disabled builds /home/user/.npm-global does
-# not exist; PATH entries for nonexistent dirs are harmless.
+# Kept unconditionally. In Claude-disabled builds /home/user/.npm-global is
+# never populated; PATH entries for nonexistent dirs are harmless.
 ENV PATH="/home/user/.npm-global/bin:${PATH}"
 
 # --- Our startup script -----------------------------------------------------

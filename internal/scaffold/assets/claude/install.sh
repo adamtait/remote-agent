@@ -1,11 +1,13 @@
 #!/bin/bash
 #
-# Claude Code harness — build-time installer.
+# Claude Code harness — first-boot installer.
 #
-# Runs as root during `docker buildx build` when WS_CLAUDE_ENABLED=true.
-# Installs the @anthropic-ai/claude-code npm package under the 'user' account
-# so the package can self-update at runtime (the base image's code-oss IDE
-# runs under that account).
+# Invoked at runtime by claude-setup.sh on container boot when the claude
+# binary is missing under /home/user/.npm-global. Runs as root (entrypoint
+# context). The 'user' account is provisioned by the code-oss base image's
+# startup hooks at boot, so chown/sudo to 'user' only works at runtime —
+# attempting this at docker build time fails with "invalid user" because
+# /etc/passwd does not yet contain that account.
 #
 set -euo pipefail
 

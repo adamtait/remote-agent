@@ -26,6 +26,30 @@ CLAUDE_SETTINGS_DIR="${USER_HOME}/.claude"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_DIR}/settings.json"
 CLAUDE_CONFIG_PATH="${USER_HOME}/.claude.json"
 
+CLAUDE_INSTALL_SCRIPT="/etc/ws/claude-install.sh"
+CLAUDE_BIN_PATH="${USER_HOME}/.npm-global/bin/claude"
+
+# Install Claude Code on first boot. The unprivileged 'user' account isn't
+# in /etc/passwd at docker build time (the code-oss base image provisions
+# it via runtime startup hooks), so npm-install-as-user has to happen at
+# boot rather than at build. Idempotent: subsequent boots find the binary
+# and skip.
+_ws_claude_install_if_missing() {
+    if [[ -x "${CLAUDE_BIN_PATH}" ]]; then
+        return 0
+    fi
+    if [[ ! -x "${CLAUDE_INSTALL_SCRIPT}" ]]; then
+        log "claude: install script ${CLAUDE_INSTALL_SCRIPT} missing or not executable; skipping install."
+        return 0
+    fi
+    log "claude: installing @anthropic-ai/claude-code (first boot)..."
+    if bash "${CLAUDE_INSTALL_SCRIPT}" 2> >(while read -r line; do log "claude-install: ${line}"; done); then
+        log "claude: install complete."
+    else
+        log "claude: install failed — claude binary will be unavailable until next boot."
+    fi
+}
+
 # Clear stale Claude auth state left by previous boots.
 _ws_claude_clear_stale_state() {
     rm -f "${APIKEY_HELPER_PATH}"
@@ -182,5 +206,8 @@ EOF
     return 1
 }
 
-# Clear stale state once per boot at source time, before the dispatch loop runs.
+# Source-time bootstrap, before the dispatch loop runs.
+# Order matters: install must complete before any code path that calls
+# `claude` (e.g. _ws_claude_seed_onboarding's smoke test).
+_ws_claude_install_if_missing
 _ws_claude_clear_stale_state

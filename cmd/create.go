@@ -196,7 +196,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if err := r.Run("auth", "configure-docker", fmt.Sprintf("%s-docker.pkg.dev", ws.Region), "--quiet"); err != nil {
 		return fmt.Errorf("configuring docker auth: %w", err)
 	}
-	if err := (dockerRunner{}).Run(dockerBuildArgs(imageURI, cfg)...); err != nil {
+	if err := (dockerRunner{}).Run(dockerBuildArgs(imageURI)...); err != nil {
 		return fmt.Errorf("building and pushing image: %w", err)
 	}
 
@@ -516,15 +516,15 @@ func materializeBuildAssets(cwd, home string) (func(), error) {
 }
 
 // dockerBuildArgs returns the buildx args used by `ws create`, centralized so
-// tests can assert on the exact flags. WS_CLAUDE_ENABLED is passed as a build
-// arg because the Dockerfile uses it to gate the Claude install step.
-func dockerBuildArgs(imageURI string, cfg *config.Config) []string {
+// tests can assert on the exact flags. The Dockerfile is harness-agnostic at
+// build time — Claude install is gated at runtime by the WS_CLAUDE_ENABLED
+// container env var, not by a build arg.
+func dockerBuildArgs(imageURI string) []string {
 	return []string{
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", imageURI,
 		"-f", ".ws/Dockerfile",
-		"--build-arg", "WS_CLAUDE_ENABLED=" + strconv.FormatBool(cfg.Claude.IsEnabled()),
 		"--push",
 		".",
 	}

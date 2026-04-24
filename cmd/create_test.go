@@ -110,14 +110,12 @@ func TestMaterializeBuildAssets_PartialExisting_WritesOnlyMissing(t *testing.T) 
 }
 
 func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
-	cfg := &config.Config{}
-	got := dockerBuildArgs("example.com/img:tag", cfg)
+	got := dockerBuildArgs("example.com/img:tag")
 	want := []string{
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", "example.com/img:tag",
 		"-f", ".ws/Dockerfile",
-		"--build-arg", "WS_CLAUDE_ENABLED=false",
 		"--push",
 		".",
 	}
@@ -126,13 +124,15 @@ func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
 	}
 }
 
-func TestBuildArgs_WsClaudeEnabledReflectsConfig(t *testing.T) {
-	enabled := true
-	cfg := &config.Config{Claude: config.ClaudeConfig{Enabled: &enabled, AuthMode: "oauth"}}
-	got := dockerBuildArgs("example.com/img:tag", cfg)
-	joined := strings.Join(got, " ")
-	if !strings.Contains(joined, "--build-arg WS_CLAUDE_ENABLED=true") {
-		t.Errorf("expected --build-arg WS_CLAUDE_ENABLED=true, got: %v", got)
+func TestBuildArgs_NoClaudeBuildArg(t *testing.T) {
+	// Claude install moved to first-boot runtime — there should no longer be
+	// a WS_CLAUDE_ENABLED build arg. The runtime gate lives in the container
+	// env, set by buildContainerEnv.
+	got := dockerBuildArgs("example.com/img:tag")
+	for _, a := range got {
+		if strings.Contains(a, "WS_CLAUDE_ENABLED") {
+			t.Errorf("dockerBuildArgs should not pass WS_CLAUDE_ENABLED at build time; got %v", got)
+		}
 	}
 }
 
