@@ -35,10 +35,24 @@ type GcloudConfig struct {
 	Workstation WorkstationConfig `yaml:"workstation"`
 }
 
+// ClaudeConfig is the "claude:" section. Enabled is a pointer so Merge can
+// distinguish unset (nil) from an explicit `enabled: false` — matching the
+// *int pattern used for AutoSleepHours.
+type ClaudeConfig struct {
+	Enabled  *bool  `yaml:"enabled,omitempty"`
+	AuthMode string `yaml:"auth_mode,omitempty"`
+}
+
+// IsEnabled returns the resolved enabled state; nil pointer means disabled.
+func (c ClaudeConfig) IsEnabled() bool {
+	return c.Enabled != nil && *c.Enabled
+}
+
 // UserConfig is ~/.config/ws/config.yaml — the exhaustive baseline.
 type UserConfig struct {
 	Git     GitConfig              `yaml:"git"`
 	Gcloud  GcloudConfig           `yaml:"gcloud"`
+	Claude  ClaudeConfig           `yaml:"claude"`
 	Secrets map[string]SecretEntry `yaml:"secrets"`
 	Env     map[string]string      `yaml:"env"`
 }
@@ -47,6 +61,7 @@ type UserConfig struct {
 type ProjectConfig struct {
 	Git     GitConfig              `yaml:"git"`
 	Gcloud  GcloudConfig           `yaml:"gcloud"`
+	Claude  ClaudeConfig           `yaml:"claude"`
 	Secrets map[string]SecretEntry `yaml:"secrets"`
 	Env     map[string]string      `yaml:"env"`
 }
@@ -55,6 +70,7 @@ type ProjectConfig struct {
 type Config struct {
 	Git    GitConfig
 	Gcloud GcloudConfig
+	Claude ClaudeConfig
 
 	Secrets map[string]SecretEntry
 	Env     map[string]string

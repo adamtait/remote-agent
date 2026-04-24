@@ -110,17 +110,29 @@ func TestMaterializeBuildAssets_PartialExisting_WritesOnlyMissing(t *testing.T) 
 }
 
 func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
-	got := dockerBuildArgs("example.com/img:tag")
+	cfg := &config.Config{}
+	got := dockerBuildArgs("example.com/img:tag", cfg)
 	want := []string{
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", "example.com/img:tag",
 		"-f", ".ws/Dockerfile",
+		"--build-arg", "WS_CLAUDE_ENABLED=false",
 		"--push",
 		".",
 	}
 	if !equalStringSlices(got, want) {
 		t.Errorf("args mismatch.\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func TestBuildArgs_WsClaudeEnabledReflectsConfig(t *testing.T) {
+	enabled := true
+	cfg := &config.Config{Claude: config.ClaudeConfig{Enabled: &enabled, AuthMode: "oauth"}}
+	got := dockerBuildArgs("example.com/img:tag", cfg)
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "--build-arg WS_CLAUDE_ENABLED=true") {
+		t.Errorf("expected --build-arg WS_CLAUDE_ENABLED=true, got: %v", got)
 	}
 }
 
@@ -213,6 +225,7 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		"GITHUB_REPO_URL":             "https://example.com/r.git",
 		"GIT_USER_NAME":               "Alice",
 		"GIT_USER_EMAIL":              "a@x.com",
+		"WS_CLAUDE_ENABLED":           "false",
 		"WS_SECRET_CLAUDE_OAUTH_NAME": "claude-auth",
 		"WS_SECRET_CLAUDE_OAUTH_VAR":  "CLAUDE_CODE_OAUTH_TOKEN",
 		"WS_SECRET_GITHUB_PAT_NAME":   "github-pat",
@@ -241,6 +254,15 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		if strings.Contains(got, banned) {
 			t.Errorf("container env still contains old key %q: %q", banned, got)
 		}
+	}
+}
+
+func TestBuildContainerEnv_ClaudeEnabledReflectsConfig(t *testing.T) {
+	enabled := true
+	cfg := &config.Config{Claude: config.ClaudeConfig{Enabled: &enabled, AuthMode: "oauth"}}
+	got := buildContainerEnv(cfg)
+	if !strings.Contains(got, "WS_CLAUDE_ENABLED=true") {
+		t.Errorf("expected WS_CLAUDE_ENABLED=true when cfg.Claude.Enabled=true; got: %q", got)
 	}
 }
 

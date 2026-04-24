@@ -178,3 +178,59 @@ func TestMerge_GcloudProject_UserDefaultProjectOverride(t *testing.T) {
 		t.Errorf("gcloud.project override lost: %+v", cfg)
 	}
 }
+
+func TestMerge_Claude_BothUnset(t *testing.T) {
+	cfg, _ := config.Merge(&config.UserConfig{}, &config.ProjectConfig{})
+	if cfg.Claude.Enabled != nil {
+		t.Errorf("expected nil Enabled when both unset, got %+v", cfg.Claude)
+	}
+	if cfg.Claude.IsEnabled() {
+		t.Error("IsEnabled should return false when pointer is nil")
+	}
+}
+
+func TestMerge_Claude_UserEnabledProjectUnset(t *testing.T) {
+	tr := true
+	user := &config.UserConfig{Claude: config.ClaudeConfig{Enabled: &tr, AuthMode: "oauth"}}
+	cfg, _ := config.Merge(user, &config.ProjectConfig{})
+	if !cfg.Claude.IsEnabled() {
+		t.Errorf("expected enabled=true from user, got %+v", cfg.Claude)
+	}
+	if cfg.Claude.AuthMode != "oauth" {
+		t.Errorf("auth_mode lost: got %q", cfg.Claude.AuthMode)
+	}
+}
+
+func TestMerge_Claude_ProjectFalseOverridesUserTrue(t *testing.T) {
+	tr := true
+	fl := false
+	user := &config.UserConfig{Claude: config.ClaudeConfig{Enabled: &tr, AuthMode: "oauth"}}
+	project := &config.ProjectConfig{Claude: config.ClaudeConfig{Enabled: &fl}}
+	cfg, _ := config.Merge(user, project)
+	if cfg.Claude.IsEnabled() {
+		t.Errorf("project enabled=false must override user enabled=true, got %+v", cfg.Claude)
+	}
+}
+
+func TestMerge_Claude_ProjectEmptyDoesNotClobberUser(t *testing.T) {
+	tr := true
+	user := &config.UserConfig{Claude: config.ClaudeConfig{Enabled: &tr, AuthMode: "apikey"}}
+	// Project has zero ClaudeConfig (Enabled=nil, AuthMode=""). User values must stick.
+	cfg, _ := config.Merge(user, &config.ProjectConfig{})
+	if !cfg.Claude.IsEnabled() {
+		t.Errorf("user enabled=true lost, got %+v", cfg.Claude)
+	}
+	if cfg.Claude.AuthMode != "apikey" {
+		t.Errorf("user auth_mode lost: got %q", cfg.Claude.AuthMode)
+	}
+}
+
+func TestMerge_Claude_ProjectAuthModeOverrides(t *testing.T) {
+	tr := true
+	user := &config.UserConfig{Claude: config.ClaudeConfig{Enabled: &tr, AuthMode: "oauth"}}
+	project := &config.ProjectConfig{Claude: config.ClaudeConfig{AuthMode: "apikey"}}
+	cfg, _ := config.Merge(user, project)
+	if cfg.Claude.AuthMode != "apikey" {
+		t.Errorf("project auth_mode override lost: got %q", cfg.Claude.AuthMode)
+	}
+}

@@ -2,9 +2,10 @@
 #
 # Runs at every workstation boot (as root, inside the container).
 #
-# Contract (v3):
+# Contract (v4):
 #   ws create emits these env vars into the container config:
 #     GCP_PROJECT_ID, GITHUB_REPO_URL, GIT_USER_NAME, GIT_USER_EMAIL
+#     WS_CLAUDE_ENABLED=true|false     — toggles the Claude Code harness
 #     WS_SECRETS=<pipe-separated logical names>
 #     for each logical <name>:
 #       WS_SECRET_<UPPERCASE_NAME>_NAME=<gcp secret name>
@@ -13,10 +14,18 @@
 #     plus any static key=value entries from config.env.
 #
 # Logical names with special handling (still conform to the schema):
-#     claude_oauth   → fetch, export $VAR, seed ~/.claude.json onboarding.
-#     claude_apikey  → install apiKeyHelper (fetches every call, ~5min TTL).
+#     claude_oauth   → (claude.enabled=true) fetch, export $VAR, seed
+#                      ~/.claude.json onboarding. Handled by claude-setup.sh.
+#     claude_apikey  → (claude.enabled=true) install apiKeyHelper (fetches
+#                      every call, ~5min TTL). Handled by claude-setup.sh.
 #     github_pat     → install git credential helper AND export $VAR for `gh`.
 #     (any other)    → fetch at boot, export $VAR. Rotation requires restart.
+#
+# Harness plugin contract:
+#   When WS_CLAUDE_ENABLED=true, /etc/ws/claude-setup.sh is sourced before the
+#   dispatch loop. It defines `ws_claude_handle_secret(logical, secret_name,
+#   target_env_var)` which returns 0 if it handled the logical name (and the
+#   main loop then `continue`s) or 1 to fall through to the main case block.
 #
 set -euo pipefail
 
@@ -24,25 +33,21 @@ USER_NAME="user"
 USER_HOME="/home/${USER_NAME}"
 WORKSPACE_DIR="${USER_HOME}/workspace"
 
-APIKEY_HELPER_PATH="/usr/local/bin/claude-apikey-helper.sh"
 GIT_HELPER_PATH="/usr/local/bin/git-credential-gcp-secret"
-CLAUDE_SETTINGS_DIR="${USER_HOME}/.claude"
-CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_DIR}/settings.json"
-CLAUDE_CONFIG_PATH="${USER_HOME}/.claude.json"
-CLAUDE_LOG_PATH="/var/log/claude-setup.log"
+WS_SETUP_LOG_PATH="/var/log/ws-setup.log"
 
 WS_RUNTIME_DIR="/run/ws"
 WS_ENV_FILE="/run/ws/env"
 WS_READY_SENTINEL="/run/ws/ready"
 
 log() {
-    local msg="[claude-setup] $(date -u +%H:%M:%S) $*"
+    local msg="[ws-setup] $(date -u +%H:%M:%S) $*"
     echo "${msg}"
-    echo "${msg}" >> "${CLAUDE_LOG_PATH}" 2>/dev/null || true
+    echo "${msg}" >> "${WS_SETUP_LOG_PATH}" 2>/dev/null || true
 }
 
-: > "${CLAUDE_LOG_PATH}" 2>/dev/null || true
-chmod 0644 "${CLAUDE_LOG_PATH}" 2>/dev/null || true
+: > "${WS_SETUP_LOG_PATH}" 2>/dev/null || true
+chmod 0644 "${WS_SETUP_LOG_PATH}" 2>/dev/null || true
 
 # =============================================================================
 # Required env vars (set by ws create)
@@ -55,87 +60,24 @@ command -v gcloud >/dev/null 2>&1 || {
     exit 1
 }
 
-# Clear stale auth state from any previous configuration.
-rm -f "${APIKEY_HELPER_PATH}"
+# Clear stale auth state common to every boot (git helper, GH_TOKEN line).
+# Harness-owned state (e.g. Claude's apiKeyHelper, CLAUDE_CODE_OAUTH_TOKEN)
+# is cleared by the harness's own setup.sh at source time, so disabling the
+# harness doesn't leave ambient credentials behind.
 rm -f "${GIT_HELPER_PATH}"
-sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/environment
 sed -i '/^GH_TOKEN=/d' /etc/environment
-sed -i '/^ANTHROPIC_API_KEY=/d' /etc/environment
 
-# Strip an apiKeyHelper line from settings.json if it's there.
-if [[ -f "${CLAUDE_SETTINGS_PATH}" ]] && command -v jq >/dev/null 2>&1; then
-    if jq -e '.apiKeyHelper' "${CLAUDE_SETTINGS_PATH}" >/dev/null 2>&1; then
-        tmp=$(mktemp)
-        jq 'del(.apiKeyHelper)' "${CLAUDE_SETTINGS_PATH}" > "${tmp}" \
-            && mv "${tmp}" "${CLAUDE_SETTINGS_PATH}"
-        chown "${USER_NAME}:${USER_NAME}" "${CLAUDE_SETTINGS_PATH}"
-        log "Cleared stale apiKeyHelper from settings.json."
-    fi
+# =============================================================================
+# Load optional harness plugins.
+# Each plugin may define ws_<harness>_handle_secret(logical, secret, env_var)
+# which returns 0 if it handled the secret, 1 otherwise. Plugins are sourced
+# before the dispatch loop so handler functions are in scope.
+# =============================================================================
+if [[ "${WS_CLAUDE_ENABLED:-false}" == "true" && -f /etc/ws/claude-setup.sh ]]; then
+    log "Claude harness enabled; sourcing /etc/ws/claude-setup.sh."
+    # shellcheck source=/dev/null
+    source /etc/ws/claude-setup.sh
 fi
-
-# =============================================================================
-# Seed ~/.claude.json so interactive `claude` skips the onboarding wizard.
-# =============================================================================
-seed_claude_onboarding() {
-    local token="$1"
-    local oauth_account_secret="$2"
-
-    local version
-    version=$(sudo -u "${USER_NAME}" claude --version 2>/dev/null | awk '{print $1}' || true)
-    if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-        log "WARNING: could not parse claude --version ('${version}'); proceeding without lastOnboardingVersion."
-        version=""
-    fi
-
-    local acct=""
-    if [[ -n "${oauth_account_secret}" ]]; then
-        log "Fetching oauthAccount metadata from Secret Manager (${oauth_account_secret})..."
-        acct=$(gcloud secrets versions access latest \
-            --secret="${oauth_account_secret}" \
-            --project="${GCP_PROJECT_ID}" 2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
-        if [[ -z "${acct}" ]]; then
-            log "WARNING: oauthAccount fetch returned empty; skipping oauthAccount field."
-            acct=""
-        elif ! jq -e '.accountUuid and .emailAddress and .organizationUuid' \
-                >/dev/null 2>&1 <<<"${acct}"; then
-            log "WARNING: oauthAccount JSON missing required fields; skipping oauthAccount field."
-            acct=""
-        fi
-    fi
-
-    local tmp
-    tmp=$(mktemp)
-    if [[ -f "${CLAUDE_CONFIG_PATH}" ]]; then
-        jq --arg acct "${acct}" --arg ver "${version}" '
-            .hasCompletedOnboarding = true
-            | (if $ver != "" then .lastOnboardingVersion = $ver else . end)
-            | (if $acct != "" then .oauthAccount = ($acct | fromjson) else . end)
-        ' "${CLAUDE_CONFIG_PATH}" > "${tmp}" || { rm -f "${tmp}"; log "ERROR: jq merge failed; leaving ${CLAUDE_CONFIG_PATH} untouched."; return 0; }
-    else
-        jq -n --arg acct "${acct}" --arg ver "${version}" '
-            {hasCompletedOnboarding: true}
-            | (if $ver != "" then .lastOnboardingVersion = $ver else . end)
-            | (if $acct != "" then .oauthAccount = ($acct | fromjson) else . end)
-        ' > "${tmp}" || { rm -f "${tmp}"; log "ERROR: jq render failed; skipping onboarding seed."; return 0; }
-    fi
-
-    if ! mv "${tmp}" "${CLAUDE_CONFIG_PATH}"; then
-        rm -f "${tmp}"
-        log "ERROR: failed to write ${CLAUDE_CONFIG_PATH}."
-        return 0
-    fi
-    chown "${USER_NAME}:${USER_NAME}" "${CLAUDE_CONFIG_PATH}"
-    chmod 600 "${CLAUDE_CONFIG_PATH}"
-    log "Seeded ${CLAUDE_CONFIG_PATH} (hasCompletedOnboarding=true${acct:+, oauthAccount set})."
-
-    if sudo -u "${USER_NAME}" env CLAUDE_CODE_OAUTH_TOKEN="${token}" \
-            claude -p "respond with OK" 2>/dev/null | grep -q 'OK'; then
-        log "Smoke test: claude -p returned OK."
-    else
-        log "WARNING: claude -p smoke test did not return OK; token or account may be stale."
-    fi
-}
-
 
 mkdir -p "${WS_RUNTIME_DIR}"
 chmod 0755 "${WS_RUNTIME_DIR}"
@@ -158,62 +100,13 @@ for logical in "${ws_secret_names[@]}"; do
         continue
     fi
 
+    if declare -f ws_claude_handle_secret >/dev/null 2>&1; then
+        if ws_claude_handle_secret "${logical}" "${secret_name}" "${target_env_var}"; then
+            continue
+        fi
+    fi
+
     case "${logical}" in
-        claude_oauth)
-            log "claude_oauth: fetching ${secret_name} → ${target_env_var}"
-            TOKEN=$(gcloud secrets versions access latest \
-                --secret="${secret_name}" --project="${GCP_PROJECT_ID}" \
-                2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
-            if [[ -z "${TOKEN}" ]]; then
-                log "WARNING: ${secret_name} fetch failed."
-            else
-                echo "${target_env_var}=${TOKEN}" >> /etc/environment
-                umask 077
-                tmp=$(mktemp "${WS_RUNTIME_DIR}/.env.XXXXXX")
-                printf '%s=%s\n' "${target_env_var}" "${TOKEN}" > "${tmp}"
-                chmod 0644 "${tmp}"
-                mv "${tmp}" "${WS_ENV_FILE}"
-                log "Exported ${target_env_var} via /etc/environment and ${WS_ENV_FILE}."
-
-                oauth_account_var="WS_SECRET_${token}_OAUTH_ACCOUNT_SECRET_NAME"
-                seed_claude_onboarding "${TOKEN}" "${!oauth_account_var:-}"
-            fi
-            ;;
-
-        claude_apikey)
-            log "claude_apikey: installing apiKeyHelper for ${secret_name}"
-            cat > "${APIKEY_HELPER_PATH}" <<EOF
-#!/bin/bash
-# Auto-generated. Outputs current value of secret '${secret_name}'.
-exec gcloud secrets versions access latest \\
-    --secret='${secret_name}' \\
-    --project='${GCP_PROJECT_ID}' 2>/dev/null
-EOF
-            chmod 0755 "${APIKEY_HELPER_PATH}"
-            if ! "${APIKEY_HELPER_PATH}" | grep -q '.'; then
-                log "WARNING: apiKeyHelper returned no value. Check SA permissions."
-            fi
-
-            mkdir -p "${CLAUDE_SETTINGS_DIR}"
-            chown "${USER_NAME}:${USER_NAME}" "${CLAUDE_SETTINGS_DIR}"
-            if [[ ! -f "${CLAUDE_SETTINGS_PATH}" ]]; then
-                cat > "${CLAUDE_SETTINGS_PATH}" <<EOF
-{
-  "apiKeyHelper": "${APIKEY_HELPER_PATH}"
-}
-EOF
-            elif command -v jq >/dev/null 2>&1; then
-                tmp=$(mktemp)
-                jq --arg h "${APIKEY_HELPER_PATH}" '.apiKeyHelper = $h' \
-                    "${CLAUDE_SETTINGS_PATH}" > "${tmp}" \
-                    && mv "${tmp}" "${CLAUDE_SETTINGS_PATH}"
-            else
-                log "WARNING: settings.json exists and jq missing; leaving it alone."
-            fi
-            chown "${USER_NAME}:${USER_NAME}" "${CLAUDE_SETTINGS_PATH}"
-            log "apiKeyHelper installed; target env var ${target_env_var} is documentation-only."
-            ;;
-
         github_pat)
             log "github_pat: installing git credential helper for ${secret_name}"
             cat > "${GIT_HELPER_PATH}" <<EOF
@@ -245,6 +138,14 @@ EOF
                 printf '%s=%s\n' "${target_env_var}" "${pat_value}" >> "${WS_ENV_FILE}"
                 log "Exported ${target_env_var} via /etc/environment and ${WS_ENV_FILE}."
             fi
+            ;;
+
+        claude_oauth|claude_apikey)
+            # Reached only when the matching harness is disabled — validation
+            # should have already rejected the config, so this is defense in
+            # depth. Skip quietly to avoid exporting a Claude token into an
+            # image that has no Claude binary to consume it.
+            log "WARNING: ${logical} configured but WS_CLAUDE_ENABLED!=true; skipping."
             ;;
 
         *)

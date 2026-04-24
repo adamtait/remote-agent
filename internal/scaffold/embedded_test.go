@@ -81,3 +81,82 @@ func TestEmbedded_DockerfileCopiesStagedProfileD(t *testing.T) {
 		t.Errorf("Dockerfile should target /etc/profile.d/")
 	}
 }
+
+func TestEmbeddedClaudeInstall_HasNpmPackage(t *testing.T) {
+	if len(embeddedClaudeInstall) == 0 {
+		t.Fatal("embeddedClaudeInstall is empty")
+	}
+	if !bytes.HasPrefix(embeddedClaudeInstall, []byte("#!/bin/bash")) {
+		t.Errorf("install.sh should start with '#!/bin/bash'")
+	}
+	if !bytes.Contains(embeddedClaudeInstall, []byte("@anthropic-ai/claude-code")) {
+		t.Errorf("install.sh should install @anthropic-ai/claude-code")
+	}
+	if !bytes.Contains(embeddedClaudeInstall, []byte("set -euo pipefail")) {
+		t.Errorf("install.sh should use strict mode")
+	}
+}
+
+func TestEmbeddedEntrypoint_NoClaudeSpecifics(t *testing.T) {
+	// Guardrail: the main entrypoint must stay harness-agnostic. Claude-owned
+	// helpers live in claude/setup.sh and are sourced at runtime only when
+	// WS_CLAUDE_ENABLED=true. If someone reintroduces these symbols into the
+	// main entrypoint, toggle semantics break.
+	forbidden := []string{
+		"seed_claude_onboarding",
+		"CLAUDE_SETTINGS_DIR",
+		"CLAUDE_SETTINGS_PATH",
+		"CLAUDE_CONFIG_PATH",
+		"claude-apikey-helper.sh",
+	}
+	for _, sym := range forbidden {
+		if bytes.Contains(embeddedEntrypoint, []byte(sym)) {
+			t.Errorf("entrypoint.sh should not reference Claude-specific symbol %q", sym)
+		}
+	}
+}
+
+func TestEmbeddedDockerfile_HasClaudeInstallHook(t *testing.T) {
+	s := embeddedDockerfile
+	for _, want := range []string{
+		"ARG WS_CLAUDE_ENABLED",
+		"COPY .ws/claude/install.sh",
+		"COPY .ws/claude/setup.sh",
+		"/etc/ws/claude-setup.sh",
+	} {
+		if !bytes.Contains(s, []byte(want)) {
+			t.Errorf("Dockerfile missing %q", want)
+		}
+	}
+	// The inline `npm install -g @anthropic-ai/claude-code` must NOT be in
+	// the Dockerfile anymore — it lives in assets/claude/install.sh.
+	if bytes.Contains(s, []byte("npm install -g @anthropic-ai/claude-code")) {
+		t.Errorf("Dockerfile should delegate Claude npm install to claude/install.sh, not inline it")
+	}
+}
+
+func TestEmbeddedEntrypoint_HasClaudeSourceHook(t *testing.T) {
+	for _, want := range []string{
+		"WS_CLAUDE_ENABLED",
+		"/etc/ws/claude-setup.sh",
+		"ws_claude_handle_secret",
+	} {
+		if !bytes.Contains(embeddedEntrypoint, []byte(want)) {
+			t.Errorf("entrypoint.sh missing %q — Claude harness hook broken", want)
+		}
+	}
+}
+
+func TestEmbeddedClaudeSetup_HasHandlerFunction(t *testing.T) {
+	if len(embeddedClaudeSetup) == 0 {
+		t.Fatal("embeddedClaudeSetup is empty")
+	}
+	if !bytes.Contains(embeddedClaudeSetup, []byte("ws_claude_handle_secret")) {
+		t.Errorf("setup.sh must define ws_claude_handle_secret() for the main dispatch hook")
+	}
+	for _, want := range []string{"claude_oauth", "claude_apikey", "apiKeyHelper"} {
+		if !bytes.Contains(embeddedClaudeSetup, []byte(want)) {
+			t.Errorf("setup.sh missing expected marker %q", want)
+		}
+	}
+}

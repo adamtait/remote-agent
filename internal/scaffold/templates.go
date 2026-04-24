@@ -14,6 +14,13 @@ const (
 	ClaudeAuthAPIKey
 )
 
+func (m ClaudeAuthMode) String() string {
+	if m == ClaudeAuthAPIKey {
+		return "apikey"
+	}
+	return "oauth"
+}
+
 // UserValues are the prompt-gathered inputs for ~/.config/ws/config.yaml.
 type UserValues struct {
 	GitUserName   string
@@ -33,6 +40,7 @@ type UserValues struct {
 	AutoSleepHours     int
 	AutoShutdownHours  int
 
+	ClaudeEnabled  bool
 	ClaudeAuthMode ClaudeAuthMode
 }
 
@@ -94,17 +102,27 @@ func RenderUserConfig(uv UserValues) string {
 	sleep := orInt(uv.AutoSleepHours, seedAutoSleepHours)
 	shutdown := orInt(uv.AutoShutdownHours, seedAutoShutdownHours)
 
-	var claudeEntry string
-	switch uv.ClaudeAuthMode {
-	case ClaudeAuthAPIKey:
-		claudeEntry = `  claude_apikey:
+	var claudeBlock string
+	if uv.ClaudeEnabled {
+		claudeBlock = fmt.Sprintf("claude:\n  enabled: true\n  auth_mode: %s\n", uv.ClaudeAuthMode)
+	} else {
+		claudeBlock = "claude:\n  enabled: false\n"
+	}
+
+	var claudeSecretEntry string
+	if uv.ClaudeEnabled {
+		if uv.ClaudeAuthMode == ClaudeAuthAPIKey {
+			claudeSecretEntry = `  claude_apikey:
     secret_name: anthropic-api-key
-    env_var: ANTHROPIC_API_KEY`
-	default:
-		claudeEntry = `  claude_oauth:
+    env_var: ANTHROPIC_API_KEY
+`
+		} else {
+			claudeSecretEntry = `  claude_oauth:
     secret_name: claude-code-oauth-token
     env_var: CLAUDE_CODE_OAUTH_TOKEN
-    # oauth_account_secret_name: claude-oauth-account   # optional`
+    # oauth_account_secret_name: claude-oauth-account   # optional
+`
+		}
 	}
 
 	var b strings.Builder
@@ -132,26 +150,33 @@ gcloud:
     auto_sleep_hours: %d
     auto_shutdown_hours: %d
 
+# claude — toggles the Claude Code harness in the workstation image.
+# When enabled=false the @anthropic-ai/claude-code npm package is not
+# installed and claude_oauth / claude_apikey secrets must not be set.
+# When enabled=true, auth_mode selects which claude_* secret is required:
+#   auth_mode=oauth   → requires secrets.claude_oauth
+#   auth_mode=apikey  → requires secrets.claude_apikey
+%s
 # secrets — map GCP Secret Manager secrets to container env vars. Each
-# entry has the same {secret_name, env_var} shape. ws recognizes three
+# entry has the same {secret_name, env_var} shape. ws recognizes these
 # logical names and wires them into credential helpers; any other name
 # is treated generically (fetched at boot, exported as env_var).
 #
-#   claude_oauth  → fetches at boot, exports env_var (CLAUDE_CODE_OAUTH_TOKEN).
-#                   Also seeds ~/.claude.json onboarding if
+#   claude_oauth  → (claude.enabled=true, auth_mode=oauth) fetches at
+#                   boot, exports env_var (CLAUDE_CODE_OAUTH_TOKEN) and
+#                   seeds ~/.claude.json onboarding if
 #                   oauth_account_secret_name is set.
-#   claude_apikey → installs Claude Code's apiKeyHelper — re-fetches every
-#                   ~5 min (rotation without restart). env_var is the
-#                   canonical name (ANTHROPIC_API_KEY) for documentation.
+#   claude_apikey → (claude.enabled=true, auth_mode=apikey) installs
+#                   Claude Code's apiKeyHelper — re-fetches every ~5 min
+#                   (rotation without restart). env_var is the canonical
+#                   name (ANTHROPIC_API_KEY) for documentation.
 #   github_pat    → installs git's credential helper (fresh fetch per git
 #                   op) AND exports env_var (GH_TOKEN) for `+"`gh`"+` CLI.
 #                   Env var is stale on rotation; git operations stay fresh.
 #
 # Other logical names: plain fetch + export. Rotation requires ws stop/start.
-# Exactly one of {claude_oauth, claude_apikey} must be present.
 secrets:
-%s
-  github_pat:
+%s  github_pat:
     secret_name: github-pat
     env_var: GH_TOKEN
 
@@ -161,7 +186,8 @@ env: {}
 		gitName, gitEmail, repoURL,
 		projectID,
 		region, machine, disk, cluster, conf, sa, img, tag, repo, sleep, shutdown,
-		claudeEntry)
+		claudeBlock,
+		claudeSecretEntry)
 	return b.String()
 }
 
@@ -189,6 +215,10 @@ gcloud:
 #     machine_type: e2-standard-8
 #     disk_size_gb: 100
 #     auto_sleep_hours: 1
+#
+# claude:
+#   enabled: false          # project-level false overrides user-level true
+#   # auth_mode: oauth      # only meaningful when enabled: true
 #
 # secrets:
 #   my_extra_secret:

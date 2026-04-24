@@ -10,7 +10,27 @@ import (
 )
 
 // AssetNames enumerates the build assets ws knows how to scaffold.
-var AssetNames = []string{"Dockerfile", "entrypoint.sh", "profile.d/00-ws-wait.sh"}
+var AssetNames = []string{
+	"Dockerfile",
+	"entrypoint.sh",
+	"profile.d/00-ws-wait.sh",
+	"claude/install.sh",
+	"claude/setup.sh",
+}
+
+// AssetMode returns the file mode ws uses for a materialized asset.
+// Shell scripts are 0755; other files are 0644.
+func AssetMode(name string) os.FileMode {
+	switch name {
+	case "entrypoint.sh",
+		"profile.d/00-ws-wait.sh",
+		"claude/install.sh",
+		"claude/setup.sh":
+		return 0755
+	default:
+		return 0644
+	}
+}
 
 // EmbeddedSeed returns the embedded default bytes for the named asset.
 // Used at setup time to materialize initial templates.
@@ -71,6 +91,10 @@ func embeddedFor(name string) ([]byte, bool) {
 		return embeddedEntrypoint, true
 	case "profile.d/00-ws-wait.sh":
 		return embeddedWaitScript, true
+	case "claude/install.sh":
+		return embeddedClaudeInstall, true
+	case "claude/setup.sh":
+		return embeddedClaudeSetup, true
 	default:
 		return nil, false
 	}

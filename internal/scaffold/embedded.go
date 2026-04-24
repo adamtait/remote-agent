@@ -12,3 +12,9 @@ var embeddedEntrypoint []byte
 
 //go:embed assets/profile.d/00-ws-wait.sh
 var embeddedWaitScript []byte
+
+//go:embed assets/claude/install.sh
+var embeddedClaudeInstall []byte
+
+//go:embed assets/claude/setup.sh
+var embeddedClaudeSetup []byte

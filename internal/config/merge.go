@@ -48,6 +48,11 @@ func Merge(u *UserConfig, project *ProjectConfig) (*Config, error) {
 	}
 	cfg.Gcloud.Workstation = lift(u.Gcloud.Workstation, project.Gcloud.Workstation)
 
+	cfg.Claude = ClaudeConfig{
+		Enabled:  pickBoolPtr(project.Claude.Enabled, u.Claude.Enabled),
+		AuthMode: pick(project.Claude.AuthMode, u.Claude.AuthMode),
+	}
+
 	// Secrets: user map seeds, project entries override or add by logical name.
 	cfg.Secrets = mergeSecretMap(u.Secrets, project.Secrets)
 	cfg.Env = mergeStringMap(u.Env, project.Env)
@@ -75,6 +80,20 @@ func pickInt(p, u int) int {
 // pickIntPtr: *int lets us distinguish "unset" (nil) from 0.
 // Project override only applies if project's pointer is non-nil.
 func pickIntPtr(p, u *int) *int {
+	if p != nil {
+		v := *p
+		return &v
+	}
+	if u != nil {
+		v := *u
+		return &v
+	}
+	return nil
+}
+
+// pickBoolPtr: *bool lets us distinguish "unset" (nil) from false.
+// Project override only applies if project's pointer is non-nil.
+func pickBoolPtr(p, u *bool) *bool {
 	if p != nil {
 		v := *p
 		return &v

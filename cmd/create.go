@@ -33,6 +33,7 @@ func buildContainerEnv(cfg *config.Config) string {
 	add("GITHUB_REPO_URL", cfg.Git.GithubRepoURL)
 	add("GIT_USER_NAME", cfg.Git.UserName)
 	add("GIT_USER_EMAIL", cfg.Git.UserEmail)
+	add("WS_CLAUDE_ENABLED", strconv.FormatBool(cfg.Claude.IsEnabled()))
 
 	logicalNames := make([]string, 0, len(cfg.Secrets))
 	for k := range cfg.Secrets {
@@ -195,7 +196,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if err := r.Run("auth", "configure-docker", fmt.Sprintf("%s-docker.pkg.dev", ws.Region), "--quiet"); err != nil {
 		return fmt.Errorf("configuring docker auth: %w", err)
 	}
-	if err := (dockerRunner{}).Run(dockerBuildArgs(imageURI)...); err != nil {
+	if err := (dockerRunner{}).Run(dockerBuildArgs(imageURI, cfg)...); err != nil {
 		return fmt.Errorf("building and pushing image: %w", err)
 	}
 
@@ -458,60 +459,72 @@ func (d dockerRunner) Run(args ...string) error {
 	return cmd.Run()
 }
 
-// materializeBuildAssets ensures .ws/Dockerfile and .ws/entrypoint.sh exist
-// for docker build. Missing files are resolved from user template or embedded
-// defaults and written to .ws/. The returned cleanup func removes only the
-// files that were written by this call; pre-existing files are untouched.
+// materializeBuildAssets ensures the build assets (Dockerfile, entrypoint.sh,
+// claude/install.sh, claude/setup.sh) exist under .ws/ for docker build.
+// Missing files are resolved from user template or embedded defaults and
+// written with the correct mode via scaffold.AssetMode. Pre-existing files
+// are untouched. The returned cleanup func removes only files (and empty
+// subdirs) that were created by this call.
 func materializeBuildAssets(cwd, home string) (func(), error) {
 	wsDir := filepath.Join(cwd, ".ws")
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		return func() {}, fmt.Errorf("creating .ws/: %w", err)
 	}
 	var written []string
-	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
+	var createdDirs []string
+	rollback := func() {
+		for _, p := range written {
+			os.Remove(p)
+		}
+		for i := len(createdDirs) - 1; i >= 0; i-- {
+			os.Remove(createdDirs[i])
+		}
+	}
+	for _, n := range scaffold.AssetNames {
 		dest := filepath.Join(wsDir, n)
 		if _, statErr := os.Stat(dest); statErr == nil {
 			continue
 		} else if !errors.Is(statErr, os.ErrNotExist) {
-			for _, p := range written {
-				os.Remove(p)
-			}
+			rollback()
 			return func() {}, fmt.Errorf("checking %s: %w", dest, statErr)
+		}
+		parent := filepath.Dir(dest)
+		if parent != wsDir {
+			if _, statErr := os.Stat(parent); errors.Is(statErr, os.ErrNotExist) {
+				if err := os.MkdirAll(parent, 0755); err != nil {
+					rollback()
+					return func() {}, fmt.Errorf("creating %s: %w", parent, err)
+				}
+				createdDirs = append(createdDirs, parent)
+			} else if statErr != nil {
+				rollback()
+				return func() {}, fmt.Errorf("checking %s: %w", parent, statErr)
+			}
 		}
 		data, _, err := scaffold.ResolveSource(home, "", n)
 		if err != nil {
-			for _, p := range written {
-				os.Remove(p)
-			}
+			rollback()
 			return func() {}, fmt.Errorf("resolving %s: %w", n, err)
 		}
-		var mode os.FileMode = 0644
-		if n == "entrypoint.sh" {
-			mode = 0755
-		}
-		if err := os.WriteFile(dest, data, mode); err != nil {
-			for _, p := range written {
-				os.Remove(p)
-			}
+		if err := os.WriteFile(dest, data, scaffold.AssetMode(n)); err != nil {
+			rollback()
 			return func() {}, fmt.Errorf("writing %s: %w", dest, err)
 		}
 		written = append(written, dest)
 	}
-	return func() {
-		for _, p := range written {
-			os.Remove(p)
-		}
-	}, nil
+	return rollback, nil
 }
 
 // dockerBuildArgs returns the buildx args used by `ws create`, centralized so
-// tests can assert on the exact flags.
-func dockerBuildArgs(imageURI string) []string {
+// tests can assert on the exact flags. WS_CLAUDE_ENABLED is passed as a build
+// arg because the Dockerfile uses it to gate the Claude install step.
+func dockerBuildArgs(imageURI string, cfg *config.Config) []string {
 	return []string{
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", imageURI,
 		"-f", ".ws/Dockerfile",
+		"--build-arg", "WS_CLAUDE_ENABLED=" + strconv.FormatBool(cfg.Claude.IsEnabled()),
 		"--push",
 		".",
 	}

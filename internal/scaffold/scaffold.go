@@ -122,16 +122,22 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 
 	if writeUser {
 		var err error
-		uv.ClaudeAuthMode, err = promptClaudeAuthMode(stdin, opts.Stdout)
-		if err != nil {
-			return err
-		}
-
 		if uv.GitUserName, err = Prompt(stdin, opts.Stdout, "git_user_name", probed.gitName, nil); err != nil {
 			return err
 		}
 		if uv.GitUserEmail, err = Prompt(stdin, opts.Stdout, "git_user_email", probed.gitEmail, nil); err != nil {
 			return err
+		}
+
+		uv.ClaudeEnabled, err = promptClaudeEnabled(stdin, opts.Stdout)
+		if err != nil {
+			return err
+		}
+		if uv.ClaudeEnabled {
+			uv.ClaudeAuthMode, err = promptClaudeAuthMode(stdin, opts.Stdout)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -254,6 +260,25 @@ func probeDefaults(p Prober) probedDefaults {
 		repoURL:   p.GitOriginURL(),
 		gitName:   p.GitUserName(),
 		gitEmail:  p.GitUserEmail(),
+	}
+}
+
+// promptClaudeEnabled asks whether Claude Code should be installed in the
+// workstation image. Defaults to N so existing users don't accidentally
+// opt in; matches the "breaking-change with explicit opt-in" stance taken
+// on the claude.enabled field.
+func promptClaudeEnabled(r *bufio.Reader, out io.Writer) (bool, error) {
+	choice, err := Prompt(r, out,
+		"Enable Claude Code? (installs @anthropic-ai/claude-code into the image) [y/N]",
+		"N", nil)
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(choice)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
 	}
 }
 
