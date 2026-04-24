@@ -180,7 +180,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("determining working directory: %w", err)
 	}
-	cleanupAssets, err := materializeBuildAssets(cwd, home)
+	cleanupAssets, err := materializeBuildAssets(cwd)
 	if err != nil {
 		return err
 	}
@@ -459,10 +459,13 @@ func (d dockerRunner) Run(args ...string) error {
 }
 
 // materializeBuildAssets ensures .ws/Dockerfile and .ws/entrypoint.sh exist
-// for docker build. Missing files are resolved from user template or embedded
-// defaults and written to .ws/. The returned cleanup func removes only the
-// files that were written by this call; pre-existing files are untouched.
-func materializeBuildAssets(cwd, home string) (func(), error) {
+// for docker build. Missing files are written from the embedded defaults
+// compiled into this binary — never from the user template — so the
+// entrypoint schema always matches what buildContainerEnv injects. If a
+// project-level .ws/entrypoint.sh already exists it is used as-is (project
+// customisation). The returned cleanup func removes only files written by
+// this call; pre-existing files are untouched.
+func materializeBuildAssets(cwd string) (func(), error) {
 	wsDir := filepath.Join(cwd, ".ws")
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		return func() {}, fmt.Errorf("creating .ws/: %w", err)
@@ -478,7 +481,7 @@ func materializeBuildAssets(cwd, home string) (func(), error) {
 			}
 			return func() {}, fmt.Errorf("checking %s: %w", dest, statErr)
 		}
-		data, _, err := scaffold.ResolveSource(home, "", n)
+		data, err := scaffold.EmbeddedSeed(n)
 		if err != nil {
 			for _, p := range written {
 				os.Remove(p)

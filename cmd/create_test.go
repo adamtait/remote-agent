@@ -28,7 +28,7 @@ func TestMaterializeBuildAssets_BothPresent_NoWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cleanup, err := materializeBuildAssets(cwd, t.TempDir())
+	cleanup, err := materializeBuildAssets(cwd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,8 +54,7 @@ func TestMaterializeBuildAssets_BothPresent_NoWrite(t *testing.T) {
 
 func TestMaterializeBuildAssets_BothMissing_WritesAndCleansUp(t *testing.T) {
 	cwd := t.TempDir()
-	home := t.TempDir()
-	cleanup, err := materializeBuildAssets(cwd, home)
+	cleanup, err := materializeBuildAssets(cwd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -85,7 +84,7 @@ func TestMaterializeBuildAssets_PartialExisting_WritesOnlyMissing(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	cleanup, err := materializeBuildAssets(cwd, t.TempDir())
+	cleanup, err := materializeBuildAssets(cwd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
