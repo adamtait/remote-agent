@@ -27,9 +27,15 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Claude Code ------------------------------------------------------------
+# --- Claude Code (installed as 'user' so auto-update works) -----------------
+RUN mkdir -p /home/user/.npm-global \
+    && chown user:user /home/user/.npm-global
+USER user
+ENV NPM_CONFIG_PREFIX=/home/user/.npm-global
 RUN npm install -g @anthropic-ai/claude-code \
     && npm cache clean --force
+USER root
+ENV PATH="/home/user/.npm-global/bin:${PATH}"
 
 # --- Sanity check: entrypoint relies on gcloud being present for runtime
 #     Secret Manager access. The code-oss base image ships with gcloud, but
