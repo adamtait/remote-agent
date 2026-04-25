@@ -1,7 +1,7 @@
 .env
 .worktrees/
-ws
-.ws/**/*
-!.ws/profile.d/
-!.ws/profile.d/*.sh
-.ws/profile.d.staged/
+ra
+.ra/**/*
+!.ra/profile.d/
+!.ra/profile.d/*.sh
+.ra/profile.d.staged/
