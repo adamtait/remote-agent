@@ -7,6 +7,8 @@ import (
 	"github.com/adamtait/remote-agent/internal/config"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 func fullValidCfg() *config.Config {
 	sleep := 2
 	return &config.Config{
@@ -30,6 +32,10 @@ func fullValidCfg() *config.Config {
 				AutoSleepHours:     &sleep,
 				AutoShutdownHours:  12,
 			},
+		},
+		Claude: config.ClaudeConfig{
+			Enabled:  boolPtr(true),
+			AuthMode: "oauth",
 		},
 		Secrets: map[string]config.SecretEntry{
 			"claude_oauth": {SecretName: "claude-auth", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
@@ -75,17 +81,98 @@ func TestValidate_MissingRequiredKeys(t *testing.T) {
 	}
 }
 
-func TestValidate_ExactlyOneClaudeAuth(t *testing.T) {
+func TestValidate_Claude_EnabledOAuth_OK(t *testing.T) {
+	c := fullValidCfg()
+	// fullValidCfg already sets enabled=true + auth_mode=oauth + claude_oauth.
+	if err := config.Validate(c); err != nil {
+		t.Errorf("expected OK, got %v", err)
+	}
+}
+
+func TestValidate_Claude_EnabledAPIKey_OK(t *testing.T) {
+	c := fullValidCfg()
+	c.Claude.AuthMode = "apikey"
+	delete(c.Secrets, "claude_oauth")
+	c.Secrets["claude_apikey"] = config.SecretEntry{SecretName: "anthropic-api-key", EnvVar: "ANTHROPIC_API_KEY"}
+	if err := config.Validate(c); err != nil {
+		t.Errorf("expected OK, got %v", err)
+	}
+}
+
+func TestValidate_Claude_Disabled_OK(t *testing.T) {
+	c := fullValidCfg()
+	c.Claude = config.ClaudeConfig{Enabled: boolPtr(false)}
+	delete(c.Secrets, "claude_oauth")
+	if err := config.Validate(c); err != nil {
+		t.Errorf("expected OK when claude disabled and no claude_* secrets, got %v", err)
+	}
+}
+
+func TestValidate_Claude_EnabledMissingMatchingSecret(t *testing.T) {
 	c := fullValidCfg()
 	delete(c.Secrets, "claude_oauth")
-	if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), "claude_oauth") {
-		t.Errorf("want missing-claude-auth error, got %v", err)
+	err := config.Validate(c)
+	if err == nil || !strings.Contains(err.Error(), "claude_oauth") {
+		t.Errorf("want missing claude_oauth error, got %v", err)
 	}
+}
 
-	c = fullValidCfg()
+func TestValidate_Claude_EnabledAuthModeMismatch(t *testing.T) {
+	c := fullValidCfg()
+	c.Claude.AuthMode = "apikey"
+	err := config.Validate(c)
+	if err == nil || !strings.Contains(err.Error(), "claude_apikey") {
+		t.Errorf("want missing claude_apikey error, got %v", err)
+	}
+}
+
+func TestValidate_Claude_EnabledBothSecretsPresent(t *testing.T) {
+	c := fullValidCfg()
 	c.Secrets["claude_apikey"] = config.SecretEntry{SecretName: "anthropic-api-key", EnvVar: "ANTHROPIC_API_KEY"}
-	if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), "exactly one") {
-		t.Errorf("want exactly-one error with both set, got %v", err)
+	err := config.Validate(c)
+	if err == nil || !strings.Contains(err.Error(), "claude_apikey") {
+		t.Errorf("want both-secrets error, got %v", err)
+	}
+}
+
+func TestValidate_Claude_EnabledMissingAuthMode(t *testing.T) {
+	c := fullValidCfg()
+	c.Claude.AuthMode = ""
+	err := config.Validate(c)
+	if err == nil || !strings.Contains(err.Error(), "auth_mode") {
+		t.Errorf("want auth_mode-required error, got %v", err)
+	}
+}
+
+func TestValidate_Claude_EnabledBadAuthMode(t *testing.T) {
+	c := fullValidCfg()
+	c.Claude.AuthMode = "nope"
+	err := config.Validate(c)
+	if err == nil || !strings.Contains(err.Error(), "auth_mode") {
+		t.Errorf("want bad-auth_mode error, got %v", err)
+	}
+}
+
+func TestValidate_Claude_DisabledButClaudeSecretPresent(t *testing.T) {
+	c := fullValidCfg()
+	c.Claude = config.ClaudeConfig{Enabled: boolPtr(false)}
+	// claude_oauth still in secrets from fullValidCfg
+	err := config.Validate(c)
+	if err == nil || !strings.Contains(err.Error(), "claude_oauth") {
+		t.Errorf("want claude_oauth-present-but-disabled error, got %v", err)
+	}
+}
+
+func TestValidate_Claude_MigrationSignal(t *testing.T) {
+	// Legacy config: no claude: block but claude_oauth secret present.
+	c := fullValidCfg()
+	c.Claude = config.ClaudeConfig{} // Enabled = nil
+	err := config.Validate(c)
+	if err == nil || !strings.Contains(err.Error(), "claude.enabled is not set") {
+		t.Errorf("want migration-signal error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ws setup --force") {
+		t.Errorf("migration error should point at 'ws setup --force', got %v", err)
 	}
 }
 
@@ -130,7 +217,7 @@ func TestValidate_EnvVarCollision_SecretAndEnv(t *testing.T) {
 }
 
 func TestValidate_EnvVarCollision_Reserved(t *testing.T) {
-	for _, reserved := range []string{"GCP_PROJECT_ID", "GITHUB_REPO_URL", "GIT_USER_NAME", "WS_SECRETS", "WS_SECRET_FOO_NAME"} {
+	for _, reserved := range []string{"GCP_PROJECT_ID", "GITHUB_REPO_URL", "GIT_USER_NAME", "WS_SECRETS", "WS_SECRET_FOO_NAME", "WS_CLAUDE_ENABLED", "WS_CODEX_ENABLED"} {
 		c := fullValidCfg()
 		c.Env = map[string]string{reserved: "v"}
 		if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), reserved) {

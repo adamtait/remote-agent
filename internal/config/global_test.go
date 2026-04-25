@@ -121,3 +121,55 @@ func TestLoadProjectConfig_Missing_ReturnsError(t *testing.T) {
 		t.Fatal("expected error for missing project config, got nil")
 	}
 }
+
+func TestLoadUserConfig_Claude_EnabledTrue(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	contents := "claude:\n  enabled: true\n  auth_mode: oauth\n"
+	if err := os.WriteFile(p, []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadUserConfig(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Claude.Enabled == nil || !*cfg.Claude.Enabled {
+		t.Errorf("enabled=true not parsed, got %+v", cfg.Claude)
+	}
+	if cfg.Claude.AuthMode != "oauth" {
+		t.Errorf("auth_mode wrong: got %q", cfg.Claude.AuthMode)
+	}
+}
+
+func TestLoadUserConfig_Claude_EnabledFalse(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	contents := "claude:\n  enabled: false\n"
+	if err := os.WriteFile(p, []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadUserConfig(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Claude.Enabled == nil {
+		t.Fatal("enabled pointer should be non-nil when explicitly false")
+	}
+	if *cfg.Claude.Enabled {
+		t.Errorf("enabled=false not parsed: got %+v", cfg.Claude)
+	}
+}
+
+func TestLoadUserConfig_Claude_Absent(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	// No claude: block at all.
+	contents := "git:\n  user_name: x\n"
+	if err := os.WriteFile(p, []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadUserConfig(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Claude.Enabled != nil {
+		t.Errorf("expected nil Enabled when block absent, got %+v", cfg.Claude)
+	}
+}

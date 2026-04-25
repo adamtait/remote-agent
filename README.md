@@ -107,8 +107,12 @@ gcloud:
     cluster_name: claude-dev-cluster
     # ... other workstation parameters
 
+claude:
+  enabled: true            # false skips @anthropic-ai/claude-code install
+  auth_mode: oauth         # "oauth" or "apikey"; required when enabled
+
 secrets:
-  claude_oauth:            # or claude_apikey — exactly one required
+  claude_oauth:            # required when claude.enabled=true + auth_mode=oauth
     secret_name: claude-code-oauth-token
     env_var: CLAUDE_CODE_OAUTH_TOKEN
   github_pat:
@@ -117,6 +121,32 @@ secrets:
 
 env: {}
 ```
+
+### Migrating from Claude-only configs
+
+Pre-v3 configs didn't have a `claude:` block; Claude Code was always installed
+and `claude_oauth`/`claude_apikey` was mandatory. After upgrading, `ws create`
+will refuse to run with a migration error pointing you to `ws setup --force`.
+
+Old config:
+```yaml
+secrets:
+  claude_oauth: { secret_name: ..., env_var: CLAUDE_CODE_OAUTH_TOKEN }
+  github_pat:   { secret_name: ..., env_var: GH_TOKEN }
+```
+
+New config (Claude still enabled):
+```yaml
+claude:
+  enabled: true
+  auth_mode: oauth         # or "apikey" if you were using claude_apikey
+secrets:
+  claude_oauth: { secret_name: ..., env_var: CLAUDE_CODE_OAUTH_TOKEN }
+  github_pat:   { secret_name: ..., env_var: GH_TOKEN }
+```
+
+To provision without Claude Code (GitHub-only workstation), set
+`claude.enabled: false` and remove the `claude_*` entries from `secrets:`.
 
 **`.ws/config.yaml`** (project-specific, thin overrides):
 ```yaml

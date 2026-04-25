@@ -19,6 +19,7 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		RepoName:           "claude-workstation-images",
 		AutoSleepHours:     2,
 		AutoShutdownHours:  12,
+		ClaudeEnabled:      true,
 		ClaudeAuthMode:     scaffold.ClaudeAuthOAuth,
 	}
 	got := scaffold.RenderUserConfig(uv)
@@ -41,6 +42,9 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		`    repo_name: claude-workstation-images`,
 		`    auto_sleep_hours: 2`,
 		`    auto_shutdown_hours: 12`,
+		`claude:`,
+		`  enabled: true`,
+		`  auth_mode: oauth`,
 		`secrets:`,
 		`  claude_oauth:`,
 		`    secret_name: claude-code-oauth-token`,
@@ -57,7 +61,7 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 }
 
 func TestRenderUserConfig_APIKeyModeSelectsApiKeyEntry(t *testing.T) {
-	uv := scaffold.UserValues{ClaudeAuthMode: scaffold.ClaudeAuthAPIKey}
+	uv := scaffold.UserValues{ClaudeEnabled: true, ClaudeAuthMode: scaffold.ClaudeAuthAPIKey}
 	got := scaffold.RenderUserConfig(uv)
 	if !strings.Contains(got, "claude_apikey:") {
 		t.Errorf("apikey mode did not write claude_apikey entry:\n%s", got)
@@ -68,19 +72,26 @@ func TestRenderUserConfig_APIKeyModeSelectsApiKeyEntry(t *testing.T) {
 	if !strings.Contains(got, "env_var: ANTHROPIC_API_KEY") {
 		t.Errorf("apikey env_var should be ANTHROPIC_API_KEY:\n%s", got)
 	}
+	if !strings.Contains(got, "auth_mode: apikey") {
+		t.Errorf("auth_mode: apikey not emitted:\n%s", got)
+	}
 }
 
-func TestRenderUserConfig_IncludesSecretsDocumentationComments(t *testing.T) {
-	got := scaffold.RenderUserConfig(scaffold.UserValues{ClaudeAuthMode: scaffold.ClaudeAuthOAuth})
-	for _, want := range []string{
-		"claude_oauth  → fetches at boot",
-		"claude_apikey → installs Claude",
-		"github_pat    → installs git",
-		"Exactly one of {claude_oauth, claude_apikey}",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("user config missing documentation comment %q", want)
-		}
+func TestRenderUserConfig_ClaudeDisabled_OmitsClaudeSecrets(t *testing.T) {
+	uv := scaffold.UserValues{ClaudeEnabled: false}
+	got := scaffold.RenderUserConfig(uv)
+	if !strings.Contains(got, "claude:\n  enabled: false") {
+		t.Errorf("expected enabled: false block:\n%s", got)
+	}
+	if strings.Contains(got, "claude_oauth:") || strings.Contains(got, "claude_apikey:") {
+		t.Errorf("disabled mode must not emit claude_* secret entries:\n%s", got)
+	}
+	if strings.Contains(got, "auth_mode:") {
+		t.Errorf("disabled mode must not emit auth_mode:\n%s", got)
+	}
+	// github_pat is shared, still required.
+	if !strings.Contains(got, "github_pat:") {
+		t.Errorf("github_pat entry must still be emitted when claude disabled:\n%s", got)
 	}
 }
 
@@ -98,6 +109,8 @@ func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T)
 		`# gcloud:`,
 		`#   workstation:`,
 		`#     machine_type: e2-standard-8`,
+		`# claude:`,
+		`#   enabled: false`,
 		`# secrets:`,
 		`# env:`,
 	} {
@@ -109,7 +122,7 @@ func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T)
 
 func TestRenderProjectConfig_ZeroValuesStillShowCommentedExamples(t *testing.T) {
 	got := scaffold.RenderProjectConfig(scaffold.ProjectValues{})
-	for _, want := range []string{`# gcloud:`, `#   workstation:`, `# secrets:`, `# env:`} {
+	for _, want := range []string{`# gcloud:`, `#   workstation:`, `# claude:`, `# secrets:`, `# env:`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing commented example %q", want)
 		}

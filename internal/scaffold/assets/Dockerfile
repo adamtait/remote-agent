@@ -1,8 +1,13 @@
 # Custom Cloud Workstations image:
-#   base code-oss IDE  +  Node.js 20  +  git/git-lfs  +  gh CLI  +  Claude Code
+#   base code-oss IDE  +  Node.js 20  +  git/git-lfs  +  gh CLI  (+ optional harnesses)
 #
 # The base image runs every executable in /etc/workstation-startup.d/ at boot;
-# we drop our setup script in there.
+# we drop our setup script in there. Per-harness setup (e.g. Claude Code) is
+# opt-in: harness scripts are always baked into the image and gated at runtime
+# by container env vars (e.g. WS_CLAUDE_ENABLED). Harness install steps run
+# at first-boot rather than at docker build, because the base image creates
+# the unprivileged 'user' account via runtime startup hooks — it does not
+# exist in /etc/passwd at build time, so build-time `chown user:user` fails.
 FROM us-central1-docker.pkg.dev/cloud-workstations-images/predefined/code-oss:latest
 
 USER root
@@ -27,25 +32,37 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Claude Code (installed as 'user' so auto-update works) -----------------
-RUN mkdir -p /home/user/.npm-global \
-    && chown user:user /home/user/.npm-global
-USER user
-ENV NPM_CONFIG_PREFIX=/home/user/.npm-global
-RUN npm install -g @anthropic-ai/claude-code \
-    && npm cache clean --force
-USER root
-ENV PATH="/home/user/.npm-global/bin:${PATH}"
-
 # --- Sanity check: entrypoint relies on gcloud being present for runtime
 #     Secret Manager access. The code-oss base image ships with gcloud, but
 #     fail the build loudly if that ever changes.
 RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && exit 1)
 
+# --- Optional: Claude Code harness -----------------------------------------
+# Both scripts are always baked into the image; the runtime entrypoint sources
+# claude-setup.sh iff WS_CLAUDE_ENABLED=true (via container env). On first
+# boot, claude-setup.sh shells out to claude-install.sh to npm-install
+# @anthropic-ai/claude-code under /home/user/.npm-global so the package can
+# self-update under the 'user' account.
+RUN mkdir -p /etc/ws
+COPY .ws/claude/install.sh /etc/ws/claude-install.sh
+COPY .ws/claude/setup.sh /etc/ws/claude-setup.sh
+RUN chmod 0755 /etc/ws/claude-install.sh /etc/ws/claude-setup.sh
+
+# Make /home/user/.npm-global/bin discoverable by login shells (sshd / IDE
+# terminal) and by `sudo -u user` invocations. A Dockerfile `ENV PATH=` only
+# reaches processes the container engine spawns from this image's entrypoint;
+# Cloud Workstations interactive shells build PATH from /etc/profile.d/, and
+# `sudo` strips the inherited PATH per its secure_path setting. Kept
+# unconditionally — if Claude is disabled the directory never exists, but a
+# missing PATH entry is harmless.
+RUN printf 'export PATH="/home/user/.npm-global/bin:$PATH"\n' \
+        > /etc/profile.d/00-ws-npm-global-path.sh \
+    && chmod 0644 /etc/profile.d/00-ws-npm-global-path.sh
+
 # --- Our startup script -----------------------------------------------------
 # Numbered 200 so it runs after the base image's own 100-series scripts.
-COPY .ws/entrypoint.sh /etc/workstation-startup.d/200_claude-setup.sh
-RUN chmod +x /etc/workstation-startup.d/200_claude-setup.sh
+COPY .ws/entrypoint.sh /etc/workstation-startup.d/200_ws-setup.sh
+RUN chmod +x /etc/workstation-startup.d/200_ws-setup.sh
 
 # --- Login-shell profile.d scripts ------------------------------------------
 # `ws create` stages .ws/profile.d/ and ~/.config/ws/profile.d/ into

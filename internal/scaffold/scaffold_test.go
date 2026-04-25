@@ -11,7 +11,8 @@ import (
 	"github.com/adamtait/remote-agent/internal/scaffold"
 )
 
-// New prompt order (full run): project_id, github_repo_url, auth_mode, git_user_name, git_user_email, confirm
+// New prompt order (full run): project_id, github_repo_url, git_user_name,
+// git_user_email, enable_claude, (if enabled) auth_mode, confirm.
 
 func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 	cwd := t.TempDir()
@@ -20,10 +21,11 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
 		"https://github.com/a/b.git",
-		"1", // oauth
 		"Alice",
 		"alice@example.com",
-		"y",
+		"y",   // enable claude
+		"1",   // oauth
+		"y",   // confirm
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 
@@ -79,16 +81,50 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 	}
 }
 
+func TestInteractiveScaffold_ClaudeDisabled_SkipsAuthModeAndOmitsClaudeSecrets(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	// After git email we answer "n" to claude_enabled — promptClaudeAuthMode
+	// must NOT run, so fewer lines are consumed than in the enabled case.
+	stdin := strings.NewReader(strings.Join([]string{
+		"my-proj-123",
+		"https://github.com/a/b.git",
+		"Alice",
+		"alice@example.com",
+		"n",
+		"y",
+	}, "\n") + "\n")
+	var stdout, stderr bytes.Buffer
+	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
+		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
+		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
+	})
+	if err != nil {
+		t.Fatalf("InteractiveScaffold: %v", err)
+	}
+
+	user, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
+	if !strings.Contains(string(user), "claude:\n  enabled: false") {
+		t.Errorf("expected claude.enabled: false block in user config:\n%s", user)
+	}
+	for _, forbidden := range []string{"claude_oauth:", "claude_apikey:", "auth_mode:"} {
+		if strings.Contains(string(user), forbidden) {
+			t.Errorf("disabled-claude user config should not contain %q:\n%s", forbidden, user)
+		}
+	}
+}
+
 func TestInteractiveScaffold_APIKeyMode(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
 		"https://github.com/a/b.git",
-		"2", // apikey
 		"Alice",
 		"alice@example.com",
-		"y",
+		"y",   // enable claude
+		"2",   // apikey
+		"y",   // confirm
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 
@@ -112,7 +148,7 @@ func TestInteractiveScaffold_WithProjectAssetsCopiesAssetsToDotWS(t *testing.T) 
 	cwd := t.TempDir()
 	home := t.TempDir()
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "1", "Alice", "alice@example.com", "y",
+		"my-proj-123", "https://github.com/a/b.git", "Alice", "alice@example.com", "y", "1", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 
@@ -174,9 +210,9 @@ func TestInteractiveScaffold_ProjectExists_SkipsAndPreserves(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Project exists → user config still prompts for project_id and github_repo_url,
-	// then auth_mode, git_user_name, git_user_email, confirm.
+	// then git_user_name, git_user_email, enable_claude, auth_mode, confirm.
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "1", "Alice", "alice@example.com", "y",
+		"my-proj-123", "https://github.com/a/b.git", "Alice", "alice@example.com", "y", "1", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
@@ -272,13 +308,15 @@ func TestInteractiveScaffold_MutuallyExclusiveFlags(t *testing.T) {
 func TestInteractiveScaffold_NoCancelsOnProceed(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	// Full run prompts: project_id, github_repo_url, auth_mode, git_user_name, git_user_email, no
+	// Full run prompts: project_id, github_repo_url, git_user_name,
+	// git_user_email, enable_claude, auth_mode (if enabled), no (cancel).
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
 		"https://github.com/a/b.git",
-		"1",
 		"Alice",
 		"alice@example.com",
+		"y",
+		"1",
 		"no",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
@@ -300,9 +338,10 @@ func TestInteractiveScaffold_DeclineWrapsErrCancelled(t *testing.T) {
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
 		"https://github.com/a/b.git",
-		"1",
 		"Alice",
 		"alice@example.com",
+		"y",
+		"1",
 		"no",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
@@ -324,9 +363,10 @@ func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
 		"https://github.com/a/b.git",
-		"1",
 		"Alice",
 		"alice@example.com",
+		"y",
+		"1",
 		"y",
 	}, "\n") + "\n")
 	var stdout bytes.Buffer

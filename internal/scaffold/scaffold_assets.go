@@ -34,15 +34,9 @@ type AssetResult struct {
 func (r AssetResult) Wrote(name string) bool    { return r.wrote[name] }
 func (r AssetResult) Source(name string) string { return r.source[name] }
 
-// assetMode returns the file mode for a named asset.
-func assetMode(name string) os.FileMode {
-	switch name {
-	case "entrypoint.sh", "profile.d/00-ws-wait.sh":
-		return 0755
-	default:
-		return 0644
-	}
-}
+// assetMode returns the file mode for a named asset. Thin wrapper around the
+// exported AssetMode so callers outside the package use the same source of truth.
+func assetMode(name string) os.FileMode { return AssetMode(name) }
 
 // ScaffoldAssets writes each asset in AssetNames to opts.TargetDir/<name>.
 func ScaffoldAssets(opts ScaffoldAssetsOptions) (AssetResult, error) {

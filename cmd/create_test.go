@@ -124,6 +124,18 @@ func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
 	}
 }
 
+func TestBuildArgs_NoClaudeBuildArg(t *testing.T) {
+	// Claude install moved to first-boot runtime — there should no longer be
+	// a WS_CLAUDE_ENABLED build arg. The runtime gate lives in the container
+	// env, set by buildContainerEnv.
+	got := dockerBuildArgs("example.com/img:tag")
+	for _, a := range got {
+		if strings.Contains(a, "WS_CLAUDE_ENABLED") {
+			t.Errorf("dockerBuildArgs should not pass WS_CLAUDE_ENABLED at build time; got %v", got)
+		}
+	}
+}
+
 func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -213,6 +225,7 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		"GITHUB_REPO_URL":             "https://example.com/r.git",
 		"GIT_USER_NAME":               "Alice",
 		"GIT_USER_EMAIL":              "a@x.com",
+		"WS_CLAUDE_ENABLED":           "false",
 		"WS_SECRET_CLAUDE_OAUTH_NAME": "claude-auth",
 		"WS_SECRET_CLAUDE_OAUTH_VAR":  "CLAUDE_CODE_OAUTH_TOKEN",
 		"WS_SECRET_GITHUB_PAT_NAME":   "github-pat",
@@ -241,6 +254,15 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		if strings.Contains(got, banned) {
 			t.Errorf("container env still contains old key %q: %q", banned, got)
 		}
+	}
+}
+
+func TestBuildContainerEnv_ClaudeEnabledReflectsConfig(t *testing.T) {
+	enabled := true
+	cfg := &config.Config{Claude: config.ClaudeConfig{Enabled: &enabled, AuthMode: "oauth"}}
+	got := buildContainerEnv(cfg)
+	if !strings.Contains(got, "WS_CLAUDE_ENABLED=true") {
+		t.Errorf("expected WS_CLAUDE_ENABLED=true when cfg.Claude.Enabled=true; got: %q", got)
 	}
 }
 
