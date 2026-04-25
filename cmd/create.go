@@ -33,21 +33,21 @@ func buildContainerEnv(cfg *config.Config) string {
 	add("GITHUB_REPO_URL", cfg.Git.GithubRepoURL)
 	add("GIT_USER_NAME", cfg.Git.UserName)
 	add("GIT_USER_EMAIL", cfg.Git.UserEmail)
-	add("WS_CLAUDE_ENABLED", strconv.FormatBool(cfg.Claude.IsEnabled()))
+	add("RA_CLAUDE_ENABLED", strconv.FormatBool(cfg.Claude.IsEnabled()))
 
 	logicalNames := make([]string, 0, len(cfg.Secrets))
 	for k := range cfg.Secrets {
 		logicalNames = append(logicalNames, k)
 	}
 	sort.Strings(logicalNames)
-	add("WS_SECRETS", strings.Join(logicalNames, "|"))
+	add("RA_SECRETS", strings.Join(logicalNames, "|"))
 	for _, logical := range logicalNames {
 		s := cfg.Secrets[logical]
 		tok := logicalNameToEnvToken(logical)
-		add("WS_SECRET_"+tok+"_NAME", s.SecretName)
-		add("WS_SECRET_"+tok+"_VAR", s.EnvVar)
+		add("RA_SECRET_"+tok+"_NAME", s.SecretName)
+		add("RA_SECRET_"+tok+"_VAR", s.EnvVar)
 		if s.OAuthAccountSecretName != "" {
-			add("WS_SECRET_"+tok+"_OAUTH_ACCOUNT_SECRET_NAME", s.OAuthAccountSecretName)
+			add("RA_SECRET_"+tok+"_OAUTH_ACCOUNT_SECRET_NAME", s.OAuthAccountSecretName)
 		}
 	}
 
@@ -70,7 +70,7 @@ var createCmd = &cobra.Command{
 and IAM setup remain idempotent; the workstation itself is freshly created on
 every run. Use --name to set the workstation name (auto-suffixed on collision);
 omit it for an auto-generated memorable name.
-Requires .ws/config.yaml in the project root with git.github_repo_url and gcloud.project set.`,
+Requires .ra/config.yaml in the project root with git.github_repo_url and gcloud.project set.`,
 	RunE: runCreate,
 }
 
@@ -398,10 +398,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
   Region       : %s
 
   SSH:
-    ws connect %s
+    ra connect %s
 
   Stop (save cost):
-    ws stop %s
+    ra stop %s
 ================================================================
 `,
 		info.Host,
@@ -460,15 +460,15 @@ func (d dockerRunner) Run(args ...string) error {
 }
 
 // materializeBuildAssets ensures the build assets (Dockerfile, entrypoint.sh,
-// claude/install.sh, claude/setup.sh) exist under .ws/ for docker build.
+// claude/install.sh, claude/setup.sh) exist under .ra/ for docker build.
 // Missing files are resolved from user template or embedded defaults and
 // written with the correct mode via scaffold.AssetMode. Pre-existing files
 // are untouched. The returned cleanup func removes only files (and empty
 // subdirs) that were created by this call.
 func materializeBuildAssets(cwd, home string) (func(), error) {
-	wsDir := filepath.Join(cwd, ".ws")
+	wsDir := filepath.Join(cwd, ".ra")
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
-		return func() {}, fmt.Errorf("creating .ws/: %w", err)
+		return func() {}, fmt.Errorf("creating .ra/: %w", err)
 	}
 	var written []string
 	var createdDirs []string
@@ -515,16 +515,16 @@ func materializeBuildAssets(cwd, home string) (func(), error) {
 	return rollback, nil
 }
 
-// dockerBuildArgs returns the buildx args used by `ws create`, centralized so
+// dockerBuildArgs returns the buildx args used by `ra create`, centralized so
 // tests can assert on the exact flags. The Dockerfile is harness-agnostic at
-// build time — Claude install is gated at runtime by the WS_CLAUDE_ENABLED
+// build time — Claude install is gated at runtime by the RA_CLAUDE_ENABLED
 // container env var, not by a build arg.
 func dockerBuildArgs(imageURI string) []string {
 	return []string{
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", imageURI,
-		"-f", ".ws/Dockerfile",
+		"-f", ".ra/Dockerfile",
 		"--push",
 		".",
 	}

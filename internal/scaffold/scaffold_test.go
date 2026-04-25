@@ -37,7 +37,7 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 		t.Fatalf("InteractiveScaffold: %v", err)
 	}
 
-	user, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
+	user, _ := os.ReadFile(filepath.Join(home, ".config", "ra", "config.yaml"))
 	for _, want := range []string{
 		`  user_name: "Alice"`,
 		`  user_email: "alice@example.com"`,
@@ -55,7 +55,7 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 		}
 	}
 
-	project, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
+	project, _ := os.ReadFile(filepath.Join(cwd, ".ra", "config.yaml"))
 	for _, want := range []string{
 		`  github_repo_url: https://github.com/a/b.git`,
 		`  project: my-proj-123`,
@@ -70,11 +70,11 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 
 	// User-dir assets exist; .ws/ assets do NOT (default — no --with-project-assets).
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		userAsset := filepath.Join(home, ".config", "ws", "template", name)
+		userAsset := filepath.Join(home, ".config", "ra", "template", name)
 		if _, err := os.Stat(userAsset); err != nil {
 			t.Errorf("user asset %s not materialized: %v", userAsset, err)
 		}
-		projectAsset := filepath.Join(cwd, ".ws", name)
+		projectAsset := filepath.Join(cwd, ".ra", name)
 		if _, err := os.Stat(projectAsset); err == nil {
 			t.Errorf("project asset %s should NOT exist without --with-project-assets", projectAsset)
 		}
@@ -103,7 +103,7 @@ func TestInteractiveScaffold_ClaudeDisabled_SkipsAuthModeAndOmitsClaudeSecrets(t
 		t.Fatalf("InteractiveScaffold: %v", err)
 	}
 
-	user, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
+	user, _ := os.ReadFile(filepath.Join(home, ".config", "ra", "config.yaml"))
 	if !strings.Contains(string(user), "claude:\n  enabled: false") {
 		t.Errorf("expected claude.enabled: false block in user config:\n%s", user)
 	}
@@ -135,7 +135,7 @@ func TestInteractiveScaffold_APIKeyMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
+	user, _ := os.ReadFile(filepath.Join(home, ".config", "ra", "config.yaml"))
 	if !strings.Contains(string(user), "claude_apikey:") {
 		t.Errorf("expected claude_apikey entry in apikey mode:\n%s", user)
 	}
@@ -161,10 +161,10 @@ func TestInteractiveScaffold_WithProjectAssetsCopiesAssetsToDotWS(t *testing.T) 
 		t.Fatal(err)
 	}
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(cwd, ".ws", name)); err != nil {
+		if _, err := os.Stat(filepath.Join(cwd, ".ra", name)); err != nil {
 			t.Errorf(".ws/%s missing despite --with-project-assets: %v", name, err)
 		}
-		if _, err := os.Stat(filepath.Join(home, ".config", "ws", "template", name)); err != nil {
+		if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); err != nil {
 			t.Errorf("user template %s missing: %v", name, err)
 		}
 	}
@@ -173,8 +173,8 @@ func TestInteractiveScaffold_WithProjectAssetsCopiesAssetsToDotWS(t *testing.T) 
 func TestInteractiveScaffold_IdempotentWithoutForce(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	userCfg := filepath.Join(home, ".config", "ws", "config.yaml")
-	projectCfg := filepath.Join(cwd, ".ws", "config.yaml")
+	userCfg := filepath.Join(home, ".config", "ra", "config.yaml")
+	projectCfg := filepath.Join(cwd, ".ra", "config.yaml")
 	if err := os.MkdirAll(filepath.Dir(userCfg), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -203,10 +203,10 @@ func TestInteractiveScaffold_IdempotentWithoutForce(t *testing.T) {
 func TestInteractiveScaffold_ProjectExists_SkipsAndPreserves(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cwd, ".ra"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("existing: true\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(cwd, ".ra", "config.yaml"), []byte("existing: true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	// Project exists → user config still prompts for project_id and github_repo_url,
@@ -222,12 +222,12 @@ func TestInteractiveScaffold_ProjectExists_SkipsAndPreserves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error for pre-existing project config, got: %v", err)
 	}
-	got, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
+	got, _ := os.ReadFile(filepath.Join(cwd, ".ra", "config.yaml"))
 	if string(got) != "existing: true\n" {
 		t.Errorf("existing project file modified: %q", got)
 	}
 	// User template assets materialized.
-	if _, err := os.Stat(filepath.Join(home, ".config", "ws", "template", "Dockerfile")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", "Dockerfile")); err != nil {
 		t.Errorf("Dockerfile not materialized in user template dir: %v", err)
 	}
 }
@@ -235,16 +235,16 @@ func TestInteractiveScaffold_ProjectExists_SkipsAndPreserves(t *testing.T) {
 func TestInteractiveScaffold_BothConfigsExist_IsNoOp(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cwd, ".ra"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwd, ".ws", "config.yaml"), []byte("existing: project\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(cwd, ".ra", "config.yaml"), []byte("existing: project\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".config", "ws"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".config", "ra"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".config", "ws", "config.yaml"), []byte("existing: global\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".config", "ra", "config.yaml"), []byte("existing: global\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	// Empty stdin: no prompts consumed, nothing written.
@@ -256,17 +256,17 @@ func TestInteractiveScaffold_BothConfigsExist_IsNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error when both configs exist, got: %v", err)
 	}
-	proj, _ := os.ReadFile(filepath.Join(cwd, ".ws", "config.yaml"))
+	proj, _ := os.ReadFile(filepath.Join(cwd, ".ra", "config.yaml"))
 	if string(proj) != "existing: project\n" {
 		t.Errorf("project config modified: %q", proj)
 	}
-	global, _ := os.ReadFile(filepath.Join(home, ".config", "ws", "config.yaml"))
+	global, _ := os.ReadFile(filepath.Join(home, ".config", "ra", "config.yaml"))
 	if string(global) != "existing: global\n" {
 		t.Errorf("global config modified: %q", global)
 	}
 	// Assets still materialized in user template dir.
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(home, ".config", "ws", "template", name)); err != nil {
+		if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); err != nil {
 			t.Errorf("%s not materialized on re-run: %v", name, err)
 		}
 	}
@@ -286,10 +286,10 @@ func TestInteractiveScaffold_ProjectOnlySkipsGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".ws", "config.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(cwd, ".ra", "config.yaml")); err != nil {
 		t.Errorf("project file not written: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".config", "ws", "config.yaml")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(home, ".config", "ra", "config.yaml")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("global file was written despite --project-only")
 	}
 }
@@ -327,7 +327,7 @@ func TestInteractiveScaffold_NoCancelsOnProceed(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected cancellation error, got nil")
 	}
-	if _, statErr := os.Stat(filepath.Join(cwd, ".ws", "config.yaml")); !errors.Is(statErr, os.ErrNotExist) {
+	if _, statErr := os.Stat(filepath.Join(cwd, ".ra", "config.yaml")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Error("project file should not exist after cancel")
 	}
 }
@@ -382,7 +382,7 @@ func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
 func TestInteractiveScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	globalDir := filepath.Join(home, ".config", "ws")
+	globalDir := filepath.Join(home, ".config", "ra")
 	if err := os.MkdirAll(globalDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestInteractiveScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) 
 		t.Errorf("existing global config modified: %q", got)
 	}
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, statErr := os.Stat(filepath.Join(home, ".config", "ws", "template", name)); statErr != nil {
+		if _, statErr := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); statErr != nil {
 			t.Errorf("%s not materialized in user template dir: %v", name, statErr)
 		}
 	}
@@ -417,7 +417,7 @@ func TestInteractiveScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) 
 func TestTemplateScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	globalDir := filepath.Join(home, ".config", "ws")
+	globalDir := filepath.Join(home, ".config", "ra")
 	if err := os.MkdirAll(globalDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +438,7 @@ func TestTemplateScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) {
 		t.Errorf("existing global config modified: %q", got)
 	}
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, statErr := os.Stat(filepath.Join(home, ".config", "ws", "template", name)); statErr != nil {
+		if _, statErr := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); statErr != nil {
 			t.Errorf("%s not materialized in user template dir: %v", name, statErr)
 		}
 	}

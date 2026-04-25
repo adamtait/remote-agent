@@ -1,4 +1,4 @@
-// ws/internal/config/global.go
+// ra/internal/config/global.go
 package config
 
 import (
@@ -16,7 +16,7 @@ func UserConfigPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("unable to determine home directory: %w", err)
 	}
-	return filepath.Join(home, ".config", "ws", "config.yaml"), nil
+	return filepath.Join(home, ".config", "ra", "config.yaml"), nil
 }
 
 // LoadUserConfig reads and parses the user config file.
@@ -37,7 +37,7 @@ func LoadUserConfig(path string) (*UserConfig, error) {
 	return &cfg, nil
 }
 
-// LoadProjectConfig reads and parses a .ws/config.yaml file.
+// LoadProjectConfig reads and parses a .ra/config.yaml file.
 func LoadProjectConfig(path string) (*ProjectConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

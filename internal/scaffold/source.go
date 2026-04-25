@@ -9,21 +9,21 @@ import (
 	"path/filepath"
 )
 
-// AssetNames enumerates the build assets ws knows how to scaffold.
+// AssetNames enumerates the build assets ra knows how to scaffold.
 var AssetNames = []string{
 	"Dockerfile",
 	"entrypoint.sh",
-	"profile.d/00-ws-wait.sh",
+	"profile.d/00-ra-wait.sh",
 	"claude/install.sh",
 	"claude/setup.sh",
 }
 
-// AssetMode returns the file mode ws uses for a materialized asset.
+// AssetMode returns the file mode ra uses for a materialized asset.
 // Shell scripts are 0755; other files are 0644.
 func AssetMode(name string) os.FileMode {
 	switch name {
 	case "entrypoint.sh",
-		"profile.d/00-ws-wait.sh",
+		"profile.d/00-ra-wait.sh",
 		"claude/install.sh",
 		"claude/setup.sh":
 		return 0755
@@ -45,8 +45,8 @@ func EmbeddedSeed(name string) ([]byte, error) {
 // ResolveSource returns the bytes to use for the named asset at runtime.
 //
 // Precedence (per asset, independent):
-//  1. <projectRoot>/.ws/<name> if present and readable.
-//  2. ~/.config/ws/template/<name> if present and readable.
+//  1. <projectRoot>/.ra/<name> if present and readable.
+//  2. ~/.config/ra/template/<name> if present and readable.
 //  3. Embedded default bytes compiled into the binary.
 //
 // projectRoot may be "" to skip the project-override check.
@@ -57,9 +57,9 @@ func ResolveSource(home, projectRoot, name string) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("unknown scaffold asset %q (known: %v)", name, AssetNames)
 	}
 
-	// 1. Project override: <projectRoot>/.ws/<name>
+	// 1. Project override: <projectRoot>/.ra/<name>
 	if projectRoot != "" {
-		projectPath := filepath.Join(projectRoot, ".ws", name)
+		projectPath := filepath.Join(projectRoot, ".ra", name)
 		data, err := os.ReadFile(projectPath)
 		if err == nil {
 			return data, "project-override", nil
@@ -69,8 +69,8 @@ func ResolveSource(home, projectRoot, name string) ([]byte, string, error) {
 		}
 	}
 
-	// 2. User template: ~/.config/ws/template/<name>
-	userPath := filepath.Join(home, ".config", "ws", "template", name)
+	// 2. User template: ~/.config/ra/template/<name>
+	userPath := filepath.Join(home, ".config", "ra", "template", name)
 	data, err := os.ReadFile(userPath)
 	if err == nil {
 		return data, "user-template", nil
@@ -89,7 +89,7 @@ func embeddedFor(name string) ([]byte, bool) {
 		return embeddedDockerfile, true
 	case "entrypoint.sh":
 		return embeddedEntrypoint, true
-	case "profile.d/00-ws-wait.sh":
+	case "profile.d/00-ra-wait.sh":
 		return embeddedWaitScript, true
 	case "claude/install.sh":
 		return embeddedClaudeInstall, true

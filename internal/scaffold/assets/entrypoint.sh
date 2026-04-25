@@ -3,14 +3,14 @@
 # Runs at every workstation boot (as root, inside the container).
 #
 # Contract (v4):
-#   ws create emits these env vars into the container config:
+#   ra create emits these env vars into the container config:
 #     GCP_PROJECT_ID, GITHUB_REPO_URL, GIT_USER_NAME, GIT_USER_EMAIL
-#     WS_CLAUDE_ENABLED=true|false     — toggles the Claude Code harness
-#     WS_SECRETS=<pipe-separated logical names>
+#     RA_CLAUDE_ENABLED=true|false     — toggles the Claude Code harness
+#     RA_SECRETS=<pipe-separated logical names>
 #     for each logical <name>:
-#       WS_SECRET_<UPPERCASE_NAME>_NAME=<gcp secret name>
-#       WS_SECRET_<UPPERCASE_NAME>_VAR=<container env var name>
-#       (optional, claude_oauth only) WS_SECRET_CLAUDE_OAUTH_OAUTH_ACCOUNT_SECRET_NAME
+#       RA_SECRET_<UPPERCASE_NAME>_NAME=<gcp secret name>
+#       RA_SECRET_<UPPERCASE_NAME>_VAR=<container env var name>
+#       (optional, claude_oauth only) RA_SECRET_CLAUDE_OAUTH_OAUTH_ACCOUNT_SECRET_NAME
 #     plus any static key=value entries from config.env.
 #
 # Logical names with special handling (still conform to the schema):
@@ -22,8 +22,8 @@
 #     (any other)    → fetch at boot, export $VAR. Rotation requires restart.
 #
 # Harness plugin contract:
-#   When WS_CLAUDE_ENABLED=true, /etc/ws/claude-setup.sh is sourced before the
-#   dispatch loop. It defines `ws_claude_handle_secret(logical, secret_name,
+#   When RA_CLAUDE_ENABLED=true, /etc/ra/claude-setup.sh is sourced before the
+#   dispatch loop. It defines `ra_claude_handle_secret(logical, secret_name,
 #   target_env_var)` which returns 0 if it handled the logical name (and the
 #   main loop then `continue`s) or 1 to fall through to the main case block.
 #
@@ -34,26 +34,26 @@ USER_HOME="/home/${USER_NAME}"
 WORKSPACE_DIR="${USER_HOME}/workspace"
 
 GIT_HELPER_PATH="/usr/local/bin/git-credential-gcp-secret"
-WS_SETUP_LOG_PATH="/var/log/ws-setup.log"
+RA_SETUP_LOG_PATH="/var/log/ra-setup.log"
 
-WS_RUNTIME_DIR="/run/ws"
-WS_ENV_FILE="/run/ws/env"
-WS_READY_SENTINEL="/run/ws/ready"
+RA_RUNTIME_DIR="/run/ra"
+RA_ENV_FILE="/run/ra/env"
+RA_READY_SENTINEL="/run/ra/ready"
 
 log() {
-    local msg="[ws-setup] $(date -u +%H:%M:%S) $*"
+    local msg="[ra-setup] $(date -u +%H:%M:%S) $*"
     echo "${msg}"
-    echo "${msg}" >> "${WS_SETUP_LOG_PATH}" 2>/dev/null || true
+    echo "${msg}" >> "${RA_SETUP_LOG_PATH}" 2>/dev/null || true
 }
 
-: > "${WS_SETUP_LOG_PATH}" 2>/dev/null || true
-chmod 0644 "${WS_SETUP_LOG_PATH}" 2>/dev/null || true
+: > "${RA_SETUP_LOG_PATH}" 2>/dev/null || true
+chmod 0644 "${RA_SETUP_LOG_PATH}" 2>/dev/null || true
 
 # =============================================================================
-# Required env vars (set by ws create)
+# Required env vars (set by ra create)
 # =============================================================================
 : "${GCP_PROJECT_ID:?GCP_PROJECT_ID not set}"
-: "${WS_SECRETS:?WS_SECRETS not set — check workstations config}"
+: "${RA_SECRETS:?RA_SECRETS not set — check workstations config}"
 
 command -v gcloud >/dev/null 2>&1 || {
     log "ERROR: gcloud CLI missing from image; cannot fetch credentials."
@@ -69,29 +69,29 @@ sed -i '/^GH_TOKEN=/d' /etc/environment
 
 # =============================================================================
 # Load optional harness plugins.
-# Each plugin may define ws_<harness>_handle_secret(logical, secret, env_var)
+# Each plugin may define ra_<harness>_handle_secret(logical, secret, env_var)
 # which returns 0 if it handled the secret, 1 otherwise. Plugins are sourced
 # before the dispatch loop so handler functions are in scope.
 # =============================================================================
-if [[ "${WS_CLAUDE_ENABLED:-false}" == "true" && -f /etc/ws/claude-setup.sh ]]; then
-    log "Claude harness enabled; sourcing /etc/ws/claude-setup.sh."
+if [[ "${RA_CLAUDE_ENABLED:-false}" == "true" && -f /etc/ra/claude-setup.sh ]]; then
+    log "Claude harness enabled; sourcing /etc/ra/claude-setup.sh."
     # shellcheck source=/dev/null
-    source /etc/ws/claude-setup.sh
+    source /etc/ra/claude-setup.sh
 fi
 
-mkdir -p "${WS_RUNTIME_DIR}"
-chmod 0755 "${WS_RUNTIME_DIR}"
-rm -f "${WS_READY_SENTINEL}"
+mkdir -p "${RA_RUNTIME_DIR}"
+chmod 0755 "${RA_RUNTIME_DIR}"
+rm -f "${RA_READY_SENTINEL}"
 
 # =============================================================================
-# Dispatch loop — iterate WS_SECRETS (pipe-separated) and handle each logical name.
+# Dispatch loop — iterate RA_SECRETS (pipe-separated) and handle each logical name.
 # =============================================================================
-IFS='|' read -r -a ws_secret_names <<<"${WS_SECRETS}"
-for logical in "${ws_secret_names[@]}"; do
+IFS='|' read -r -a ra_secret_names <<<"${RA_SECRETS}"
+for logical in "${ra_secret_names[@]}"; do
     [[ -z "${logical}" ]] && continue
     token=$(echo "${logical}" | tr '[:lower:]' '[:upper:]')
-    name_var="WS_SECRET_${token}_NAME"
-    env_var_var="WS_SECRET_${token}_VAR"
+    name_var="RA_SECRET_${token}_NAME"
+    env_var_var="RA_SECRET_${token}_VAR"
     secret_name="${!name_var:-}"
     target_env_var="${!env_var_var:-}"
 
@@ -100,8 +100,8 @@ for logical in "${ws_secret_names[@]}"; do
         continue
     fi
 
-    if declare -f ws_claude_handle_secret >/dev/null 2>&1; then
-        if ws_claude_handle_secret "${logical}" "${secret_name}" "${target_env_var}"; then
+    if declare -f ra_claude_handle_secret >/dev/null 2>&1; then
+        if ra_claude_handle_secret "${logical}" "${secret_name}" "${target_env_var}"; then
             continue
         fi
     fi
@@ -130,13 +130,13 @@ EOF
             if [[ -n "${pat_value}" ]]; then
                 echo "${target_env_var}=${pat_value}" >> /etc/environment
                 umask 077
-                if [[ ! -f "${WS_ENV_FILE}" ]]; then
-                    : > "${WS_ENV_FILE}"
-                    chmod 0644 "${WS_ENV_FILE}"
+                if [[ ! -f "${RA_ENV_FILE}" ]]; then
+                    : > "${RA_ENV_FILE}"
+                    chmod 0644 "${RA_ENV_FILE}"
                 fi
-                sed -i "/^${target_env_var}=/d" "${WS_ENV_FILE}"
-                printf '%s=%s\n' "${target_env_var}" "${pat_value}" >> "${WS_ENV_FILE}"
-                log "Exported ${target_env_var} via /etc/environment and ${WS_ENV_FILE}."
+                sed -i "/^${target_env_var}=/d" "${RA_ENV_FILE}"
+                printf '%s=%s\n' "${target_env_var}" "${pat_value}" >> "${RA_ENV_FILE}"
+                log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
             fi
             ;;
 
@@ -145,7 +145,7 @@ EOF
             # should have already rejected the config, so this is defense in
             # depth. Skip quietly to avoid exporting a Claude token into an
             # image that has no Claude binary to consume it.
-            log "WARNING: ${logical} configured but WS_CLAUDE_ENABLED!=true; skipping."
+            log "WARNING: ${logical} configured but RA_CLAUDE_ENABLED!=true; skipping."
             ;;
 
         *)
@@ -166,7 +166,7 @@ done
 # =============================================================================
 # First-boot-only: gitconfig + repo clone.
 # =============================================================================
-FIRST_BOOT_MARKER="${USER_HOME}/.ws-first-boot-done"
+FIRST_BOOT_MARKER="${USER_HOME}/.ra-first-boot-done"
 if [[ ! -f "${FIRST_BOOT_MARKER}" ]]; then
     log "First boot: configuring git identity and cloning repo."
     : "${GITHUB_REPO_URL:?GITHUB_REPO_URL not set}"
@@ -186,8 +186,8 @@ if [[ ! -f "${FIRST_BOOT_MARKER}" ]]; then
     chown "${USER_NAME}:${USER_NAME}" "${FIRST_BOOT_MARKER}"
 fi
 
-touch "${WS_READY_SENTINEL}"
-chmod 0644 "${WS_READY_SENTINEL}"
-log "Sentinel ${WS_READY_SENTINEL} created; login shells unblocked."
+touch "${RA_READY_SENTINEL}"
+chmod 0644 "${RA_READY_SENTINEL}"
+log "Sentinel ${RA_READY_SENTINEL} created; login shells unblocked."
 
 log "Entrypoint complete."

@@ -1,4 +1,4 @@
-// ws/internal/config/discover_test.go
+// ra/internal/config/discover_test.go
 package config_test
 
 import (
@@ -11,10 +11,10 @@ import (
 
 func writeConfig(t *testing.T, dir string) string {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(dir, ".ws"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".ra"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(dir, ".ws", "config.yaml")
+	p := filepath.Join(dir, ".ra", "config.yaml")
 	if err := os.WriteFile(p, []byte("project_id: test\n"), 0644); err != nil {
 		t.Fatal(err)
 	}

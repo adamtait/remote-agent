@@ -11,7 +11,7 @@ import (
 func TestScaffoldAssets_WritesBothFromEmbedded(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	wsDir := filepath.Join(cwd, ".ws")
+	wsDir := filepath.Join(cwd, ".ra")
 	var out bytes.Buffer
 
 	res, err := ScaffoldAssets(ScaffoldAssetsOptions{
@@ -50,7 +50,7 @@ func TestScaffoldAssets_WritesBothFromEmbedded(t *testing.T) {
 func TestScaffoldAssets_RefusesExistingWithoutForce(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	wsDir := filepath.Join(cwd, ".ws")
+	wsDir := filepath.Join(cwd, ".ra")
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestScaffoldAssets_RefusesExistingWithoutForce(t *testing.T) {
 func TestScaffoldAssets_ForceOverwrites(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	wsDir := filepath.Join(cwd, ".ws")
+	wsDir := filepath.Join(cwd, ".ra")
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestScaffoldAssets_ForceOverwrites(t *testing.T) {
 func TestScaffoldAssets_DryRun_WritesNothing(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	wsDir := filepath.Join(cwd, ".ws")
+	wsDir := filepath.Join(cwd, ".ra")
 	var out bytes.Buffer
 	if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
 		TargetDir: wsDir, Home: home, Stdout: &out, DryRun: true,
@@ -123,9 +123,9 @@ func TestScaffoldAssets_DryRun_WritesNothing(t *testing.T) {
 func TestScaffoldAssets_AlwaysWritesEmbedded(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	wsDir := filepath.Join(cwd, ".ws")
+	wsDir := filepath.Join(cwd, ".ra")
 	// Place a user template; ScaffoldAssets should ignore it and use embedded bytes.
-	tmplDir := filepath.Join(home, ".config", "ws", "template")
+	tmplDir := filepath.Join(home, ".config", "ra", "template")
 	if err := os.MkdirAll(tmplDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestScaffoldAssets_AlwaysWritesEmbedded(t *testing.T) {
 func TestScaffoldAssets_PartialExisting_OnlyScaffoldsMissing(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	wsDir := filepath.Join(cwd, ".ws")
+	wsDir := filepath.Join(cwd, ".ra")
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -193,15 +193,15 @@ func TestScaffoldAssets_NestedPath_CreatesParentDir(t *testing.T) {
 	// Stub the AssetNames and embedded map just for this test by relying on
 	// a real nested asset added in Task 2. If that asset is not yet added,
 	// this test exists to drive that change — it will fail until the name
-	// "profile.d/00-ws-wait.sh" is in AssetNames.
-	wsDir := filepath.Join(cwd, ".ws")
+	// "profile.d/00-ra-wait.sh" is in AssetNames.
+	wsDir := filepath.Join(cwd, ".ra")
 	res, err := ScaffoldAssets(ScaffoldAssetsOptions{
 		TargetDir: wsDir, Home: home, Stdout: &out,
 	})
 	if err != nil {
 		t.Fatalf("ScaffoldAssets: %v", err)
 	}
-	nested := filepath.Join(wsDir, "profile.d", "00-ws-wait.sh")
+	nested := filepath.Join(wsDir, "profile.d", "00-ra-wait.sh")
 	info, err := os.Stat(nested)
 	if err != nil {
 		t.Fatalf("expected %s to exist: %v", nested, err)
@@ -209,7 +209,7 @@ func TestScaffoldAssets_NestedPath_CreatesParentDir(t *testing.T) {
 	if info.Mode().Perm() != 0755 {
 		t.Errorf("nested asset mode = %o, want 0755", info.Mode().Perm())
 	}
-	if !res.Wrote("profile.d/00-ws-wait.sh") {
-		t.Errorf("result should record profile.d/00-ws-wait.sh written: %+v", res)
+	if !res.Wrote("profile.d/00-ra-wait.sh") {
+		t.Errorf("result should record profile.d/00-ra-wait.sh written: %+v", res)
 	}
 }

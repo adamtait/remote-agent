@@ -1,4 +1,4 @@
-BINARY := ws
+BINARY := ra
 INSTALL_DIR := $(HOME)/.local/bin
 
 .PHONY: build install clean test

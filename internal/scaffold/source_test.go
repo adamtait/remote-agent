@@ -10,7 +10,7 @@ import (
 func TestResolveSource_UserTemplateTakesPrecedence(t *testing.T) {
 	home := t.TempDir()
 	projectRoot := t.TempDir()
-	tmplDir := filepath.Join(home, ".config", "ws", "template")
+	tmplDir := filepath.Join(home, ".config", "ra", "template")
 	if err := os.MkdirAll(tmplDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestResolveSource_ProjectTakesPrecedenceOverUser(t *testing.T) {
 	projectRoot := t.TempDir()
 
 	// Write user template
-	userTmplDir := filepath.Join(home, ".config", "ws", "template")
+	userTmplDir := filepath.Join(home, ".config", "ra", "template")
 	if err := os.MkdirAll(userTmplDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestResolveSource_ProjectTakesPrecedenceOverUser(t *testing.T) {
 	}
 
 	// Write project override
-	wsDir := filepath.Join(projectRoot, ".ws")
+	wsDir := filepath.Join(projectRoot, ".ra")
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestResolveSource_UserTemplateUnreadable_Propagates(t *testing.T) {
 		t.Skip("root bypasses file mode permissions")
 	}
 	home := t.TempDir()
-	tmplDir := filepath.Join(home, ".config", "ws", "template")
+	tmplDir := filepath.Join(home, ".config", "ra", "template")
 	if err := os.MkdirAll(tmplDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -131,17 +131,17 @@ func TestEmbeddedSeed_UnknownName_ReturnsError(t *testing.T) {
 }
 
 func TestEmbeddedSeed_ProfileDWaitScript(t *testing.T) {
-	body, err := EmbeddedSeed("profile.d/00-ws-wait.sh")
+	body, err := EmbeddedSeed("profile.d/00-ra-wait.sh")
 	if err != nil {
 		t.Fatalf("EmbeddedSeed: %v", err)
 	}
 	if len(body) == 0 {
-		t.Errorf("expected non-empty embedded body for profile.d/00-ws-wait.sh")
+		t.Errorf("expected non-empty embedded body for profile.d/00-ra-wait.sh")
 	}
-	if !bytes.Contains(body, []byte("/run/ws/ready")) {
-		t.Errorf("expected body to reference sentinel path /run/ws/ready")
+	if !bytes.Contains(body, []byte("/run/ra/ready")) {
+		t.Errorf("expected body to reference sentinel path /run/ra/ready")
 	}
-	if !bytes.Contains(body, []byte("/run/ws/env")) {
-		t.Errorf("expected body to source /run/ws/env")
+	if !bytes.Contains(body, []byte("/run/ra/env")) {
+		t.Errorf("expected body to source /run/ra/env")
 	}
 }

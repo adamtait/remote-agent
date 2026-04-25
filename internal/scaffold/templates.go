@@ -1,4 +1,4 @@
-// ws/internal/scaffold/templates.go
+// ra/internal/scaffold/templates.go
 package scaffold
 
 import (
@@ -21,7 +21,7 @@ func (m ClaudeAuthMode) String() string {
 	return "oauth"
 }
 
-// UserValues are the prompt-gathered inputs for ~/.config/ws/config.yaml.
+// UserValues are the prompt-gathered inputs for ~/.config/ra/config.yaml.
 type UserValues struct {
 	GitUserName   string
 	GitUserEmail  string
@@ -44,7 +44,7 @@ type UserValues struct {
 	ClaudeAuthMode ClaudeAuthMode
 }
 
-// ProjectValues are the prompt-gathered inputs for .ws/config.yaml.
+// ProjectValues are the prompt-gathered inputs for .ra/config.yaml.
 type ProjectValues struct {
 	ProjectID     string
 	GithubRepoURL string
@@ -83,7 +83,7 @@ func orInt(v, seed int) int {
 	return v
 }
 
-// RenderUserConfig returns a fully-populated ~/.config/ws/config.yaml.
+// RenderUserConfig returns a fully-populated ~/.config/ra/config.yaml.
 func RenderUserConfig(uv UserValues) string {
 	gitName := orStr(uv.GitUserName, placeholderGitUserName)
 	gitEmail := orStr(uv.GitUserEmail, placeholderGitEmail)
@@ -126,8 +126,8 @@ func RenderUserConfig(uv UserValues) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `# ws user config — baseline for all ws commands.
-# Every required key is set here. Project configs (.ws/config.yaml)
+	fmt.Fprintf(&b, `# ra user config — baseline for all ra commands.
+# Every required key is set here. Project configs (.ra/config.yaml)
 # override per-key.
 
 git:
@@ -174,7 +174,7 @@ gcloud:
 #                   op) AND exports env_var (GH_TOKEN) for `+"`gh`"+` CLI.
 #                   Env var is stale on rotation; git operations stay fresh.
 #
-# Other logical names: plain fetch + export. Rotation requires ws stop/start.
+# Other logical names: plain fetch + export. Rotation requires ra stop/start.
 secrets:
 %s  github_pat:
     secret_name: github-pat
@@ -191,14 +191,14 @@ env: {}
 	return b.String()
 }
 
-// RenderProjectConfig returns a minimal .ws/config.yaml with the two
+// RenderProjectConfig returns a minimal .ra/config.yaml with the two
 // required project keys and commented-out override examples.
 func RenderProjectConfig(pv ProjectValues) string {
 	projectID := orStr(pv.ProjectID, placeholderProjectID)
 	repoURL := orStr(pv.GithubRepoURL, placeholderRepoURL)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `# ws project config — committed to source control.
+	fmt.Fprintf(&b, `# ra project config — committed to source control.
 # Precedence: project overrides user. See user config for defaults and
 # the full secrets/env schema.
 

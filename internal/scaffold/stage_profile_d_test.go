@@ -19,7 +19,7 @@ func writeProfileScript(t *testing.T, dir, name, body string) {
 func TestStageProfileD_CopiesProjectOnly(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	writeProfileScript(t, filepath.Join(cwd, ".ws", "profile.d"), "10-app.sh", "echo project\n")
+	writeProfileScript(t, filepath.Join(cwd, ".ra", "profile.d"), "10-app.sh", "echo project\n")
 
 	stage, cleanup, err := StageProfileD(cwd, home)
 	if err != nil {
@@ -39,7 +39,7 @@ func TestStageProfileD_CopiesProjectOnly(t *testing.T) {
 func TestStageProfileD_CopiesUserGlobalOnly(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	writeProfileScript(t, filepath.Join(home, ".config", "ws", "profile.d"), "20-user.sh", "echo user\n")
+	writeProfileScript(t, filepath.Join(home, ".config", "ra", "profile.d"), "20-user.sh", "echo user\n")
 
 	stage, cleanup, err := StageProfileD(cwd, home)
 	if err != nil {
@@ -59,8 +59,8 @@ func TestStageProfileD_CopiesUserGlobalOnly(t *testing.T) {
 func TestStageProfileD_ProjectOverridesUserGlobalOnCollision(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	writeProfileScript(t, filepath.Join(cwd, ".ws", "profile.d"), "50-shared.sh", "echo project\n")
-	writeProfileScript(t, filepath.Join(home, ".config", "ws", "profile.d"), "50-shared.sh", "echo user\n")
+	writeProfileScript(t, filepath.Join(cwd, ".ra", "profile.d"), "50-shared.sh", "echo project\n")
+	writeProfileScript(t, filepath.Join(home, ".config", "ra", "profile.d"), "50-shared.sh", "echo user\n")
 
 	stage, cleanup, err := StageProfileD(cwd, home)
 	if err != nil {
@@ -80,7 +80,7 @@ func TestStageProfileD_ProjectOverridesUserGlobalOnCollision(t *testing.T) {
 func TestStageProfileD_CleanupRemovesStagingDir(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	writeProfileScript(t, filepath.Join(cwd, ".ws", "profile.d"), "10-app.sh", "echo x\n")
+	writeProfileScript(t, filepath.Join(cwd, ".ra", "profile.d"), "10-app.sh", "echo x\n")
 
 	stage, cleanup, err := StageProfileD(cwd, home)
 	if err != nil {
@@ -95,14 +95,14 @@ func TestStageProfileD_CleanupRemovesStagingDir(t *testing.T) {
 func TestStageProfileD_PreexistingStagingDirReplaced(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	stale := filepath.Join(cwd, ".ws", "profile.d.staged")
+	stale := filepath.Join(cwd, ".ra", "profile.d.staged")
 	if err := os.MkdirAll(stale, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(stale, "stale.sh"), []byte("old\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeProfileScript(t, filepath.Join(cwd, ".ws", "profile.d"), "fresh.sh", "new\n")
+	writeProfileScript(t, filepath.Join(cwd, ".ra", "profile.d"), "fresh.sh", "new\n")
 
 	stage, cleanup, err := StageProfileD(cwd, home)
 	if err != nil {
@@ -147,7 +147,7 @@ func TestStageProfileD_NoSourcesProducesEmptyStage(t *testing.T) {
 func TestStageProfileD_IgnoresNonShellFiles(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	dir := filepath.Join(cwd, ".ws", "profile.d")
+	dir := filepath.Join(cwd, ".ra", "profile.d")
 	writeProfileScript(t, dir, "10-app.sh", "echo x\n")
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("notes\n"), 0644); err != nil {
 		t.Fatal(err)

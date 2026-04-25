@@ -4,7 +4,7 @@
 # The base image runs every executable in /etc/workstation-startup.d/ at boot;
 # we drop our setup script in there. Per-harness setup (e.g. Claude Code) is
 # opt-in: harness scripts are always baked into the image and gated at runtime
-# by container env vars (e.g. WS_CLAUDE_ENABLED). Harness install steps run
+# by container env vars (e.g. RA_CLAUDE_ENABLED). Harness install steps run
 # at first-boot rather than at docker build, because the base image creates
 # the unprivileged 'user' account via runtime startup hooks — it does not
 # exist in /etc/passwd at build time, so build-time `chown user:user` fails.
@@ -39,14 +39,14 @@ RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && ex
 
 # --- Optional: Claude Code harness -----------------------------------------
 # Both scripts are always baked into the image; the runtime entrypoint sources
-# claude-setup.sh iff WS_CLAUDE_ENABLED=true (via container env). On first
+# claude-setup.sh iff RA_CLAUDE_ENABLED=true (via container env). On first
 # boot, claude-setup.sh shells out to claude-install.sh to npm-install
 # @anthropic-ai/claude-code under /home/user/.npm-global so the package can
 # self-update under the 'user' account.
-RUN mkdir -p /etc/ws
-COPY .ws/claude/install.sh /etc/ws/claude-install.sh
-COPY .ws/claude/setup.sh /etc/ws/claude-setup.sh
-RUN chmod 0755 /etc/ws/claude-install.sh /etc/ws/claude-setup.sh
+RUN mkdir -p /etc/ra
+COPY .ra/claude/install.sh /etc/ra/claude-install.sh
+COPY .ra/claude/setup.sh /etc/ra/claude-setup.sh
+RUN chmod 0755 /etc/ra/claude-install.sh /etc/ra/claude-setup.sh
 
 # Make /home/user/.npm-global/bin discoverable by login shells (sshd / IDE
 # terminal) and by `sudo -u user` invocations. A Dockerfile `ENV PATH=` only
@@ -56,21 +56,21 @@ RUN chmod 0755 /etc/ws/claude-install.sh /etc/ws/claude-setup.sh
 # unconditionally — if Claude is disabled the directory never exists, but a
 # missing PATH entry is harmless.
 RUN printf 'export PATH="/home/user/.npm-global/bin:$PATH"\n' \
-        > /etc/profile.d/00-ws-npm-global-path.sh \
-    && chmod 0644 /etc/profile.d/00-ws-npm-global-path.sh
+        > /etc/profile.d/00-ra-npm-global-path.sh \
+    && chmod 0644 /etc/profile.d/00-ra-npm-global-path.sh
 
 # --- Our startup script -----------------------------------------------------
 # Numbered 200 so it runs after the base image's own 100-series scripts.
-COPY .ws/entrypoint.sh /etc/workstation-startup.d/200_ws-setup.sh
-RUN chmod +x /etc/workstation-startup.d/200_ws-setup.sh
+COPY .ra/entrypoint.sh /etc/workstation-startup.d/200_ra-setup.sh
+RUN chmod +x /etc/workstation-startup.d/200_ra-setup.sh
 
 # --- Login-shell profile.d scripts ------------------------------------------
-# `ws create` stages .ws/profile.d/ and ~/.config/ws/profile.d/ into
-# .ws/profile.d.staged/ just before invoking docker buildx (project
+# `ra create` stages .ra/profile.d/ and ~/.config/ra/profile.d/ into
+# .ra/profile.d.staged/ just before invoking docker buildx (project
 # overrides user-global on filename collision). The staging helper chmods each
 # .sh to 0755 before COPY, so no RUN chmod is needed. In other build flows
 # (e.g. manual `docker build`) the caller is responsible for populating
-# .ws/profile.d.staged/ with executable scripts.
-COPY .ws/profile.d.staged/ /etc/profile.d/
+# .ra/profile.d.staged/ with executable scripts.
+COPY .ra/profile.d.staged/ /etc/profile.d/
 
 # The base image's ENTRYPOINT handles IDE startup; don't override it.

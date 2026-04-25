@@ -2,16 +2,16 @@
 #
 # Claude Code harness — runtime setup.
 #
-# Sourced by /etc/workstation-startup.d/200_ws-setup.sh (the main entrypoint)
-# at boot when WS_CLAUDE_ENABLED=true. Defines `ws_claude_handle_secret`
+# Sourced by /etc/workstation-startup.d/200_ra-setup.sh (the main entrypoint)
+# at boot when RA_CLAUDE_ENABLED=true. Defines `ra_claude_handle_secret`
 # which the main dispatch loop calls for each logical secret name; returns 0
 # when it handled the secret, 1 otherwise (the main loop then falls through
 # to its own cases).
 #
 # Depends on functions/constants provided by the main entrypoint:
 #   log()                — shared logger
-#   WS_RUNTIME_DIR       — /run/ws
-#   WS_ENV_FILE          — /run/ws/env
+#   RA_RUNTIME_DIR       — /run/ra
+#   RA_ENV_FILE          — /run/ra/env
 #   GCP_PROJECT_ID       — project id for gcloud
 #   USER_NAME            — target container user ("user")
 #
@@ -26,7 +26,7 @@ CLAUDE_SETTINGS_DIR="${USER_HOME}/.claude"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_DIR}/settings.json"
 CLAUDE_CONFIG_PATH="${USER_HOME}/.claude.json"
 
-CLAUDE_INSTALL_SCRIPT="/etc/ws/claude-install.sh"
+CLAUDE_INSTALL_SCRIPT="/etc/ra/claude-install.sh"
 CLAUDE_BIN_PATH="${USER_HOME}/.npm-global/bin/claude"
 
 # Install Claude Code on first boot. The unprivileged 'user' account isn't
@@ -34,7 +34,7 @@ CLAUDE_BIN_PATH="${USER_HOME}/.npm-global/bin/claude"
 # it via runtime startup hooks), so npm-install-as-user has to happen at
 # boot rather than at build. Idempotent: subsequent boots find the binary
 # and skip.
-_ws_claude_install_if_missing() {
+_ra_claude_install_if_missing() {
     if [[ -x "${CLAUDE_BIN_PATH}" ]]; then
         return 0
     fi
@@ -51,7 +51,7 @@ _ws_claude_install_if_missing() {
 }
 
 # Clear stale Claude auth state left by previous boots.
-_ws_claude_clear_stale_state() {
+_ra_claude_clear_stale_state() {
     rm -f "${APIKEY_HELPER_PATH}"
     sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/environment
     sed -i '/^ANTHROPIC_API_KEY=/d' /etc/environment
@@ -69,7 +69,7 @@ _ws_claude_clear_stale_state() {
 }
 
 # Seed ~/.claude.json so interactive `claude` skips the onboarding wizard.
-_ws_claude_seed_onboarding() {
+_ra_claude_seed_onboarding() {
     local token="$1"
     local oauth_account_secret="$2"
 
@@ -131,12 +131,12 @@ _ws_claude_seed_onboarding() {
     fi
 }
 
-# ws_claude_handle_secret is called by the main dispatch loop for every
+# ra_claude_handle_secret is called by the main dispatch loop for every
 # logical secret. Returns 0 if it handled the secret (main loop skips its
 # own cases), 1 otherwise.
 #
 # Args: logical_name, secret_name, target_env_var
-ws_claude_handle_secret() {
+ra_claude_handle_secret() {
     local logical="$1"
     local secret_name="$2"
     local target_env_var="$3"
@@ -155,16 +155,16 @@ ws_claude_handle_secret() {
             echo "${target_env_var}=${TOKEN}" >> /etc/environment
             umask 077
             local tmp
-            tmp=$(mktemp "${WS_RUNTIME_DIR}/.env.XXXXXX")
+            tmp=$(mktemp "${RA_RUNTIME_DIR}/.env.XXXXXX")
             printf '%s=%s\n' "${target_env_var}" "${TOKEN}" > "${tmp}"
             chmod 0644 "${tmp}"
-            mv "${tmp}" "${WS_ENV_FILE}"
-            log "claude: exported ${target_env_var} via /etc/environment and ${WS_ENV_FILE}."
+            mv "${tmp}" "${RA_ENV_FILE}"
+            log "claude: exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
 
             local token_upper oauth_account_var
             token_upper=$(echo "${logical}" | tr '[:lower:]' '[:upper:]')
-            oauth_account_var="WS_SECRET_${token_upper}_OAUTH_ACCOUNT_SECRET_NAME"
-            _ws_claude_seed_onboarding "${TOKEN}" "${!oauth_account_var:-}"
+            oauth_account_var="RA_SECRET_${token_upper}_OAUTH_ACCOUNT_SECRET_NAME"
+            _ra_claude_seed_onboarding "${TOKEN}" "${!oauth_account_var:-}"
             return 0
             ;;
 
@@ -210,6 +210,6 @@ EOF
 
 # Source-time bootstrap, before the dispatch loop runs.
 # Order matters: install must complete before any code path that calls
-# `claude` (e.g. _ws_claude_seed_onboarding's smoke test).
-_ws_claude_install_if_missing
-_ws_claude_clear_stale_state
+# `claude` (e.g. _ra_claude_seed_onboarding's smoke test).
+_ra_claude_install_if_missing
+_ra_claude_clear_stale_state

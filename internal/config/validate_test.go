@@ -171,8 +171,8 @@ func TestValidate_Claude_MigrationSignal(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "claude.enabled is not set") {
 		t.Errorf("want migration-signal error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "ws setup --force") {
-		t.Errorf("migration error should point at 'ws setup --force', got %v", err)
+	if !strings.Contains(err.Error(), "ra setup --force") {
+		t.Errorf("migration error should point at 'ra setup --force', got %v", err)
 	}
 }
 
@@ -217,7 +217,7 @@ func TestValidate_EnvVarCollision_SecretAndEnv(t *testing.T) {
 }
 
 func TestValidate_EnvVarCollision_Reserved(t *testing.T) {
-	for _, reserved := range []string{"GCP_PROJECT_ID", "GITHUB_REPO_URL", "GIT_USER_NAME", "WS_SECRETS", "WS_SECRET_FOO_NAME", "WS_CLAUDE_ENABLED", "WS_CODEX_ENABLED"} {
+	for _, reserved := range []string{"GCP_PROJECT_ID", "GITHUB_REPO_URL", "GIT_USER_NAME", "RA_SECRETS", "RA_SECRET_FOO_NAME", "RA_CLAUDE_ENABLED", "RA_CODEX_ENABLED"} {
 		c := fullValidCfg()
 		c.Env = map[string]string{reserved: "v"}
 		if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), reserved) {
