@@ -48,9 +48,16 @@ COPY .ws/claude/install.sh /etc/ws/claude-install.sh
 COPY .ws/claude/setup.sh /etc/ws/claude-setup.sh
 RUN chmod 0755 /etc/ws/claude-install.sh /etc/ws/claude-setup.sh
 
-# Kept unconditionally. In Claude-disabled builds /home/user/.npm-global is
-# never populated; PATH entries for nonexistent dirs are harmless.
-ENV PATH="/home/user/.npm-global/bin:${PATH}"
+# Make /home/user/.npm-global/bin discoverable by login shells (sshd / IDE
+# terminal) and by `sudo -u user` invocations. A Dockerfile `ENV PATH=` only
+# reaches processes the container engine spawns from this image's entrypoint;
+# Cloud Workstations interactive shells build PATH from /etc/profile.d/, and
+# `sudo` strips the inherited PATH per its secure_path setting. Kept
+# unconditionally — if Claude is disabled the directory never exists, but a
+# missing PATH entry is harmless.
+RUN printf 'export PATH="/home/user/.npm-global/bin:$PATH"\n' \
+        > /etc/profile.d/00-ws-npm-global-path.sh \
+    && chmod 0644 /etc/profile.d/00-ws-npm-global-path.sh
 
 # --- Our startup script -----------------------------------------------------
 # Numbered 200 so it runs after the base image's own 100-series scripts.

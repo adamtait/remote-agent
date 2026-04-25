@@ -73,8 +73,10 @@ _ws_claude_seed_onboarding() {
     local token="$1"
     local oauth_account_secret="$2"
 
+    # Invoke claude by absolute path: `sudo -u user` resets PATH via secure_path
+    # and strips /home/user/.npm-global/bin, so bare `claude` would not resolve.
     local version
-    version=$(sudo -u "${USER_NAME}" claude --version 2>/dev/null | awk '{print $1}' || true)
+    version=$(sudo -u "${USER_NAME}" "${CLAUDE_BIN_PATH}" --version 2>/dev/null | awk '{print $1}' || true)
     if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
         log "claude: could not parse claude --version ('${version}'); proceeding without lastOnboardingVersion."
         version=""
@@ -122,7 +124,7 @@ _ws_claude_seed_onboarding() {
     log "claude: seeded ${CLAUDE_CONFIG_PATH} (hasCompletedOnboarding=true${acct:+, oauthAccount set})."
 
     if sudo -u "${USER_NAME}" env CLAUDE_CODE_OAUTH_TOKEN="${token}" \
-            claude -p "respond with OK" 2>/dev/null | grep -q 'OK'; then
+            "${CLAUDE_BIN_PATH}" -p "respond with OK" 2>/dev/null | grep -q 'OK'; then
         log "claude: smoke test returned OK."
     else
         log "claude: smoke test did not return OK; token or account may be stale."

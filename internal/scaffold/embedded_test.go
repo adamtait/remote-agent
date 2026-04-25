@@ -116,6 +116,29 @@ func TestEmbeddedEntrypoint_NoClaudeSpecifics(t *testing.T) {
 	}
 }
 
+func TestEmbeddedDockerfile_PutsNpmGlobalOnLoginShellPath(t *testing.T) {
+	// Cloud Workstations interactive shells (sshd / IDE terminal) and
+	// `sudo -u user` calls don't inherit `ENV PATH=` from the Dockerfile;
+	// they build PATH from /etc/profile.d/. Without a profile.d snippet,
+	// /home/user/.npm-global/bin is invisible and `claude` is not found.
+	s := embeddedDockerfile
+	if !bytes.Contains(s, []byte("/etc/profile.d/")) {
+		t.Errorf("Dockerfile should write a profile.d snippet that adds /home/user/.npm-global/bin to PATH")
+	}
+	if !bytes.Contains(s, []byte("/home/user/.npm-global/bin")) {
+		t.Errorf("Dockerfile should reference /home/user/.npm-global/bin when extending login-shell PATH")
+	}
+	// The standalone `ENV PATH=...` directive doesn't reach login shells or
+	// sudo'd commands, so it should not be the only mechanism. If it stays,
+	// it must be accompanied by a profile.d export — asserted by the checks
+	// above. Guard that we don't regress to ENV-only.
+	envOnly := bytes.Contains(s, []byte(`ENV PATH="/home/user/.npm-global/bin`)) &&
+		!bytes.Contains(s, []byte("profile.d/00-ws-npm-global-path.sh"))
+	if envOnly {
+		t.Errorf("Dockerfile relies on ENV PATH alone — login shells will not see /home/user/.npm-global/bin")
+	}
+}
+
 func TestEmbeddedDockerfile_CopiesClaudeScripts(t *testing.T) {
 	s := embeddedDockerfile
 	for _, want := range []string{
@@ -164,6 +187,28 @@ func TestEmbeddedClaudeSetup_InstallsOnFirstBoot(t *testing.T) {
 		if !bytes.Contains(embeddedClaudeSetup, []byte(want)) {
 			t.Errorf("setup.sh missing %q — first-boot install hook broken", want)
 		}
+	}
+}
+
+func TestEmbeddedClaudeSetup_UsesAbsolutePathForVersionAndSmokeTest(t *testing.T) {
+	// `sudo -u user` resets PATH to its secure_path default and strips
+	// /home/user/.npm-global/bin, so bare `claude` is not found. The version
+	// detection and the smoke test must invoke claude by absolute path
+	// (CLAUDE_BIN_PATH). Without this fix, both calls fail silently and the
+	// onboarding seed proceeds without a version string while the smoke test
+	// reports "token or account may be stale" on every fresh boot.
+	s := embeddedClaudeSetup
+	if bytes.Contains(s, []byte(`sudo -u "${USER_NAME}" claude --version`)) {
+		t.Errorf("setup.sh: version check must use ${CLAUDE_BIN_PATH}, not bare `claude` (sudo strips PATH)")
+	}
+	if bytes.Contains(s, []byte(`claude -p "respond with OK"`)) {
+		t.Errorf("setup.sh: smoke test must invoke ${CLAUDE_BIN_PATH}, not bare `claude` (sudo strips PATH)")
+	}
+	if !bytes.Contains(s, []byte(`"${CLAUDE_BIN_PATH}" --version`)) {
+		t.Errorf(`setup.sh: expected '"${CLAUDE_BIN_PATH}" --version' for the version check`)
+	}
+	if !bytes.Contains(s, []byte(`"${CLAUDE_BIN_PATH}" -p "respond with OK"`)) {
+		t.Errorf(`setup.sh: expected '"${CLAUDE_BIN_PATH}" -p "respond with OK"' for the smoke test`)
 	}
 }
 
