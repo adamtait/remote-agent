@@ -1,4 +1,4 @@
-// ws/internal/scaffold/scaffold.go
+// ra/internal/scaffold/scaffold.go
 package scaffold
 
 import (
@@ -51,8 +51,8 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	writeProject := !opts.GlobalOnly
 	writeUser := !opts.ProjectOnly
 
-	projectPath := filepath.Join(opts.Cwd, ".ws", "config.yaml")
-	userPath := filepath.Join(opts.Home, ".config", "ws", "config.yaml")
+	projectPath := filepath.Join(opts.Cwd, ".ra", "config.yaml")
+	userPath := filepath.Join(opts.Home, ".config", "ra", "config.yaml")
 
 	if writeProject && !opts.Force && fileExists(projectPath) {
 		fmt.Fprintf(opts.Stdout, "skip %s (already present); re-run with --force to regenerate\n", projectPath)
@@ -162,7 +162,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	}
 
 	// Materialize build assets to user template dir.
-	userTemplateDir := filepath.Join(opts.Home, ".config", "ws", "template")
+	userTemplateDir := filepath.Join(opts.Home, ".config", "ra", "template")
 	if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
 		TargetDir: userTemplateDir, Home: opts.Home, Stdout: opts.Stdout,
 		Force: opts.Force, OnlyMissing: !opts.Force,
@@ -170,9 +170,9 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		return err
 	}
 
-	// Optionally also write assets into .ws/.
+	// Optionally also write assets into .ra/.
 	if opts.WithProjectAssets {
-		wsDir := filepath.Join(opts.Cwd, ".ws")
+		wsDir := filepath.Join(opts.Cwd, ".ra")
 		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
 			TargetDir: wsDir, Home: opts.Home, Stdout: opts.Stdout,
 			Force: opts.Force, OnlyMissing: !opts.Force,
@@ -192,7 +192,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		}
 	}
 
-	fmt.Fprintln(opts.Stdout, "Run 'ws create' to provision the workstation.")
+	fmt.Fprintln(opts.Stdout, "Run 'ra create' to provision the workstation.")
 	return nil
 }
 
@@ -202,7 +202,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 	}
 
 	// Materialize build assets.
-	userTemplateDir := filepath.Join(opts.Home, ".config", "ws", "template")
+	userTemplateDir := filepath.Join(opts.Home, ".config", "ra", "template")
 	if !opts.GlobalOnly {
 		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
 			TargetDir: userTemplateDir, Home: opts.Home, Stdout: opts.Stdout,
@@ -212,7 +212,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 		}
 	}
 	if opts.WithProjectAssets {
-		wsDir := filepath.Join(opts.Cwd, ".ws")
+		wsDir := filepath.Join(opts.Cwd, ".ra")
 		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
 			TargetDir: wsDir, Home: opts.Home, Stdout: opts.Stdout,
 			Force: opts.Force, OnlyMissing: !opts.Force,
@@ -222,7 +222,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 	}
 
 	if !opts.GlobalOnly {
-		path := filepath.Join(opts.Cwd, ".ws", "config.yaml")
+		path := filepath.Join(opts.Cwd, ".ra", "config.yaml")
 		if !opts.Force && fileExists(path) {
 			fmt.Fprintf(opts.Stdout, "skip %s (already present); re-run with --force to regenerate\n", path)
 		} else {
@@ -233,7 +233,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 		}
 	}
 	if !opts.ProjectOnly {
-		path := filepath.Join(opts.Home, ".config", "ws", "config.yaml")
+		path := filepath.Join(opts.Home, ".config", "ra", "config.yaml")
 		if !opts.Force && fileExists(path) {
 			fmt.Fprintf(opts.Stdout, "skip %s (already present); re-run with --force to regenerate\n", path)
 		} else {
@@ -302,12 +302,12 @@ func warnPrereqs(out io.Writer, p Prober) {
 		return
 	}
 	if !p.HasGcloud() {
-		fmt.Fprintln(out, "WARN: gcloud CLI not found on PATH — ws create will fail until installed")
+		fmt.Fprintln(out, "WARN: gcloud CLI not found on PATH — ra create will fail until installed")
 	} else if !p.HasGcloudAuth() {
-		fmt.Fprintln(out, "WARN: no active gcloud credentials — run 'gcloud auth login' before 'ws create'")
+		fmt.Fprintln(out, "WARN: no active gcloud credentials — run 'gcloud auth login' before 'ra create'")
 	}
 	if !p.HasDocker() {
-		fmt.Fprintln(out, "WARN: docker not found on PATH — ws create needs it to build the workstation image")
+		fmt.Fprintln(out, "WARN: docker not found on PATH — ra create needs it to build the workstation image")
 	}
 }
 

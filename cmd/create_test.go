@@ -1,4 +1,4 @@
-// ws/cmd/create_test.go
+// ra/cmd/create_test.go
 package cmd
 
 import (
@@ -18,7 +18,7 @@ import (
 // test without running the whole create flow.
 func TestMaterializeBuildAssets_BothPresent_NoWrite(t *testing.T) {
 	cwd := t.TempDir()
-	ws := filepath.Join(cwd, ".ws")
+	ws := filepath.Join(cwd, ".ra")
 	if err := os.MkdirAll(ws, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -61,14 +61,14 @@ func TestMaterializeBuildAssets_BothMissing_WritesAndCleansUp(t *testing.T) {
 	}
 	// files should exist after materialize
 	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(cwd, ".ws", n)); err != nil {
+		if _, err := os.Stat(filepath.Join(cwd, ".ra", n)); err != nil {
 			t.Errorf("expected %s to be materialized: %v", n, err)
 		}
 	}
 	cleanup()
 	// cleanup should remove only the files that were written
 	for _, n := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(cwd, ".ws", n)); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(cwd, ".ra", n)); !os.IsNotExist(err) {
 			t.Errorf("expected %s removed by cleanup, err=%v", n, err)
 		}
 	}
@@ -76,7 +76,7 @@ func TestMaterializeBuildAssets_BothMissing_WritesAndCleansUp(t *testing.T) {
 
 func TestMaterializeBuildAssets_PartialExisting_WritesOnlyMissing(t *testing.T) {
 	cwd := t.TempDir()
-	ws := filepath.Join(cwd, ".ws")
+	ws := filepath.Join(cwd, ".ra")
 	if err := os.MkdirAll(ws, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", "example.com/img:tag",
-		"-f", ".ws/Dockerfile",
+		"-f", ".ra/Dockerfile",
 		"--push",
 		".",
 	}
@@ -126,12 +126,12 @@ func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
 
 func TestBuildArgs_NoClaudeBuildArg(t *testing.T) {
 	// Claude install moved to first-boot runtime — there should no longer be
-	// a WS_CLAUDE_ENABLED build arg. The runtime gate lives in the container
+	// a RA_CLAUDE_ENABLED build arg. The runtime gate lives in the container
 	// env, set by buildContainerEnv.
 	got := dockerBuildArgs("example.com/img:tag")
 	for _, a := range got {
-		if strings.Contains(a, "WS_CLAUDE_ENABLED") {
-			t.Errorf("dockerBuildArgs should not pass WS_CLAUDE_ENABLED at build time; got %v", got)
+		if strings.Contains(a, "RA_CLAUDE_ENABLED") {
+			t.Errorf("dockerBuildArgs should not pass RA_CLAUDE_ENABLED at build time; got %v", got)
 		}
 	}
 }
@@ -160,10 +160,10 @@ func TestCreate_StagesProfileDBeforeBuildAndCleansUp(t *testing.T) {
 	// wiring regression without having to fake out gcloud/docker.
 	cwd := t.TempDir()
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws", "profile.d"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cwd, ".ra", "profile.d"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwd, ".ws", "profile.d", "10-app.sh"),
+	if err := os.WriteFile(filepath.Join(cwd, ".ra", "profile.d", "10-app.sh"),
 		[]byte("echo x\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -225,13 +225,13 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		"GITHUB_REPO_URL":             "https://example.com/r.git",
 		"GIT_USER_NAME":               "Alice",
 		"GIT_USER_EMAIL":              "a@x.com",
-		"WS_CLAUDE_ENABLED":           "false",
-		"WS_SECRET_CLAUDE_OAUTH_NAME": "claude-auth",
-		"WS_SECRET_CLAUDE_OAUTH_VAR":  "CLAUDE_CODE_OAUTH_TOKEN",
-		"WS_SECRET_GITHUB_PAT_NAME":   "github-pat",
-		"WS_SECRET_GITHUB_PAT_VAR":    "GH_TOKEN",
-		"WS_SECRET_MY_EXTRA_NAME":     "ex",
-		"WS_SECRET_MY_EXTRA_VAR":      "MY_EXTRA",
+		"RA_CLAUDE_ENABLED":           "false",
+		"RA_SECRET_CLAUDE_OAUTH_NAME": "claude-auth",
+		"RA_SECRET_CLAUDE_OAUTH_VAR":  "CLAUDE_CODE_OAUTH_TOKEN",
+		"RA_SECRET_GITHUB_PAT_NAME":   "github-pat",
+		"RA_SECRET_GITHUB_PAT_VAR":    "GH_TOKEN",
+		"RA_SECRET_MY_EXTRA_NAME":     "ex",
+		"RA_SECRET_MY_EXTRA_VAR":      "MY_EXTRA",
 		"STATIC_KEY":                  "abc",
 	}
 	for k, v := range must {
@@ -239,16 +239,16 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 			t.Errorf("container env %s: got %q, want %q (full string: %q)", k, m[k], v, got)
 		}
 	}
-	parts := strings.Split(m["WS_SECRETS"], "|")
+	parts := strings.Split(m["RA_SECRETS"], "|")
 	wantSet := map[string]bool{"claude_oauth": true, "github_pat": true, "my_extra": true}
 	for _, p := range parts {
 		if !wantSet[p] {
-			t.Errorf("unexpected WS_SECRETS entry: %q", p)
+			t.Errorf("unexpected RA_SECRETS entry: %q", p)
 		}
 		delete(wantSet, p)
 	}
 	if len(wantSet) != 0 {
-		t.Errorf("missing WS_SECRETS entries: %v", wantSet)
+		t.Errorf("missing RA_SECRETS entries: %v", wantSet)
 	}
 	for _, banned := range []string{"CLAUDE_AUTH_MODE=", "CLAUDE_AUTH_SECRET_NAME=", "GITHUB_PAT_SECRET_NAME="} {
 		if strings.Contains(got, banned) {
@@ -261,8 +261,8 @@ func TestBuildContainerEnv_ClaudeEnabledReflectsConfig(t *testing.T) {
 	enabled := true
 	cfg := &config.Config{Claude: config.ClaudeConfig{Enabled: &enabled, AuthMode: "oauth"}}
 	got := buildContainerEnv(cfg)
-	if !strings.Contains(got, "WS_CLAUDE_ENABLED=true") {
-		t.Errorf("expected WS_CLAUDE_ENABLED=true when cfg.Claude.Enabled=true; got: %q", got)
+	if !strings.Contains(got, "RA_CLAUDE_ENABLED=true") {
+		t.Errorf("expected RA_CLAUDE_ENABLED=true when cfg.Claude.Enabled=true; got: %q", got)
 	}
 }
 
@@ -277,7 +277,7 @@ func TestBuildContainerEnv_OAuthAccountSiblingEmitted(t *testing.T) {
 		},
 	}
 	got := buildContainerEnv(cfg)
-	if !strings.Contains(got, "WS_SECRET_CLAUDE_OAUTH_OAUTH_ACCOUNT_SECRET_NAME=claude-oauth-account") {
+	if !strings.Contains(got, "RA_SECRET_CLAUDE_OAUTH_OAUTH_ACCOUNT_SECRET_NAME=claude-oauth-account") {
 		t.Errorf("oauth_account_secret_name not emitted: %q", got)
 	}
 }

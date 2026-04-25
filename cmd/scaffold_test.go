@@ -28,7 +28,7 @@ func TestSetupScaffold_WritesEmbeddedDefaults(t *testing.T) {
 	}
 
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		p := filepath.Join(cwd, ".ws", name)
+		p := filepath.Join(cwd, ".ra", name)
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
@@ -45,10 +45,10 @@ func TestSetupScaffold_RefusesExistingWithoutForce(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cwd, ".ra"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwd, ".ws", "Dockerfile"), []byte("old\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(cwd, ".ra", "Dockerfile"), []byte("old\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -72,10 +72,10 @@ func TestSetupScaffold_ForceOverwrites(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cwd, ".ra"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwd, ".ws", "Dockerfile"), []byte("old\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(cwd, ".ra", "Dockerfile"), []byte("old\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,7 +85,7 @@ func TestSetupScaffold_ForceOverwrites(t *testing.T) {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
 
-	data, _ := os.ReadFile(filepath.Join(cwd, ".ws", "Dockerfile"))
+	data, _ := os.ReadFile(filepath.Join(cwd, ".ra", "Dockerfile"))
 	if string(data) == "old\n" {
 		t.Errorf("--force did not overwrite")
 	}
@@ -107,8 +107,8 @@ func TestSetupScaffold_DryRun_WritesNothing(t *testing.T) {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
 
-	if _, err := os.Stat(filepath.Join(cwd, ".ws", "Dockerfile")); !os.IsNotExist(err) {
-		t.Error("dry-run should not create .ws/Dockerfile")
+	if _, err := os.Stat(filepath.Join(cwd, ".ra", "Dockerfile")); !os.IsNotExist(err) {
+		t.Error("dry-run should not create .ra/Dockerfile")
 	}
 	if !strings.Contains(stdout.String(), "would write") {
 		t.Errorf("expected 'would write' in stdout, got %q", stdout.String())

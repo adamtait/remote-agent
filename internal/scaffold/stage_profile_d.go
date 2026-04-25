@@ -1,6 +1,6 @@
 // Package scaffold — stage_profile_d.go
-// Compose .ws/profile.d.staged/ from .ws/profile.d/ (project) and
-// ~/.config/ws/profile.d/ (user-global) for the Dockerfile to COPY.
+// Compose .ra/profile.d.staged/ from .ra/profile.d/ (project) and
+// ~/.config/ra/profile.d/ (user-global) for the Dockerfile to COPY.
 package scaffold
 
 import (
@@ -12,7 +12,7 @@ import (
 )
 
 // StageProfileD merges project-level and user-global profile.d scripts into
-// <cwd>/.ws/profile.d.staged/. Project-level wins on filename collision.
+// <cwd>/.ra/profile.d.staged/. Project-level wins on filename collision.
 //
 // Returns the stage path, a cleanup func the caller MUST invoke (typically
 // via defer) to remove the staging dir, and any error.
@@ -20,9 +20,9 @@ import (
 // Only *.sh files are copied. Any preexisting staging directory is removed
 // first so stale content from a prior run cannot leak into the next build.
 // If neither source exists, the staging dir is created empty so the
-// Dockerfile's `COPY .ws/profile.d.staged/ /etc/profile.d/` does not fail.
+// Dockerfile's `COPY .ra/profile.d.staged/ /etc/profile.d/` does not fail.
 func StageProfileD(cwd, home string) (string, func(), error) {
-	stage := filepath.Join(cwd, ".ws", "profile.d.staged")
+	stage := filepath.Join(cwd, ".ra", "profile.d.staged")
 
 	if err := os.RemoveAll(stage); err != nil {
 		return "", func() {}, fmt.Errorf("clearing stale stage %s: %w", stage, err)
@@ -36,8 +36,8 @@ func StageProfileD(cwd, home string) (string, func(), error) {
 	// Copy user-global first, then project-level — the second pass
 	// overwrites collisions, so project wins.
 	sources := []string{
-		filepath.Join(home, ".config", "ws", "profile.d"),
-		filepath.Join(cwd, ".ws", "profile.d"),
+		filepath.Join(home, ".config", "ra", "profile.d"),
+		filepath.Join(cwd, ".ra", "profile.d"),
 	}
 	for _, src := range sources {
 		if err := copyShellScriptsInto(src, stage); err != nil {

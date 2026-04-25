@@ -1,4 +1,4 @@
-// ws/internal/config/validate.go
+// ra/internal/config/validate.go
 package config
 
 import (
@@ -11,15 +11,15 @@ import (
 // envVarPattern matches POSIX shell identifiers used as container env vars.
 var envVarPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
-// reservedEnvVars are set directly by ws create; configs must not shadow them.
+// reservedEnvVars are set directly by ra create; configs must not shadow them.
 var reservedEnvVars = []string{
 	"GCP_PROJECT_ID",
 	"GITHUB_REPO_URL",
 	"GIT_USER_NAME",
 	"GIT_USER_EMAIL",
-	"WS_SECRETS",
-	"WS_CLAUDE_ENABLED",
-	"WS_CODEX_ENABLED",
+	"RA_SECRETS",
+	"RA_CLAUDE_ENABLED",
+	"RA_CODEX_ENABLED",
 }
 
 // Validate asserts the merged Config is complete and internally consistent.
@@ -49,7 +49,7 @@ func Validate(cfg *Config) error {
 	}
 	for _, r := range required {
 		if r.empty {
-			errs = append(errs, fmt.Sprintf("%s is required (run 'ws setup' to write it)", r.label))
+			errs = append(errs, fmt.Sprintf("%s is required (run 'ra setup' to write it)", r.label))
 		}
 	}
 
@@ -64,7 +64,7 @@ func Validate(cfg *Config) error {
 	// Per-secret shape + collision detection.
 	usedEnvVars := map[string]string{}
 	for _, r := range reservedEnvVars {
-		usedEnvVars[r] = "(ws-reserved)"
+		usedEnvVars[r] = "(ra-reserved)"
 	}
 
 	for name, s := range cfg.Secrets {
@@ -75,8 +75,8 @@ func Validate(cfg *Config) error {
 			errs = append(errs, fmt.Sprintf("secrets.%s.env_var is required", name))
 		} else if !envVarPattern.MatchString(s.EnvVar) {
 			errs = append(errs, fmt.Sprintf("secrets.%s.env_var %q must match %s", name, s.EnvVar, envVarPattern))
-		} else if strings.HasPrefix(s.EnvVar, "WS_SECRET_") {
-			errs = append(errs, fmt.Sprintf("secrets.%s.env_var %q collides with ws-reserved WS_SECRET_* prefix", name, s.EnvVar))
+		} else if strings.HasPrefix(s.EnvVar, "RA_SECRET_") {
+			errs = append(errs, fmt.Sprintf("secrets.%s.env_var %q collides with ra-reserved RA_SECRET_* prefix", name, s.EnvVar))
 		} else if existing, collide := usedEnvVars[s.EnvVar]; collide {
 			errs = append(errs, fmt.Sprintf("secrets.%s.env_var %q collides with %s", name, s.EnvVar, existing))
 		} else {
@@ -89,8 +89,8 @@ func Validate(cfg *Config) error {
 			errs = append(errs, fmt.Sprintf("env.%s name must match %s", key, envVarPattern))
 			continue
 		}
-		if strings.HasPrefix(key, "WS_SECRET_") {
-			errs = append(errs, fmt.Sprintf("env.%s collides with ws-reserved WS_SECRET_* prefix", key))
+		if strings.HasPrefix(key, "RA_SECRET_") {
+			errs = append(errs, fmt.Sprintf("env.%s collides with ra-reserved RA_SECRET_* prefix", key))
 			continue
 		}
 		if existing, collide := usedEnvVars[key]; collide {
@@ -108,7 +108,7 @@ func Validate(cfg *Config) error {
 
 // validateClaude enforces the claude.enabled ↔ secrets.claude_* contract.
 // Legacy configs (no claude: block) that still have claude_* secrets get a
-// targeted migration error pointing at `ws setup --force`.
+// targeted migration error pointing at `ra setup --force`.
 func validateClaude(cfg *Config) []string {
 	var errs []string
 	_, hasOAuth := cfg.Secrets["claude_oauth"]
@@ -117,8 +117,8 @@ func validateClaude(cfg *Config) []string {
 	// Migration signal: claude section absent but claude_* secrets present.
 	if cfg.Claude.Enabled == nil && (hasOAuth || hasAPIKey) {
 		errs = append(errs, "claude.enabled is not set but claude_* secrets are configured; "+
-			"add 'claude:\\n  enabled: true\\n  auth_mode: oauth|apikey' to ~/.config/ws/config.yaml "+
-			"or run 'ws setup --force' to regenerate")
+			"add 'claude:\\n  enabled: true\\n  auth_mode: oauth|apikey' to ~/.config/ra/config.yaml "+
+			"or run 'ra setup --force' to regenerate")
 		return errs
 	}
 

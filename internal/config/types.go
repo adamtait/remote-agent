@@ -1,6 +1,6 @@
 package config
 
-// GitConfig is the "git:" section of ~/.config/ws/config.yaml.
+// GitConfig is the "git:" section of ~/.config/ra/config.yaml.
 type GitConfig struct {
 	UserName      string `yaml:"user_name"`
 	UserEmail     string `yaml:"user_email"`
@@ -48,7 +48,7 @@ func (c ClaudeConfig) IsEnabled() bool {
 	return c.Enabled != nil && *c.Enabled
 }
 
-// UserConfig is ~/.config/ws/config.yaml — the exhaustive baseline.
+// UserConfig is ~/.config/ra/config.yaml — the exhaustive baseline.
 type UserConfig struct {
 	Git     GitConfig              `yaml:"git"`
 	Gcloud  GcloudConfig           `yaml:"gcloud"`
@@ -57,7 +57,7 @@ type UserConfig struct {
 	Env     map[string]string      `yaml:"env"`
 }
 
-// ProjectConfig is .ws/config.yaml — required project keys + overrides.
+// ProjectConfig is .ra/config.yaml — required project keys + overrides.
 type ProjectConfig struct {
 	Git     GitConfig              `yaml:"git"`
 	Gcloud  GcloudConfig           `yaml:"gcloud"`
@@ -76,5 +76,5 @@ type Config struct {
 	Env     map[string]string
 
 	WorkstationName   string // <project_id>-<username>, sanitized, ≤63 chars
-	ProjectConfigPath string // absolute path to the .ws/config.yaml that was found
+	ProjectConfigPath string // absolute path to the .ra/config.yaml that was found
 }

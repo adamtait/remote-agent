@@ -14,7 +14,7 @@ func TestEmbeddedDockerfile_NonEmpty(t *testing.T) {
 
 func TestEmbeddedDockerfile_HasEntrypointCopyPath(t *testing.T) {
 	s := string(embeddedDockerfile)
-	want := "COPY .ws/entrypoint.sh"
+	want := "COPY .ra/entrypoint.sh"
 	if !strings.Contains(s, want) {
 		t.Errorf("embedded Dockerfile missing %q; got:\n%s", want, s)
 	}
@@ -47,11 +47,11 @@ func TestEmbedded_WaitScriptHasShebangAndTimeout(t *testing.T) {
 }
 
 func TestEmbedded_EntrypointWritesRunWsEnv(t *testing.T) {
-	if !bytes.Contains(embeddedEntrypoint, []byte("/run/ws/env")) {
-		t.Errorf("expected entrypoint to write /run/ws/env")
+	if !bytes.Contains(embeddedEntrypoint, []byte("/run/ra/env")) {
+		t.Errorf("expected entrypoint to write /run/ra/env")
 	}
-	if !bytes.Contains(embeddedEntrypoint, []byte("/run/ws/ready")) {
-		t.Errorf("expected entrypoint to create /run/ws/ready sentinel")
+	if !bytes.Contains(embeddedEntrypoint, []byte("/run/ra/ready")) {
+		t.Errorf("expected entrypoint to create /run/ra/ready sentinel")
 	}
 	if bytes.Contains(embeddedEntrypoint, []byte("/etc/profile.d/claude-auth.sh")) {
 		t.Errorf("entrypoint should no longer write directly to /etc/profile.d/claude-auth.sh")
@@ -59,8 +59,8 @@ func TestEmbedded_EntrypointWritesRunWsEnv(t *testing.T) {
 }
 
 func TestEmbedded_EntrypointSentinelIsLast(t *testing.T) {
-	idxTouch := bytes.LastIndex(embeddedEntrypoint, []byte(`touch "${WS_READY_SENTINEL}"`))
-	idxEnvWrite := bytes.LastIndex(embeddedEntrypoint, []byte(`"${WS_ENV_FILE}"`))
+	idxTouch := bytes.LastIndex(embeddedEntrypoint, []byte(`touch "${RA_READY_SENTINEL}"`))
+	idxEnvWrite := bytes.LastIndex(embeddedEntrypoint, []byte(`"${RA_ENV_FILE}"`))
 	idxDone := bytes.LastIndex(embeddedEntrypoint, []byte("Entrypoint complete"))
 	if idxTouch < 0 || idxEnvWrite < 0 || idxDone < 0 {
 		t.Fatalf("markers missing: touch=%d env=%d done=%d", idxTouch, idxEnvWrite, idxDone)
@@ -74,8 +74,8 @@ func TestEmbedded_EntrypointSentinelIsLast(t *testing.T) {
 }
 
 func TestEmbedded_DockerfileCopiesStagedProfileD(t *testing.T) {
-	if !bytes.Contains(embeddedDockerfile, []byte(".ws/profile.d.staged/")) {
-		t.Errorf("Dockerfile should COPY .ws/profile.d.staged/ into /etc/profile.d/")
+	if !bytes.Contains(embeddedDockerfile, []byte(".ra/profile.d.staged/")) {
+		t.Errorf("Dockerfile should COPY .ra/profile.d.staged/ into /etc/profile.d/")
 	}
 	if !bytes.Contains(embeddedDockerfile, []byte("/etc/profile.d/")) {
 		t.Errorf("Dockerfile should target /etc/profile.d/")
@@ -133,7 +133,7 @@ func TestEmbeddedDockerfile_PutsNpmGlobalOnLoginShellPath(t *testing.T) {
 	// it must be accompanied by a profile.d export — asserted by the checks
 	// above. Guard that we don't regress to ENV-only.
 	envOnly := bytes.Contains(s, []byte(`ENV PATH="/home/user/.npm-global/bin`)) &&
-		!bytes.Contains(s, []byte("profile.d/00-ws-npm-global-path.sh"))
+		!bytes.Contains(s, []byte("profile.d/00-ra-npm-global-path.sh"))
 	if envOnly {
 		t.Errorf("Dockerfile relies on ENV PATH alone — login shells will not see /home/user/.npm-global/bin")
 	}
@@ -142,10 +142,10 @@ func TestEmbeddedDockerfile_PutsNpmGlobalOnLoginShellPath(t *testing.T) {
 func TestEmbeddedDockerfile_CopiesClaudeScripts(t *testing.T) {
 	s := embeddedDockerfile
 	for _, want := range []string{
-		"COPY .ws/claude/install.sh",
-		"COPY .ws/claude/setup.sh",
-		"/etc/ws/claude-install.sh",
-		"/etc/ws/claude-setup.sh",
+		"COPY .ra/claude/install.sh",
+		"COPY .ra/claude/setup.sh",
+		"/etc/ra/claude-install.sh",
+		"/etc/ra/claude-setup.sh",
 	} {
 		if !bytes.Contains(s, []byte(want)) {
 			t.Errorf("Dockerfile missing %q", want)
@@ -159,19 +159,19 @@ func TestEmbeddedDockerfile_CopiesClaudeScripts(t *testing.T) {
 	}
 	// The runtime gate may be mentioned in comments, but the Dockerfile must
 	// not declare it as a build arg or branch on it inside a RUN.
-	if bytes.Contains(s, []byte("ARG WS_CLAUDE_ENABLED")) {
-		t.Errorf("Dockerfile should not declare ARG WS_CLAUDE_ENABLED — install is runtime-gated, not build-gated")
+	if bytes.Contains(s, []byte("ARG RA_CLAUDE_ENABLED")) {
+		t.Errorf("Dockerfile should not declare ARG RA_CLAUDE_ENABLED — install is runtime-gated, not build-gated")
 	}
-	if bytes.Contains(s, []byte("$WS_CLAUDE_ENABLED")) {
-		t.Errorf("Dockerfile should not branch on $WS_CLAUDE_ENABLED — install is runtime-gated")
+	if bytes.Contains(s, []byte("$RA_CLAUDE_ENABLED")) {
+		t.Errorf("Dockerfile should not branch on $RA_CLAUDE_ENABLED — install is runtime-gated")
 	}
 }
 
 func TestEmbeddedEntrypoint_HasClaudeSourceHook(t *testing.T) {
 	for _, want := range []string{
-		"WS_CLAUDE_ENABLED",
-		"/etc/ws/claude-setup.sh",
-		"ws_claude_handle_secret",
+		"RA_CLAUDE_ENABLED",
+		"/etc/ra/claude-setup.sh",
+		"ra_claude_handle_secret",
 	} {
 		if !bytes.Contains(embeddedEntrypoint, []byte(want)) {
 			t.Errorf("entrypoint.sh missing %q — Claude harness hook broken", want)
@@ -181,8 +181,8 @@ func TestEmbeddedEntrypoint_HasClaudeSourceHook(t *testing.T) {
 
 func TestEmbeddedClaudeSetup_InstallsOnFirstBoot(t *testing.T) {
 	for _, want := range []string{
-		"_ws_claude_install_if_missing",
-		"/etc/ws/claude-install.sh",
+		"_ra_claude_install_if_missing",
+		"/etc/ra/claude-install.sh",
 	} {
 		if !bytes.Contains(embeddedClaudeSetup, []byte(want)) {
 			t.Errorf("setup.sh missing %q — first-boot install hook broken", want)
@@ -216,8 +216,8 @@ func TestEmbeddedClaudeSetup_HasHandlerFunction(t *testing.T) {
 	if len(embeddedClaudeSetup) == 0 {
 		t.Fatal("embeddedClaudeSetup is empty")
 	}
-	if !bytes.Contains(embeddedClaudeSetup, []byte("ws_claude_handle_secret")) {
-		t.Errorf("setup.sh must define ws_claude_handle_secret() for the main dispatch hook")
+	if !bytes.Contains(embeddedClaudeSetup, []byte("ra_claude_handle_secret")) {
+		t.Errorf("setup.sh must define ra_claude_handle_secret() for the main dispatch hook")
 	}
 	for _, want := range []string{"claude_oauth", "claude_apikey", "apiKeyHelper"} {
 		if !bytes.Contains(embeddedClaudeSetup, []byte(want)) {

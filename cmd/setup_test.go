@@ -1,4 +1,4 @@
-// ws/cmd/setup_test.go
+// ra/cmd/setup_test.go
 package cmd_test
 
 import (
@@ -29,11 +29,11 @@ func TestSetupTemplate_WritesFiles(t *testing.T) {
 		t.Fatalf("expected exit 0, got %d. stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
 
-	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
+	projectPath := filepath.Join(cwd, ".ra", "config.yaml")
 	if _, err := os.Stat(projectPath); err != nil {
 		t.Fatalf("expected %s to exist: %v", projectPath, err)
 	}
-	globalPath := filepath.Join(home, ".config", "ws", "config.yaml")
+	globalPath := filepath.Join(home, ".config", "ra", "config.yaml")
 	if _, err := os.Stat(globalPath); err != nil {
 		t.Fatalf("expected %s to exist: %v", globalPath, err)
 	}
@@ -50,10 +50,10 @@ func TestSetupTemplate_ExistingSkipsAndPreservesContent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cwd, ".ra"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
+	projectPath := filepath.Join(cwd, ".ra", "config.yaml")
 	original := []byte("old: content\n")
 	if err := os.WriteFile(projectPath, original, 0o644); err != nil {
 		t.Fatal(err)
@@ -85,10 +85,10 @@ func TestSetupTemplate_ForceOverwrites(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	if err := os.MkdirAll(filepath.Join(cwd, ".ws"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cwd, ".ra"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	projectPath := filepath.Join(cwd, ".ws", "config.yaml")
+	projectPath := filepath.Join(cwd, ".ra", "config.yaml")
 	if err := os.WriteFile(projectPath, []byte("old: content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestSetupTemplate_WritesAssets(t *testing.T) {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		p := filepath.Join(home, ".config", "ws", "template", name)
+		p := filepath.Join(home, ".config", "ra", "template", name)
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
@@ -147,8 +147,8 @@ func TestSetupTemplate_GlobalOnly_SkipsAssets(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".ws", "Dockerfile")); !os.IsNotExist(err) {
-		t.Error("--global-only should not write .ws/Dockerfile")
+	if _, err := os.Stat(filepath.Join(cwd, ".ra", "Dockerfile")); !os.IsNotExist(err) {
+		t.Error("--global-only should not write .ra/Dockerfile")
 	}
 }
 
@@ -168,13 +168,13 @@ func TestSetupTemplate_ProjectOnly_WritesAssets(t *testing.T) {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(home, ".config", "ws", "template", name)); err != nil {
+		if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); err != nil {
 			t.Errorf("missing %s: %v", name, err)
 		}
 	}
 	// Global config should not exist under --project-only.
-	if _, err := os.Stat(filepath.Join(home, ".config", "ws", "config.yaml")); !os.IsNotExist(err) {
-		t.Error("--project-only should not write ~/.config/ws/config.yaml")
+	if _, err := os.Stat(filepath.Join(home, ".config", "ra", "config.yaml")); !os.IsNotExist(err) {
+		t.Error("--project-only should not write ~/.config/ra/config.yaml")
 	}
 }
 
@@ -209,19 +209,19 @@ func TestSetupInteractive_AlwaysScaffoldsAssets(t *testing.T) {
 		t.Fatalf("exit %d. stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
 	// config.yaml still in .ws/
-	if _, err := os.Stat(filepath.Join(cwd, ".ws", "config.yaml")); err != nil {
-		t.Errorf("missing .ws/config.yaml: %v", err)
+	if _, err := os.Stat(filepath.Join(cwd, ".ra", "config.yaml")); err != nil {
+		t.Errorf("missing .ra/config.yaml: %v", err)
 	}
 	// assets in user template dir
 	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(home, ".config", "ws", "template", name)); err != nil {
+		if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); err != nil {
 			t.Errorf("missing user template %s: %v", name, err)
 		}
 	}
 }
 
 func TestSetupInteractive_RerunSkipsExistingAssets(t *testing.T) {
-	// Re-running ws setup must not error on pre-existing scaffold assets;
+	// Re-running ra setup must not error on pre-existing scaffold assets;
 	// OnlyMissing semantics make the scaffold step idempotent.
 	cwd := t.TempDir()
 	home := t.TempDir()
@@ -233,7 +233,7 @@ func TestSetupInteractive_RerunSkipsExistingAssets(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
 	// Pre-create a customized Dockerfile in user template dir that must survive setup.
-	userTemplateDir := filepath.Join(home, ".config", "ws", "template")
+	userTemplateDir := filepath.Join(home, ".config", "ra", "template")
 	if err := os.MkdirAll(userTemplateDir, 0755); err != nil {
 		t.Fatal(err)
 	}

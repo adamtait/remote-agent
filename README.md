@@ -13,7 +13,7 @@ runtime via its attached service account:
   result for ~5 minutes, so rotating propagates within that window with no
   restart.
 - **Claude OAuth** is fetched at each container boot and written to
-  `/run/ws/env` (a tmpfs) and `/etc/environment`. Rotation →
+  `/run/ra/env` (a tmpfs) and `/etc/environment`. Rotation →
   `workstations stop/start`. In OAuth mode, the entrypoint also seeds
   `~/.claude.json` from a second secret holding the `oauthAccount` block
   so interactive `claude` skips the browser-based onboarding wizard
@@ -23,19 +23,19 @@ runtime via its attached service account:
   picked up immediately on the next push/pull/clone, no restart.
 
 The workstation config carries only pointers (GCP secret names and env var
-names) — no sensitive values. Auth mode is chosen at `ws setup` time by
+names) — no sensitive values. Auth mode is chosen at `ra setup` time by
 selecting `claude_oauth` or `claude_apikey` as the Claude secret type.
 
 ## Files
 
-- `main.go` / `cmd/` / `internal/` — `ws` CLI (idempotent provisioning)
+- `main.go` / `cmd/` / `internal/` — `ra` CLI (idempotent provisioning)
 - `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
-- `.ws/Dockerfile` — custom image: code-oss + Node 20 + gh + Claude Code
-- `.ws/entrypoint.sh` — runs at container boot; sets up git, clones the repo
-- `.ws/profile.d/*.sh` — image-baked login-shell scripts. `00-ws-wait.sh`
-  (shipped by `ws setup scaffold`) blocks on the entrypoint's sentinel;
+- `.ra/Dockerfile` — custom image: code-oss + Node 20 + gh + Claude Code
+- `.ra/entrypoint.sh` — runs at container boot; sets up git, clones the repo
+- `.ra/profile.d/*.sh` — image-baked login-shell scripts. `00-ra-wait.sh`
+  (shipped by `ra setup scaffold`) blocks on the entrypoint's sentinel;
   any additional `*.sh` file you drop here is baked into `/etc/profile.d/`.
-- `~/.config/ws/profile.d/*.sh` — same, but scoped to you across all
+- `~/.config/ra/profile.d/*.sh` — same, but scoped to you across all
   projects. On filename collision with a project-level script the
   project-level version wins.
 
@@ -47,7 +47,7 @@ selecting `claude_oauth` or `claude_apikey` as the Claude secret type.
 - A GitHub fine-grained PAT scoped to the target repo with Contents: Read & write
 - If your Google Workspace/Cloud org enforces a session-length / reauth
   policy, the `reauth.googleapis.com` API must be enabled in the workstation
-  project. `ws create` enables it automatically; otherwise
+  project. `ra create` enables it automatically; otherwise
   gcloud's OAuth token refresh (e.g. during `gcloud workstations ssh`) will
   fail with `PERMISSION_DENIED: Reauth API has not been used...`.
 - **Claude Code auth**, one of:
@@ -64,34 +64,34 @@ token and silently bypass your subscription.
 
 ## One-time setup
 
-Build and install the `ws` CLI, then scaffold configs and run `ws create`:
+Build and install the `ra` CLI, then scaffold configs and run `ra create`:
 
 ```bash
-make install                # installs ws to ~/.local/bin
-ws setup                   # writes .ws/config.yaml + ~/.config/ws/config.yaml
-ws create                  # provisions the workstation
+make install                # installs ra to ~/.local/bin
+ra setup                   # writes .ra/config.yaml + ~/.config/ra/config.yaml
+ra create                  # provisions the workstation
 ```
 
-`ws setup` prompts for:
+`ra setup` prompts for:
 1. **GCP project ID** — the project where the workstation cluster lives
 2. **GitHub repo URL** — the repo to clone inside the workstation
 3. **Claude auth mode** — `1` for OAuth token, `2` for API key
 4. **Git identity** — name and email for commits inside the workstation
 
 It writes two config files:
-- **`.ws/config.yaml`** (committed to source control) — project ID, repo URL,
+- **`.ra/config.yaml`** (committed to source control) — project ID, repo URL,
   and optional per-project overrides
-- **`~/.config/ws/config.yaml`** (personal baseline) — all workstation
+- **`~/.config/ra/config.yaml`** (personal baseline) — all workstation
   parameters, git identity, and secret references
 
 After setup, secrets are pushed to Secret Manager the first time you run
-`ws create`. First run takes ~20 minutes (cluster provisioning is the slow
+`ra create`. First run takes ~20 minutes (cluster provisioning is the slow
 part). Subsequent runs skip everything that already exists and finish in
 under a minute.
 
 ### Config schema
 
-**`~/.config/ws/config.yaml`** (personal, exhaustive baseline):
+**`~/.config/ra/config.yaml`** (personal, exhaustive baseline):
 ```yaml
 git:
   user_name: "Alice"
@@ -125,8 +125,8 @@ env: {}
 ### Migrating from Claude-only configs
 
 Pre-v3 configs didn't have a `claude:` block; Claude Code was always installed
-and `claude_oauth`/`claude_apikey` was mandatory. After upgrading, `ws create`
-will refuse to run with a migration error pointing you to `ws setup --force`.
+and `claude_oauth`/`claude_apikey` was mandatory. After upgrading, `ra create`
+will refuse to run with a migration error pointing you to `ra setup --force`.
 
 Old config:
 ```yaml
@@ -148,7 +148,7 @@ secrets:
 To provision without Claude Code (GitHub-only workstation), set
 `claude.enabled: false` and remove the `claude_*` entries from `secrets:`.
 
-**`.ws/config.yaml`** (project-specific, thin overrides):
+**`.ra/config.yaml`** (project-specific, thin overrides):
 ```yaml
 git:
   github_repo_url: https://github.com/org/repo.git
@@ -174,12 +174,12 @@ config.
 ## Day-to-day
 
 ```bash
-ws list           # list workstations
-ws url            # print the browser IDE URL
-ws connect        # SSH into the workstation
-ws logs           # tail workstation logs
-ws stop           # stop (save $)
-ws delete         # delete the workstation
+ra list           # list workstations
+ra url            # print the browser IDE URL
+ra connect        # SSH into the workstation
+ra logs           # tail workstation logs
+ra stop           # stop (save $)
+ra delete         # delete the workstation
 ```
 
 Each targeted command accepts an optional name argument; otherwise the
@@ -190,9 +190,9 @@ Open the printed browser IDE URL, launch a terminal, `cd ~/workspace`, run
 
 ## Rotating credentials
 
-All rotations happen via Secret Manager — no need to re-run `ws create`.
+All rotations happen via Secret Manager — no need to re-run `ra create`.
 The GCP secret names are the `secret_name` values from your
-`~/.config/ws/config.yaml` (defaults shown below).
+`~/.config/ra/config.yaml` (defaults shown below).
 
 ```bash
 # Claude API key — auto-picked up within ~5 min, no restart
@@ -202,22 +202,22 @@ echo -n 'sk-ant-newvalue' | gcloud secrets versions add <claude_apikey secret_na
 # Claude OAuth token — picked up on next `workstations start`
 echo -n 'sk-ant-oat01-newvalue' | gcloud secrets versions add <claude_oauth secret_name> \
     --data-file=- --project=$PROJECT_ID
-ws stop
-ws create    # starts the workstation back up
+ra stop
+ra create    # starts the workstation back up
 
 # GitHub PAT — picked up on next git operation, no restart
 echo -n 'ghp_newvalue' | gcloud secrets versions add <github_pat secret_name> \
     --data-file=- --project=$PROJECT_ID
 ```
 
-To switch Claude auth modes (OAuth ↔ API key), re-run `ws setup` to update
-the secret type in `~/.config/ws/config.yaml`, then re-run `ws create` and
+To switch Claude auth modes (OAuth ↔ API key), re-run `ra setup` to update
+the secret type in `~/.config/ra/config.yaml`, then re-run `ra create` and
 restart the workstation.
 
 ## How auth actually works at runtime
 
-Auth mode is determined at `ws setup` time by which logical secret name you
-configure in `~/.config/ws/config.yaml`: `claude_oauth` or `claude_apikey`.
+Auth mode is determined at `ra setup` time by which logical secret name you
+configure in `~/.config/ra/config.yaml`: `claude_oauth` or `claude_apikey`.
 The container receives the chosen secret name(s) via environment variables at
 boot.
 
@@ -230,10 +230,10 @@ every ~5 minutes, so rotating the secret is transparent.
 
 **Claude OAuth mode** (`claude_oauth` in secrets config). At every container
 boot, `entrypoint.sh` fetches the token from Secret Manager and writes it to
-`/run/ws/env` (alongside `GH_TOKEN`). `/run/ws` is a tmpfs, so the file never
-touches disk. Login shells are held at `/etc/profile.d/00-ws-wait.sh` until
-`entrypoint.sh` creates the `/run/ws/ready` sentinel, at which point
-`00-ws-wait.sh` sources `/run/ws/env` and the shell proceeds. This closes the
+`/run/ra/env` (alongside `GH_TOKEN`). `/run/ra` is a tmpfs, so the file never
+touches disk. Login shells are held at `/etc/profile.d/00-ra-wait.sh` until
+`entrypoint.sh` creates the `/run/ra/ready` sentinel, at which point
+`00-ra-wait.sh` sources `/run/ra/env` and the shell proceeds. This closes the
 race where sshd begins accepting connections before the entrypoint has written
 the token. Non-login sessions (IDE-spawned terminals) continue to read the
 token from `/etc/environment` via PAM. Because `apiKeyHelper` conflicts with
@@ -279,7 +279,7 @@ only to the workstation's service account.
 
 In API-key mode, the Claude key is fetched into memory by `apiKeyHelper`
 on demand and never touches disk. In OAuth mode, the token is written to
-`/run/ws/env` (mode 0644) and to `/etc/environment`; `/run/ws` is a
+`/run/ra/env` (mode 0644) and to `/etc/environment`; `/run/ra` is a
 tmpfs so only `/etc/environment` survives a reboot — and that file is
 rewritten from Secret Manager on the very next boot. The GitHub PAT is
 fetched per-operation by the git credential helper and never persisted.

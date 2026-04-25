@@ -1,4 +1,4 @@
-// ws/cmd/setup.go
+// ra/cmd/setup.go
 package cmd
 
 import (
@@ -22,7 +22,7 @@ func readFlags(cmd *cobra.Command, names ...string) map[string]bool {
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Scaffold ws config files (.ws/config.yaml and ~/.config/ws/config.yaml)",
+	Short: "Scaffold ra config files (.ra/config.yaml and ~/.config/ra/config.yaml)",
 	Long: `Interactive setup: probes the environment for defaults (gcloud project/region,
 git user, git origin) and prompts for each required field. Writes both
 project- and user-level config files unless --project-only or --global-only
@@ -77,13 +77,13 @@ var setupTemplateCmd = &cobra.Command{
 }
 
 // addSharedSetupFlags registers the --force/--project-only/--global-only flags
-// that both "ws setup" and "ws setup template" accept. Keeping one definition
+// that both "ra setup" and "ra setup template" accept. Keeping one definition
 // prevents the two subcommands' help text from drifting.
 func addSharedSetupFlags(c *cobra.Command) {
 	c.Flags().Bool("force", false, "overwrite existing config files")
-	c.Flags().Bool("project-only", false, "scaffold only .ws/config.yaml")
-	c.Flags().Bool("global-only", false, "scaffold only ~/.config/ws/config.yaml")
-	c.Flags().Bool("with-project-assets", false, "also copy Dockerfile/entrypoint.sh into .ws/")
+	c.Flags().Bool("project-only", false, "scaffold only .ra/config.yaml")
+	c.Flags().Bool("global-only", false, "scaffold only ~/.config/ra/config.yaml")
+	c.Flags().Bool("with-project-assets", false, "also copy Dockerfile/entrypoint.sh into .ra/")
 }
 
 func init() {
