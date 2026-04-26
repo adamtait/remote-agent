@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/adamtait/remote-agent/internal/plugins"
 	"github.com/spf13/cobra"
@@ -57,10 +56,16 @@ var pluginInstallCmd = &cobra.Command{
 
 		var destBase string
 		if pluginInstallLocal {
-			wd, _ := os.Getwd()
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("determining working directory: %w", err)
+			}
 			destBase = filepath.Join(wd, ".ra", "plugins")
 		} else {
-			home, _ := os.UserHomeDir()
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("determining home directory: %w", err)
+			}
 			destBase = filepath.Join(home, ".config", "ra", "plugins")
 		}
 		dest := filepath.Join(destBase, p.Name())
@@ -87,8 +92,14 @@ var pluginListCmd = &cobra.Command{
 	Short:             "List installed plugins",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error { return nil },
 	RunE: func(cmd *cobra.Command, args []string) error {
-		home, _ := os.UserHomeDir()
-		wd, _ := os.Getwd()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("determining home directory: %w", err)
+		}
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("determining working directory: %w", err)
+		}
 		userDir := filepath.Join(home, ".config", "ra", "plugins")
 		projDir := filepath.Join(wd, ".ra", "plugins")
 
@@ -114,7 +125,10 @@ var pluginRemoveCmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error { return nil },
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("determining home directory: %w", err)
+		}
 		dest := filepath.Join(home, ".config", "ra", "plugins", name)
 		if _, err := os.Stat(dest); errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("plugin %q not found at %s", name, dest)
@@ -133,7 +147,10 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		rel := strings.TrimPrefix(path, src)
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
 			return os.MkdirAll(target, info.Mode())
