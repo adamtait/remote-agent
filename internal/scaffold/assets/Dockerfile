@@ -1,13 +1,13 @@
 # Custom Cloud Workstations image:
-#   base code-oss IDE  +  Node.js 20  +  git/git-lfs  +  gh CLI  (+ optional harnesses)
+#   base code-oss IDE  +  Node.js 20  +  git/git-lfs  +  gh CLI  (+ optional plugins)
 #
 # The base image runs every executable in /etc/workstation-startup.d/ at boot;
-# we drop our setup script in there. Per-harness setup (e.g. Claude Code) is
-# opt-in: harness scripts are always baked into the image and gated at runtime
-# by container env vars (e.g. RA_CLAUDE_ENABLED). Harness install steps run
-# at first-boot rather than at docker build, because the base image creates
-# the unprivileged 'user' account via runtime startup hooks — it does not
-# exist in /etc/passwd at build time, so build-time `chown user:user` fails.
+# we drop our setup script in there. Per-plugin setup is opt-in: plugin scripts
+# are always baked into the image and gated at runtime by container env vars
+# (e.g. RA_PLUGIN_<NAME>_ENABLED). Plugin install steps run at first-boot
+# rather than at docker build, because the base image creates the unprivileged
+# 'user' account via runtime startup hooks — it does not exist in /etc/passwd
+# at build time, so build-time `chown user:user` fails.
 FROM us-central1-docker.pkg.dev/cloud-workstations-images/predefined/code-oss:latest
 
 USER root
@@ -37,16 +37,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 #     fail the build loudly if that ever changes.
 RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && exit 1)
 
-# --- Optional: Claude Code harness -----------------------------------------
-# Both scripts are always baked into the image; the runtime entrypoint sources
-# claude-setup.sh iff RA_CLAUDE_ENABLED=true (via container env). On first
-# boot, claude-setup.sh shells out to claude-install.sh to npm-install
-# @anthropic-ai/claude-code under /home/user/.npm-global so the package can
-# self-update under the 'user' account.
-RUN mkdir -p /etc/ra
-COPY .ra/claude/install.sh /etc/ra/claude-install.sh
-COPY .ra/claude/setup.sh /etc/ra/claude-setup.sh
-RUN chmod 0755 /etc/ra/claude-install.sh /etc/ra/claude-setup.sh
+# Plugin scripts (setup.sh sourced at boot; install.sh called by setup.sh on first boot)
+RUN mkdir -p /etc/ra/plugins
+COPY .ra/plugins/ /etc/ra/plugins/
+RUN find /etc/ra/plugins -name "*.sh" -exec chmod 0755 {} +
 
 # Make /home/user/.npm-global/bin discoverable by login shells (sshd / IDE
 # terminal) and by `sudo -u user` invocations. A Dockerfile `ENV PATH=` only
