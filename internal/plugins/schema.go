@@ -1,4 +1,3 @@
-// internal/plugins/schema.go
 package plugins
 
 // PluginSchema is the parsed structure of a plugin.yaml file.
@@ -16,7 +15,7 @@ type ConfigField struct {
 	Name        string      `yaml:"name"`
 	Type        string      `yaml:"type"` // "bool", "string", "int"
 	Description string      `yaml:"description"`
-	Default     interface{} `yaml:"default"`
+	Default     any         `yaml:"default"`
 	Required    bool        `yaml:"required"`
 	Options     []string    `yaml:"options"`
 }

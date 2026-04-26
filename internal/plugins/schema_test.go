@@ -1,4 +1,3 @@
-// internal/plugins/schema_test.go
 package plugins
 
 import (
@@ -56,6 +55,9 @@ auth_providers:
 	}
 	if s.Config[0].Name != "enabled" || s.Config[0].Type != "bool" {
 		t.Errorf("Config[0] = %+v", s.Config[0])
+	}
+	if s.Config[0].Default != false {
+		t.Errorf("Config[0].Default = %v, want false", s.Config[0].Default)
 	}
 	if s.Config[1].Required != true || len(s.Config[1].Options) != 2 {
 		t.Errorf("Config[1] = %+v", s.Config[1])
