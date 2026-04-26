@@ -19,8 +19,12 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		RepoName:           "claude-workstation-images",
 		AutoSleepHours:     2,
 		AutoShutdownHours:  12,
-		ClaudeEnabled:      true,
-		ClaudeAuthMode:     scaffold.ClaudeAuthOAuth,
+		PluginFragments: [][2]string{
+			{
+				"claude:\n  enabled: true\n  auth_mode: oauth\n",
+				"  claude_oauth:\n    secret_name: claude-code-oauth-token\n    env_var: CLAUDE_CODE_OAUTH_TOKEN\n    # oauth_account_secret_name: claude-oauth-account   # optional\n",
+			},
+		},
 	}
 	got := scaffold.RenderUserConfig(uv)
 	for _, want := range []string{
@@ -61,7 +65,14 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 }
 
 func TestRenderUserConfig_APIKeyModeSelectsApiKeyEntry(t *testing.T) {
-	uv := scaffold.UserValues{ClaudeEnabled: true, ClaudeAuthMode: scaffold.ClaudeAuthAPIKey}
+	uv := scaffold.UserValues{
+		PluginFragments: [][2]string{
+			{
+				"claude:\n  enabled: true\n  auth_mode: apikey\n",
+				"  claude_apikey:\n    secret_name: anthropic-api-key\n    env_var: ANTHROPIC_API_KEY\n",
+			},
+		},
+	}
 	got := scaffold.RenderUserConfig(uv)
 	if !strings.Contains(got, "claude_apikey:") {
 		t.Errorf("apikey mode did not write claude_apikey entry:\n%s", got)
@@ -78,7 +89,11 @@ func TestRenderUserConfig_APIKeyModeSelectsApiKeyEntry(t *testing.T) {
 }
 
 func TestRenderUserConfig_ClaudeDisabled_OmitsClaudeSecrets(t *testing.T) {
-	uv := scaffold.UserValues{ClaudeEnabled: false}
+	uv := scaffold.UserValues{
+		PluginFragments: [][2]string{
+			{"claude:\n  enabled: false\n", ""},
+		},
+	}
 	got := scaffold.RenderUserConfig(uv)
 	if !strings.Contains(got, "claude:\n  enabled: false") {
 		t.Errorf("expected enabled: false block:\n%s", got)

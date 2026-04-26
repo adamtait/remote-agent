@@ -45,8 +45,17 @@ func fullValidCfg() *config.Config {
 }
 
 func TestValidate_FullConfig_OK(t *testing.T) {
-	if err := config.Validate(fullValidCfg()); err != nil {
+	c := fullValidCfg()
+	if err := config.Validate(c, nil); err != nil {
 		t.Errorf("expected OK, got %v", err)
+	}
+}
+
+func TestValidate_PluginErrorsAreForwarded(t *testing.T) {
+	c := fullValidCfg()
+	err := config.Validate(c, []string{"some-plugin-reported-error"})
+	if err == nil || !strings.Contains(err.Error(), "some-plugin-reported-error") {
+		t.Errorf("expected plugin error to be forwarded, got %v", err)
 	}
 }
 
@@ -74,112 +83,17 @@ func TestValidate_MissingRequiredKeys(t *testing.T) {
 	for _, tc := range tcs {
 		c := fullValidCfg()
 		tc.mutate(c)
-		err := config.Validate(c)
+		err := config.Validate(c, nil)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("want error mentioning %q, got %v", tc.want, err)
 		}
 	}
 }
 
-func TestValidate_Claude_EnabledOAuth_OK(t *testing.T) {
-	c := fullValidCfg()
-	// fullValidCfg already sets enabled=true + auth_mode=oauth + claude_oauth.
-	if err := config.Validate(c); err != nil {
-		t.Errorf("expected OK, got %v", err)
-	}
-}
-
-func TestValidate_Claude_EnabledAPIKey_OK(t *testing.T) {
-	c := fullValidCfg()
-	c.Claude.AuthMode = "apikey"
-	delete(c.Secrets, "claude_oauth")
-	c.Secrets["claude_apikey"] = config.SecretEntry{SecretName: "anthropic-api-key", EnvVar: "ANTHROPIC_API_KEY"}
-	if err := config.Validate(c); err != nil {
-		t.Errorf("expected OK, got %v", err)
-	}
-}
-
-func TestValidate_Claude_Disabled_OK(t *testing.T) {
-	c := fullValidCfg()
-	c.Claude = config.ClaudeConfig{Enabled: boolPtr(false)}
-	delete(c.Secrets, "claude_oauth")
-	if err := config.Validate(c); err != nil {
-		t.Errorf("expected OK when claude disabled and no claude_* secrets, got %v", err)
-	}
-}
-
-func TestValidate_Claude_EnabledMissingMatchingSecret(t *testing.T) {
-	c := fullValidCfg()
-	delete(c.Secrets, "claude_oauth")
-	err := config.Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "claude_oauth") {
-		t.Errorf("want missing claude_oauth error, got %v", err)
-	}
-}
-
-func TestValidate_Claude_EnabledAuthModeMismatch(t *testing.T) {
-	c := fullValidCfg()
-	c.Claude.AuthMode = "apikey"
-	err := config.Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "claude_apikey") {
-		t.Errorf("want missing claude_apikey error, got %v", err)
-	}
-}
-
-func TestValidate_Claude_EnabledBothSecretsPresent(t *testing.T) {
-	c := fullValidCfg()
-	c.Secrets["claude_apikey"] = config.SecretEntry{SecretName: "anthropic-api-key", EnvVar: "ANTHROPIC_API_KEY"}
-	err := config.Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "claude_apikey") {
-		t.Errorf("want both-secrets error, got %v", err)
-	}
-}
-
-func TestValidate_Claude_EnabledMissingAuthMode(t *testing.T) {
-	c := fullValidCfg()
-	c.Claude.AuthMode = ""
-	err := config.Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "auth_mode") {
-		t.Errorf("want auth_mode-required error, got %v", err)
-	}
-}
-
-func TestValidate_Claude_EnabledBadAuthMode(t *testing.T) {
-	c := fullValidCfg()
-	c.Claude.AuthMode = "nope"
-	err := config.Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "auth_mode") {
-		t.Errorf("want bad-auth_mode error, got %v", err)
-	}
-}
-
-func TestValidate_Claude_DisabledButClaudeSecretPresent(t *testing.T) {
-	c := fullValidCfg()
-	c.Claude = config.ClaudeConfig{Enabled: boolPtr(false)}
-	// claude_oauth still in secrets from fullValidCfg
-	err := config.Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "claude_oauth") {
-		t.Errorf("want claude_oauth-present-but-disabled error, got %v", err)
-	}
-}
-
-func TestValidate_Claude_MigrationSignal(t *testing.T) {
-	// Legacy config: no claude: block but claude_oauth secret present.
-	c := fullValidCfg()
-	c.Claude = config.ClaudeConfig{} // Enabled = nil
-	err := config.Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "claude.enabled is not set") {
-		t.Errorf("want migration-signal error, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "ra setup --force") {
-		t.Errorf("migration error should point at 'ra setup --force', got %v", err)
-	}
-}
-
 func TestValidate_GithubPatRequired(t *testing.T) {
 	c := fullValidCfg()
 	delete(c.Secrets, "github_pat")
-	if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), "github_pat") {
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "github_pat") {
 		t.Errorf("want missing-github_pat error, got %v", err)
 	}
 }
@@ -187,7 +101,7 @@ func TestValidate_GithubPatRequired(t *testing.T) {
 func TestValidate_SecretEnvVarShape(t *testing.T) {
 	c := fullValidCfg()
 	c.Secrets["claude_oauth"] = config.SecretEntry{SecretName: "x", EnvVar: "not-valid"}
-	if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), "env_var") {
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "env_var") {
 		t.Errorf("want env_var-shape error, got %v", err)
 	}
 }
@@ -195,7 +109,7 @@ func TestValidate_SecretEnvVarShape(t *testing.T) {
 func TestValidate_SecretSecretNameNonEmpty(t *testing.T) {
 	c := fullValidCfg()
 	c.Secrets["claude_oauth"] = config.SecretEntry{SecretName: "", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"}
-	if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), "secret_name") {
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "secret_name") {
 		t.Errorf("want secret_name-missing error, got %v", err)
 	}
 }
@@ -203,7 +117,7 @@ func TestValidate_SecretSecretNameNonEmpty(t *testing.T) {
 func TestValidate_EnvVarCollision_BetweenSecrets(t *testing.T) {
 	c := fullValidCfg()
 	c.Secrets["extra"] = config.SecretEntry{SecretName: "ex", EnvVar: "GH_TOKEN"} // collides with github_pat
-	if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), "GH_TOKEN") {
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "GH_TOKEN") {
 		t.Errorf("want collision error, got %v", err)
 	}
 }
@@ -211,7 +125,7 @@ func TestValidate_EnvVarCollision_BetweenSecrets(t *testing.T) {
 func TestValidate_EnvVarCollision_SecretAndEnv(t *testing.T) {
 	c := fullValidCfg()
 	c.Env = map[string]string{"GH_TOKEN": "whatever"}
-	if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), "GH_TOKEN") {
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "GH_TOKEN") {
 		t.Errorf("want collision error between secret and env, got %v", err)
 	}
 }
@@ -220,7 +134,7 @@ func TestValidate_EnvVarCollision_Reserved(t *testing.T) {
 	for _, reserved := range []string{"GCP_PROJECT_ID", "GITHUB_REPO_URL", "GIT_USER_NAME", "RA_SECRETS", "RA_SECRET_FOO_NAME", "RA_CLAUDE_ENABLED", "RA_CODEX_ENABLED"} {
 		c := fullValidCfg()
 		c.Env = map[string]string{reserved: "v"}
-		if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), reserved) {
+		if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), reserved) {
 			t.Errorf("reserved %q not caught: %v", reserved, err)
 		}
 	}
@@ -229,7 +143,7 @@ func TestValidate_EnvVarCollision_Reserved(t *testing.T) {
 func TestValidate_EnvKeyShape(t *testing.T) {
 	c := fullValidCfg()
 	c.Env = map[string]string{"not-valid": "x"}
-	if err := config.Validate(c); err == nil || !strings.Contains(err.Error(), "env") {
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "env") {
 		t.Errorf("want env key-shape error, got %v", err)
 	}
 }

@@ -9,23 +9,21 @@ import (
 	"path/filepath"
 )
 
-// AssetNames enumerates the build assets ra knows how to scaffold.
+// AssetNames enumerates the core build assets ra knows how to scaffold.
+// Plugin-contributed assets (e.g. claude/install.sh) are not listed here;
+// they are returned by each plugin's Assets() method.
 var AssetNames = []string{
 	"Dockerfile",
 	"entrypoint.sh",
 	"profile.d/00-ra-wait.sh",
-	"claude/install.sh",
-	"claude/setup.sh",
 }
 
-// AssetMode returns the file mode ra uses for a materialized asset.
+// AssetMode returns the file mode ra uses for a core materialized asset.
 // Shell scripts are 0755; other files are 0644.
 func AssetMode(name string) os.FileMode {
 	switch name {
 	case "entrypoint.sh",
-		"profile.d/00-ra-wait.sh",
-		"claude/install.sh",
-		"claude/setup.sh":
+		"profile.d/00-ra-wait.sh":
 		return 0755
 	default:
 		return 0644
@@ -91,10 +89,6 @@ func embeddedFor(name string) ([]byte, bool) {
 		return embeddedEntrypoint, true
 	case "profile.d/00-ra-wait.sh":
 		return embeddedWaitScript, true
-	case "claude/install.sh":
-		return embeddedClaudeInstall, true
-	case "claude/setup.sh":
-		return embeddedClaudeSetup, true
 	default:
 		return nil, false
 	}

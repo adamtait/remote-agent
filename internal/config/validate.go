@@ -12,6 +12,8 @@ import (
 var envVarPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
 // reservedEnvVars are set directly by ra create; configs must not shadow them.
+// Plugin authors: each plugin that emits an RA_<PLUGIN>_ENABLED env var via
+// ContainerEnvPairs must also add that name here to prevent user collisions.
 var reservedEnvVars = []string{
 	"GCP_PROJECT_ID",
 	"GITHUB_REPO_URL",
@@ -23,8 +25,9 @@ var reservedEnvVars = []string{
 }
 
 // Validate asserts the merged Config is complete and internally consistent.
+// pluginErrs are additional errors from registered plugins (e.g. claude validation).
 // Run from cmd/root.go's PersistentPreRunE for every command except setup.
-func Validate(cfg *Config) error {
+func Validate(cfg *Config, pluginErrs []string) error {
 	var errs []string
 
 	required := []struct {
@@ -53,8 +56,7 @@ func Validate(cfg *Config) error {
 		}
 	}
 
-	// Claude harness: enabled flag gates auth_mode + claude_* secret requirements.
-	errs = append(errs, validateClaude(cfg)...)
+	errs = append(errs, pluginErrs...)
 
 	// github_pat required (shared infrastructure, not Claude-specific).
 	if _, ok := cfg.Secrets["github_pat"]; !ok {
@@ -106,52 +108,3 @@ func Validate(cfg *Config) error {
 	return errors.New("config validation failed:\n  - " + strings.Join(errs, "\n  - "))
 }
 
-// validateClaude enforces the claude.enabled ↔ secrets.claude_* contract.
-// Legacy configs (no claude: block) that still have claude_* secrets get a
-// targeted migration error pointing at `ra setup --force`.
-func validateClaude(cfg *Config) []string {
-	var errs []string
-	_, hasOAuth := cfg.Secrets["claude_oauth"]
-	_, hasAPIKey := cfg.Secrets["claude_apikey"]
-
-	// Migration signal: claude section absent but claude_* secrets present.
-	if cfg.Claude.Enabled == nil && (hasOAuth || hasAPIKey) {
-		errs = append(errs, "claude.enabled is not set but claude_* secrets are configured; "+
-			"add 'claude:\\n  enabled: true\\n  auth_mode: oauth|apikey' to ~/.config/ra/config.yaml "+
-			"or run 'ra setup --force' to regenerate")
-		return errs
-	}
-
-	if cfg.Claude.IsEnabled() {
-		switch cfg.Claude.AuthMode {
-		case "oauth":
-			if !hasOAuth {
-				errs = append(errs, "claude.enabled=true with auth_mode=oauth requires secrets.claude_oauth")
-			}
-			if hasAPIKey {
-				errs = append(errs, "claude.auth_mode=oauth but secrets.claude_apikey is also set; remove one")
-			}
-		case "apikey":
-			if !hasAPIKey {
-				errs = append(errs, "claude.enabled=true with auth_mode=apikey requires secrets.claude_apikey")
-			}
-			if hasOAuth {
-				errs = append(errs, "claude.auth_mode=apikey but secrets.claude_oauth is also set; remove one")
-			}
-		case "":
-			errs = append(errs, "claude.auth_mode is required when claude.enabled=true (oauth or apikey)")
-		default:
-			errs = append(errs, fmt.Sprintf("claude.auth_mode must be \"oauth\" or \"apikey\", got %q", cfg.Claude.AuthMode))
-		}
-		return errs
-	}
-
-	// Disabled (explicitly or absent-plus-no-claude-secrets): claude_* must not be present.
-	if hasOAuth {
-		errs = append(errs, "secrets.claude_oauth is set but claude.enabled is not true; set claude.enabled=true (auth_mode=oauth) or remove the secret")
-	}
-	if hasAPIKey {
-		errs = append(errs, "secrets.claude_apikey is set but claude.enabled is not true; set claude.enabled=true (auth_mode=apikey) or remove the secret")
-	}
-	return errs
-}

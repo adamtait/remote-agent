@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
 type ScaffoldAssetsOptions struct {
@@ -22,6 +24,9 @@ type ScaffoldAssetsOptions struct {
 	Force       bool
 	DryRun      bool
 	OnlyMissing bool
+
+	// ExtraAssets are plugin-contributed assets to materialize alongside core assets.
+	ExtraAssets []plugins.Asset
 }
 
 // AssetResult records, per asset name, whether the file was (or would be)
@@ -93,6 +98,44 @@ func ScaffoldAssets(opts ScaffoldAssetsOptions) (AssetResult, error) {
 		}
 		res.wrote[name] = true
 		fmt.Fprintf(opts.Stdout, "wrote %s (from %s)\n", name, source)
+	}
+
+	for _, asset := range opts.ExtraAssets {
+		target := filepath.Join(opts.TargetDir, asset.Name)
+		if !opts.DryRun {
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return res, fmt.Errorf("creating parent dir for %s: %w", target, err)
+			}
+		}
+
+		_, statErr := os.Stat(target)
+		exists := statErr == nil
+		if !exists && !errors.Is(statErr, os.ErrNotExist) {
+			return res, fmt.Errorf("stat %s: %w", target, statErr)
+		}
+
+		if exists {
+			switch {
+			case opts.OnlyMissing:
+				res.source[asset.Name] = "preexisting"
+				fmt.Fprintf(opts.Stdout, "skip %s (already present)\n", asset.Name)
+				continue
+			case !opts.Force:
+				return res, fmt.Errorf("%s already exists; re-run with --force to overwrite", target)
+			}
+		}
+
+		if opts.DryRun {
+			fmt.Fprintf(opts.Stdout, "would write %s (%d bytes, from embedded-default)\n", asset.Name, len(asset.Bytes))
+			continue
+		}
+
+		if err := writeFileAtomic(target, asset.Bytes, asset.FileMode); err != nil {
+			return res, err
+		}
+		res.wrote[asset.Name] = true
+		res.source[asset.Name] = "embedded-default"
+		fmt.Fprintf(opts.Stdout, "wrote %s (from embedded-default)\n", asset.Name)
 	}
 
 	return res, nil
