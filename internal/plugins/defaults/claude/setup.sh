@@ -92,13 +92,18 @@ case "${RA_PLUGIN_CLAUDE_AUTH_PROVIDER}" in
         if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
             log "claude: ANTHROPIC_API_KEY not set; auth may fail."
         else
+            cat > "${APIKEY_HELPER_PATH}" <<EOF
+#!/bin/bash
+echo "${ANTHROPIC_API_KEY}"
+EOF
+            chmod 0755 "${APIKEY_HELPER_PATH}"
             mkdir -p "${CLAUDE_SETTINGS_DIR}"
             chown "${USER_NAME}:${USER_NAME}" "${CLAUDE_SETTINGS_DIR}"
             if [[ ! -f "${CLAUDE_SETTINGS_PATH}" ]]; then
-                printf '{"apiKeyHelper": "%s"}\n' "${ANTHROPIC_API_KEY}" > "${CLAUDE_SETTINGS_PATH}"
+                printf '{"apiKeyHelper": "%s"}\n' "${APIKEY_HELPER_PATH}" > "${CLAUDE_SETTINGS_PATH}"
             elif command -v jq >/dev/null 2>&1; then
-                local tmp; tmp=$(mktemp)
-                jq --arg k "${ANTHROPIC_API_KEY}" '.apiKeyHelper = $k' \
+                tmp=$(mktemp)
+                jq --arg h "${APIKEY_HELPER_PATH}" '.apiKeyHelper = $h' \
                     "${CLAUDE_SETTINGS_PATH}" > "${tmp}" && mv "${tmp}" "${CLAUDE_SETTINGS_PATH}"
             fi
             chown "${USER_NAME}:${USER_NAME}" "${CLAUDE_SETTINGS_PATH}"
