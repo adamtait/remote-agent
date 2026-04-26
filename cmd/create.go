@@ -49,9 +49,6 @@ func buildContainerEnv(cfg *config.Config) string {
 		tok := logicalNameToEnvToken(logical)
 		add("RA_SECRET_"+tok+"_NAME", s.SecretName)
 		add("RA_SECRET_"+tok+"_VAR", s.EnvVar)
-		if s.OAuthAccountSecretName != "" {
-			add("RA_SECRET_"+tok+"_OAUTH_ACCOUNT_SECRET_NAME", s.OAuthAccountSecretName)
-		}
 	}
 
 	envKeys := make([]string, 0, len(cfg.Env))
@@ -216,12 +213,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		if err := ensureSecret(r, cfg.Gcloud.Project, s.SecretName, prompt); err != nil {
 			return fmt.Errorf("ensuring secret %s: %w", s.SecretName, err)
 		}
-		if s.OAuthAccountSecretName != "" {
-			p := fmt.Sprintf("Enter value for oauth_account secret %q", s.OAuthAccountSecretName)
-			if err := ensureSecret(r, cfg.Gcloud.Project, s.OAuthAccountSecretName, p); err != nil {
-				return fmt.Errorf("ensuring oauth_account secret %s: %w", s.OAuthAccountSecretName, err)
-			}
-		}
 	}
 
 	// Step 5 — Service account and IAM
@@ -242,10 +233,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		if !seen[s.SecretName] {
 			secretNames = append(secretNames, s.SecretName)
 			seen[s.SecretName] = true
-		}
-		if s.OAuthAccountSecretName != "" && !seen[s.OAuthAccountSecretName] {
-			secretNames = append(secretNames, s.OAuthAccountSecretName)
-			seen[s.OAuthAccountSecretName] = true
 		}
 	}
 	for _, secret := range secretNames {
@@ -563,8 +550,8 @@ func resolvePluginAsset(home string, asset plugins.Asset) ([]byte, error) {
 
 // dockerBuildArgs returns the buildx args used by `ra create`, centralized so
 // tests can assert on the exact flags. The Dockerfile is harness-agnostic at
-// build time — Claude install is gated at runtime by the RA_CLAUDE_ENABLED
-// container env var, not by a build arg.
+// build time — Claude install is gated at runtime by the `RA_PLUGIN_CLAUDE_ENABLED`
+// env var emitted by the claude plugin.
 func dockerBuildArgs(imageURI string) []string {
 	return []string{
 		"buildx", "build",

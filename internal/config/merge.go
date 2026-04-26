@@ -1,4 +1,3 @@
-// ws/internal/config/merge.go
 package config
 
 import (
@@ -48,10 +47,7 @@ func Merge(u *UserConfig, project *ProjectConfig) (*Config, error) {
 	}
 	cfg.Gcloud.Workstation = lift(u.Gcloud.Workstation, project.Gcloud.Workstation)
 
-	cfg.Claude = ClaudeConfig{
-		Enabled:  pickBoolPtr(project.Claude.Enabled, u.Claude.Enabled),
-		AuthMode: pick(project.Claude.AuthMode, u.Claude.AuthMode),
-	}
+	cfg.Plugins = mergePluginsMap(u.Plugins, project.Plugins)
 
 	// Secrets: user map seeds, project entries override or add by logical name.
 	cfg.Secrets = mergeSecretMap(u.Secrets, project.Secrets)
@@ -91,20 +87,6 @@ func pickIntPtr(p, u *int) *int {
 	return nil
 }
 
-// pickBoolPtr: *bool lets us distinguish "unset" (nil) from false.
-// Project override only applies if project's pointer is non-nil.
-func pickBoolPtr(p, u *bool) *bool {
-	if p != nil {
-		v := *p
-		return &v
-	}
-	if u != nil {
-		v := *u
-		return &v
-	}
-	return nil
-}
-
 func mergeSecretMap(u, project map[string]SecretEntry) map[string]SecretEntry {
 	out := map[string]SecretEntry{}
 	for k, v := range u {
@@ -118,6 +100,17 @@ func mergeSecretMap(u, project map[string]SecretEntry) map[string]SecretEntry {
 
 func mergeStringMap(u, project map[string]string) map[string]string {
 	out := map[string]string{}
+	for k, v := range u {
+		out[k] = v
+	}
+	for k, v := range project {
+		out[k] = v
+	}
+	return out
+}
+
+func mergePluginsMap(u, project map[string]map[string]interface{}) map[string]map[string]interface{} {
+	out := make(map[string]map[string]interface{})
 	for k, v := range u {
 		out[k] = v
 	}

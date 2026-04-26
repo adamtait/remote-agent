@@ -124,8 +124,9 @@ func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T)
 		`# gcloud:`,
 		`#   workstation:`,
 		`#     machine_type: e2-standard-8`,
-		`# claude:`,
-		`#   enabled: false`,
+		`# plugins:`,
+		`#   claude:`,
+		`#     enabled: false`,
 		`# secrets:`,
 		`# env:`,
 	} {
@@ -137,7 +138,7 @@ func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T)
 
 func TestRenderProjectConfig_ZeroValuesStillShowCommentedExamples(t *testing.T) {
 	got := scaffold.RenderProjectConfig(scaffold.ProjectValues{})
-	for _, want := range []string{`# gcloud:`, `#   workstation:`, `# claude:`, `# secrets:`, `# env:`} {
+	for _, want := range []string{`# gcloud:`, `#   workstation:`, `# plugins:`, `#   claude:`, `# secrets:`, `# env:`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing commented example %q", want)
 		}

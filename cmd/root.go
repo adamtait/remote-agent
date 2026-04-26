@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/plugins"
-	claudeplugin "github.com/adamtait/remote-agent/internal/plugins/claude"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -21,7 +21,18 @@ var (
 )
 
 func init() {
-	reg = plugins.NewRegistry(claudeplugin.New())
+	home, err := os.UserHomeDir()
+	if err != nil {
+		reg = plugins.NewRegistry(nil)
+		return
+	}
+	userPluginsDir := filepath.Join(home, ".config", "ra", "plugins")
+	loaded, err := plugins.LoadAll(userPluginsDir, "")
+	if err != nil {
+		reg = plugins.NewRegistry(nil)
+		return
+	}
+	reg = plugins.NewRegistry(loaded)
 }
 
 var rootCmd = &cobra.Command{
@@ -59,6 +70,15 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 		cfg.ProjectConfigPath = projectCfgPath
+		projectPluginsDir := filepath.Join(filepath.Dir(projectCfgPath), "plugins")
+		loaded, err := plugins.LoadAll(
+			filepath.Join(home, ".config", "ra", "plugins"),
+			projectPluginsDir,
+		)
+		if err != nil {
+			return fmt.Errorf("loading plugins: %w", err)
+		}
+		reg = plugins.NewRegistry(loaded)
 		if err := config.Validate(cfg, reg.ValidateAll(cfg)); err != nil {
 			return err
 		}

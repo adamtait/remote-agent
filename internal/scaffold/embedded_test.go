@@ -125,42 +125,47 @@ func TestEmbeddedDockerfile_PutsNpmGlobalOnLoginShellPath(t *testing.T) {
 	}
 }
 
-func TestEmbeddedDockerfile_CopiesClaudeScripts(t *testing.T) {
+func TestEmbeddedDockerfile_CopiesPluginDirectory(t *testing.T) {
 	s := embeddedDockerfile
 	for _, want := range []string{
-		"COPY .ra/claude/install.sh",
-		"COPY .ra/claude/setup.sh",
-		"/etc/ra/claude-install.sh",
-		"/etc/ra/claude-setup.sh",
+		"COPY .ra/plugins/",
+		"/etc/ra/plugins",
 	} {
 		if !bytes.Contains(s, []byte(want)) {
 			t.Errorf("Dockerfile missing %q", want)
 		}
 	}
-	// Claude install moved to runtime (the 'user' account does not exist
-	// in /etc/passwd at docker build time). The Dockerfile must not invoke
-	// the npm install at build time, nor rely on a build arg to gate it.
-	if bytes.Contains(s, []byte("npm install -g @anthropic-ai/claude-code")) {
-		t.Errorf("Dockerfile should delegate Claude npm install to runtime, not inline it")
-	}
-	// The runtime gate may be mentioned in comments, but the Dockerfile must
-	// not declare it as a build arg or branch on it inside a RUN.
-	if bytes.Contains(s, []byte("ARG RA_CLAUDE_ENABLED")) {
-		t.Errorf("Dockerfile should not declare ARG RA_CLAUDE_ENABLED — install is runtime-gated, not build-gated")
-	}
-	if bytes.Contains(s, []byte("$RA_CLAUDE_ENABLED")) {
-		t.Errorf("Dockerfile should not branch on $RA_CLAUDE_ENABLED — install is runtime-gated")
+	// Old claude-specific paths must not appear.
+	for _, banned := range []string{
+		"COPY .ra/claude/install.sh",
+		"COPY .ra/claude/setup.sh",
+		"/etc/ra/claude-install.sh",
+		"/etc/ra/claude-setup.sh",
+	} {
+		if bytes.Contains(s, []byte(banned)) {
+			t.Errorf("Dockerfile should not reference old claude path %q", banned)
+		}
 	}
 }
 
-func TestEmbeddedEntrypoint_HasClaudeSourceHook(t *testing.T) {
+func TestEmbeddedEntrypoint_HasPluginSourcingLoop(t *testing.T) {
 	for _, want := range []string{
+		"/etc/ra/plugins/",
+		"setup.sh",
+		"Sourcing plugin:",
+	} {
+		if !bytes.Contains(embeddedEntrypoint, []byte(want)) {
+			t.Errorf("entrypoint.sh missing %q — plugin sourcing loop broken", want)
+		}
+	}
+	// Old claude-specific hooks must not appear.
+	for _, banned := range []string{
 		"RA_CLAUDE_ENABLED",
 		"/etc/ra/claude-setup.sh",
 		"ra_claude_handle_secret",
 	} {
-		if !bytes.Contains(embeddedEntrypoint, []byte(want)) {
-			t.Errorf("entrypoint.sh missing %q — Claude harness hook broken", want)
+		if bytes.Contains(embeddedEntrypoint, []byte(banned)) {
+			t.Errorf("entrypoint.sh should not reference old claude symbol %q", banned)
 		}
 	}
 }

@@ -2,30 +2,20 @@
 #
 # Runs at every workstation boot (as root, inside the container).
 #
-# Contract (v4):
+# Contract (v5):
 #   ra create emits these env vars into the container config:
 #     GCP_PROJECT_ID, GITHUB_REPO_URL, GIT_USER_NAME, GIT_USER_EMAIL
-#     RA_CLAUDE_ENABLED=true|false     — toggles the Claude Code harness
+#     RA_PLUGIN_<NAME>_ENABLED=true|false  — per-plugin toggle
+#     RA_PLUGIN_<NAME>_AUTH_PROVIDER=<provider>  — active auth provider
 #     RA_SECRETS=<pipe-separated logical names>
 #     for each logical <name>:
 #       RA_SECRET_<UPPERCASE_NAME>_NAME=<gcp secret name>
 #       RA_SECRET_<UPPERCASE_NAME>_VAR=<container env var name>
-#       (optional, claude_oauth only) RA_SECRET_CLAUDE_OAUTH_OAUTH_ACCOUNT_SECRET_NAME
 #     plus any static key=value entries from config.env.
 #
 # Logical names with special handling (still conform to the schema):
-#     claude_oauth   → (claude.enabled=true) fetch, export $VAR, seed
-#                      ~/.claude.json onboarding. Handled by claude-setup.sh.
-#     claude_apikey  → (claude.enabled=true) install apiKeyHelper (fetches
-#                      every call, ~5min TTL). Handled by claude-setup.sh.
 #     github_pat     → install git credential helper AND export $VAR for `gh`.
 #     (any other)    → fetch at boot, export $VAR. Rotation requires restart.
-#
-# Harness plugin contract:
-#   When RA_CLAUDE_ENABLED=true, /etc/ra/claude-setup.sh is sourced before the
-#   dispatch loop. It defines `ra_claude_handle_secret(logical, secret_name,
-#   target_env_var)` which returns 0 if it handled the logical name (and the
-#   main loop then `continue`s) or 1 to fall through to the main case block.
 #
 set -euo pipefail
 
@@ -61,23 +51,10 @@ command -v gcloud >/dev/null 2>&1 || {
 }
 
 # Clear stale auth state common to every boot (git helper, GH_TOKEN line).
-# Harness-owned state (e.g. Claude's apiKeyHelper, CLAUDE_CODE_OAUTH_TOKEN)
-# is cleared by the harness's own setup.sh at source time, so disabling the
-# harness doesn't leave ambient credentials behind.
+# Plugin-owned state is cleared by each plugin's own setup.sh at source time,
+# so disabling a plugin doesn't leave ambient credentials behind.
 rm -f "${GIT_HELPER_PATH}"
 sed -i '/^GH_TOKEN=/d' /etc/environment
-
-# =============================================================================
-# Load optional harness plugins.
-# Each plugin may define ra_<harness>_handle_secret(logical, secret, env_var)
-# which returns 0 if it handled the secret, 1 otherwise. Plugins are sourced
-# before the dispatch loop so handler functions are in scope.
-# =============================================================================
-if [[ "${RA_CLAUDE_ENABLED:-false}" == "true" && -f /etc/ra/claude-setup.sh ]]; then
-    log "Claude harness enabled; sourcing /etc/ra/claude-setup.sh."
-    # shellcheck source=/dev/null
-    source /etc/ra/claude-setup.sh
-fi
 
 mkdir -p "${RA_RUNTIME_DIR}"
 chmod 0755 "${RA_RUNTIME_DIR}"
@@ -98,12 +75,6 @@ for logical in "${ra_secret_names[@]}"; do
     if [[ -z "${secret_name}" || -z "${target_env_var}" ]]; then
         log "ERROR: secret ${logical} is missing ${name_var} or ${env_var_var}; skipping."
         continue
-    fi
-
-    if declare -f ra_claude_handle_secret >/dev/null 2>&1; then
-        if ra_claude_handle_secret "${logical}" "${secret_name}" "${target_env_var}"; then
-            continue
-        fi
     fi
 
     case "${logical}" in
@@ -140,14 +111,6 @@ EOF
             fi
             ;;
 
-        claude_oauth|claude_apikey)
-            # Reached only when the matching harness is disabled — validation
-            # should have already rejected the config, so this is defense in
-            # depth. Skip quietly to avoid exporting a Claude token into an
-            # image that has no Claude binary to consume it.
-            log "WARNING: ${logical} configured but RA_CLAUDE_ENABLED!=true; skipping."
-            ;;
-
         *)
             log "generic: fetching ${secret_name} → ${target_env_var}"
             val=$(gcloud secrets versions access latest \
@@ -162,6 +125,20 @@ EOF
             ;;
     esac
 done
+
+# =============================================================================
+# Source plugin setup scripts. Each script guards itself with
+# RA_PLUGIN_<NAME>_ENABLED checks; secrets are already in env from the
+# dispatch loop above.
+# =============================================================================
+for _ra_plugin_setup in /etc/ra/plugins/*/setup.sh; do
+    if [[ -f "${_ra_plugin_setup}" ]]; then
+        log "Sourcing plugin: ${_ra_plugin_setup}"
+        # shellcheck source=/dev/null
+        source "${_ra_plugin_setup}"
+    fi
+done
+unset _ra_plugin_setup
 
 # =============================================================================
 # First-boot-only: gitconfig + repo clone.

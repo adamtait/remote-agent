@@ -120,26 +120,14 @@ gcloud:
     auto_sleep_hours: %d
     auto_shutdown_hours: %d
 
-# claude — toggles the Claude Code harness in the workstation image.
-# When enabled=false the @anthropic-ai/claude-code npm package is not
-# installed and claude_oauth / claude_apikey secrets must not be set.
-# When enabled=true, auth_mode selects which claude_* secret is required:
-#   auth_mode=oauth   → requires secrets.claude_oauth
-#   auth_mode=apikey  → requires secrets.claude_apikey
+# plugins — per-plugin config. Each plugin declares its own fields;
+# the enabled/auth_provider fields are conventional. Run 'ra plugin list'
+# to see installed plugins.
 %s
 # secrets — map GCP Secret Manager secrets to container env vars. Each
-# entry has the same {secret_name, env_var} shape. ws recognizes these
-# logical names and wires them into credential helpers; any other name
-# is treated generically (fetched at boot, exported as env_var).
+# entry has the same {secret_name, env_var} shape. Logical names with
+# special handling:
 #
-#   claude_oauth  → (claude.enabled=true, auth_mode=oauth) fetches at
-#                   boot, exports env_var (CLAUDE_CODE_OAUTH_TOKEN) and
-#                   seeds ~/.claude.json onboarding if
-#                   oauth_account_secret_name is set.
-#   claude_apikey → (claude.enabled=true, auth_mode=apikey) installs
-#                   Claude Code's apiKeyHelper — re-fetches every ~5 min
-#                   (rotation without restart). env_var is the canonical
-#                   name (ANTHROPIC_API_KEY) for documentation.
 #   github_pat    → installs git's credential helper (fresh fetch per git
 #                   op) AND exports env_var (GH_TOKEN) for `+"`gh`"+` CLI.
 #                   Env var is stale on rotation; git operations stay fresh.
@@ -186,9 +174,10 @@ gcloud:
 #     disk_size_gb: 100
 #     auto_sleep_hours: 1
 #
-# claude:
-#   enabled: false          # project-level false overrides user-level true
-#   # auth_mode: oauth      # only meaningful when enabled: true
+# plugins:
+#   claude:
+#     enabled: false        # project-level false overrides user-level true
+#     auth_provider: oauth  # oauth | apikey
 #
 # secrets:
 #   my_extra_secret:
