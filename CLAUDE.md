@@ -52,5 +52,5 @@ Credentials never appear in config. Each secret has a logical name and env var n
 
 - All gcloud calls shell out — no GCP Go SDK. Keep it that way.
 - Provisioning steps are idempotent (skip-if-exists) except workstation creation itself.
-- Secrets config supports exactly one of `claude_oauth` or `claude_apikey` (not both).
-- The entrypoint distinguishes OAuth vs API key mode by which env var is present at runtime.
+- Plugin config lives at `plugins.<name>.*` in YAML; the claude plugin's auth method is set via `plugins.claude.auth_provider: oauth|apikey`.
+- The entrypoint sources each plugin's `setup.sh` after fetching all secrets; plugins guard themselves via `RA_PLUGIN_<NAME>_ENABLED`.
