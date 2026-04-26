@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // LoadAll returns all plugins from embedded defaults, user-global dir, and
@@ -36,6 +37,7 @@ func LoadAll(userDir, projectDir string) ([]*FilePlugin, error) {
 	for _, p := range byName {
 		out = append(out, p)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name() < out[j].Name() })
 	return out, nil
 }
 
@@ -44,7 +46,7 @@ func loadDir(dir string, byName map[string]*FilePlugin) {
 		return
 	}
 	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) || err != nil {
+	if err != nil {
 		return
 	}
 	for _, e := range entries {

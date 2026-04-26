@@ -62,9 +62,13 @@ func TestLoadAll_ProjectShadowsUser(t *testing.T) {
 
 	write := func(dir, version string) {
 		d := filepath.Join(dir, "myplugin")
-		os.MkdirAll(d, 0755)
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
 		yaml := "name: myplugin\nversion: \"" + version + "\"\ndescription: \"d\"\n"
-		os.WriteFile(filepath.Join(d, "plugin.yaml"), []byte(yaml), 0644)
+		if err := os.WriteFile(filepath.Join(d, "plugin.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	write(userDir, "1.0.0")
 	write(projDir, "2.0.0")
