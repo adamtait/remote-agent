@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
 func fileExists(path string) bool {
@@ -24,6 +26,8 @@ type InteractiveOptions struct {
 	Home   string
 	Prober Prober
 
+	Registry *plugins.Registry
+
 	Force             bool
 	ProjectOnly       bool
 	GlobalOnly        bool
@@ -36,6 +40,8 @@ type TemplateOptions struct {
 	Cwd    string
 	Home   string
 	Prober Prober
+
+	Registry *plugins.Registry
 
 	Force             bool
 	ProjectOnly       bool
@@ -129,15 +135,13 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 			return err
 		}
 
-		uv.ClaudeEnabled, err = promptClaudeEnabled(stdin, opts.Stdout)
-		if err != nil {
-			return err
-		}
-		if uv.ClaudeEnabled {
-			uv.ClaudeAuthMode, err = promptClaudeAuthMode(stdin, opts.Stdout)
+		uv.PluginFragments = make([][2]string, 0)
+		for _, p := range opts.Registry.All() {
+			block, secrets, err := p.Prompt(stdin, opts.Stdout)
 			if err != nil {
 				return err
 			}
+			uv.PluginFragments = append(uv.PluginFragments, [2]string{block, secrets})
 		}
 	}
 
@@ -166,6 +170,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 	if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
 		TargetDir: userTemplateDir, Home: opts.Home, Stdout: opts.Stdout,
 		Force: opts.Force, OnlyMissing: !opts.Force,
+		ExtraAssets: opts.Registry.AllAssets(),
 	}); err != nil {
 		return err
 	}
@@ -176,6 +181,7 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
 			TargetDir: wsDir, Home: opts.Home, Stdout: opts.Stdout,
 			Force: opts.Force, OnlyMissing: !opts.Force,
+			ExtraAssets: opts.Registry.AllAssets(),
 		}); err != nil {
 			return err
 		}
@@ -207,6 +213,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
 			TargetDir: userTemplateDir, Home: opts.Home, Stdout: opts.Stdout,
 			Force: opts.Force, OnlyMissing: !opts.Force,
+			ExtraAssets: opts.Registry.AllAssets(),
 		}); err != nil {
 			return err
 		}
@@ -216,9 +223,16 @@ func TemplateScaffold(opts TemplateOptions) error {
 		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
 			TargetDir: wsDir, Home: opts.Home, Stdout: opts.Stdout,
 			Force: opts.Force, OnlyMissing: !opts.Force,
+			ExtraAssets: opts.Registry.AllAssets(),
 		}); err != nil {
 			return err
 		}
+	}
+
+	var templateUV UserValues
+	for _, p := range opts.Registry.All() {
+		block, secrets := p.DefaultConfigFragments()
+		templateUV.PluginFragments = append(templateUV.PluginFragments, [2]string{block, secrets})
 	}
 
 	if !opts.GlobalOnly {
@@ -237,7 +251,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 		if !opts.Force && fileExists(path) {
 			fmt.Fprintf(opts.Stdout, "skip %s (already present); re-run with --force to regenerate\n", path)
 		} else {
-			if err := WriteAtomic(path, []byte(RenderUserConfig(UserValues{})), opts.Force); err != nil {
+			if err := WriteAtomic(path, []byte(RenderUserConfig(templateUV)), opts.Force); err != nil {
 				return err
 			}
 			fmt.Fprintln(opts.Stdout, "Wrote "+path)
@@ -263,39 +277,6 @@ func probeDefaults(p Prober) probedDefaults {
 	}
 }
 
-// promptClaudeEnabled asks whether Claude Code should be installed in the
-// workstation image. Defaults to N so existing users don't accidentally
-// opt in; matches the "breaking-change with explicit opt-in" stance taken
-// on the claude.enabled field.
-func promptClaudeEnabled(r *bufio.Reader, out io.Writer) (bool, error) {
-	choice, err := Prompt(r, out,
-		"Enable Claude Code? (installs @anthropic-ai/claude-code into the image) [y/N]",
-		"N", nil)
-	if err != nil {
-		return false, err
-	}
-	switch strings.ToLower(strings.TrimSpace(choice)) {
-	case "y", "yes":
-		return true, nil
-	default:
-		return false, nil
-	}
-}
-
-// promptClaudeAuthMode asks the user whether to use OAuth or API key auth.
-func promptClaudeAuthMode(r *bufio.Reader, out io.Writer) (ClaudeAuthMode, error) {
-	fmt.Fprintln(out, "Claude auth mode:")
-	fmt.Fprintln(out, "  1) OAuth token (recommended)")
-	fmt.Fprintln(out, "  2) API key (via apiKeyHelper)")
-	choice, err := Prompt(r, out, "choice [1/2]", "1", nil)
-	if err != nil {
-		return ClaudeAuthOAuth, err
-	}
-	if strings.TrimSpace(choice) == "2" {
-		return ClaudeAuthAPIKey, nil
-	}
-	return ClaudeAuthOAuth, nil
-}
 
 func warnPrereqs(out io.Writer, p Prober) {
 	if out == nil {

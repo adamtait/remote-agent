@@ -6,21 +6,6 @@ import (
 	"strings"
 )
 
-// ClaudeAuthMode selects which "claude_*" logical secret the user config writes.
-type ClaudeAuthMode int
-
-const (
-	ClaudeAuthOAuth ClaudeAuthMode = iota
-	ClaudeAuthAPIKey
-)
-
-func (m ClaudeAuthMode) String() string {
-	if m == ClaudeAuthAPIKey {
-		return "apikey"
-	}
-	return "oauth"
-}
-
 // UserValues are the prompt-gathered inputs for ~/.config/ra/config.yaml.
 type UserValues struct {
 	GitUserName   string
@@ -40,8 +25,9 @@ type UserValues struct {
 	AutoSleepHours     int
 	AutoShutdownHours  int
 
-	ClaudeEnabled  bool
-	ClaudeAuthMode ClaudeAuthMode
+	// PluginFragments holds [configBlock, secretsBlock] pairs contributed by
+	// each registered plugin during interactive setup.
+	PluginFragments [][2]string
 }
 
 // ProjectValues are the prompt-gathered inputs for .ra/config.yaml.
@@ -102,27 +88,11 @@ func RenderUserConfig(uv UserValues) string {
 	sleep := orInt(uv.AutoSleepHours, seedAutoSleepHours)
 	shutdown := orInt(uv.AutoShutdownHours, seedAutoShutdownHours)
 
-	var claudeBlock string
-	if uv.ClaudeEnabled {
-		claudeBlock = fmt.Sprintf("claude:\n  enabled: true\n  auth_mode: %s\n", uv.ClaudeAuthMode)
-	} else {
-		claudeBlock = "claude:\n  enabled: false\n"
-	}
-
-	var claudeSecretEntry string
-	if uv.ClaudeEnabled {
-		if uv.ClaudeAuthMode == ClaudeAuthAPIKey {
-			claudeSecretEntry = `  claude_apikey:
-    secret_name: anthropic-api-key
-    env_var: ANTHROPIC_API_KEY
-`
-		} else {
-			claudeSecretEntry = `  claude_oauth:
-    secret_name: claude-code-oauth-token
-    env_var: CLAUDE_CODE_OAUTH_TOKEN
-    # oauth_account_secret_name: claude-oauth-account   # optional
-`
-		}
+	var configPluginBlocks strings.Builder
+	var secretsPluginBlocks strings.Builder
+	for _, frag := range uv.PluginFragments {
+		configPluginBlocks.WriteString(frag[0])
+		secretsPluginBlocks.WriteString(frag[1])
 	}
 
 	var b strings.Builder
@@ -186,8 +156,8 @@ env: {}
 		gitName, gitEmail, repoURL,
 		projectID,
 		region, machine, disk, cluster, conf, sa, img, tag, repo, sleep, shutdown,
-		claudeBlock,
-		claudeSecretEntry)
+		configPluginBlocks.String(),
+		secretsPluginBlocks.String())
 	return b.String()
 }
 

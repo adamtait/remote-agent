@@ -16,6 +16,7 @@ import (
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/naming"
+	"github.com/adamtait/remote-agent/internal/plugins"
 	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -33,7 +34,9 @@ func buildContainerEnv(cfg *config.Config) string {
 	add("GITHUB_REPO_URL", cfg.Git.GithubRepoURL)
 	add("GIT_USER_NAME", cfg.Git.UserName)
 	add("GIT_USER_EMAIL", cfg.Git.UserEmail)
-	add("RA_CLAUDE_ENABLED", strconv.FormatBool(cfg.Claude.IsEnabled()))
+	for _, pair := range reg.AllContainerEnvPairs(cfg) {
+		pairs = append(pairs, pair)
+	}
 
 	logicalNames := make([]string, 0, len(cfg.Secrets))
 	for k := range cfg.Secrets {
@@ -459,12 +462,10 @@ func (d dockerRunner) Run(args ...string) error {
 	return cmd.Run()
 }
 
-// materializeBuildAssets ensures the build assets (Dockerfile, entrypoint.sh,
-// claude/install.sh, claude/setup.sh) exist under .ra/ for docker build.
-// Missing files are resolved from user template or embedded defaults and
-// written with the correct mode via scaffold.AssetMode. Pre-existing files
-// are untouched. The returned cleanup func removes only files (and empty
-// subdirs) that were created by this call.
+// materializeBuildAssets ensures all build assets (core + plugin) exist under
+// .ra/ for docker build. Missing files are resolved from user template or
+// embedded defaults. Pre-existing files are untouched. The returned cleanup
+// func removes only files (and empty subdirs) that were created by this call.
 func materializeBuildAssets(cwd, home string) (func(), error) {
 	wsDir := filepath.Join(cwd, ".ra")
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
@@ -480,6 +481,23 @@ func materializeBuildAssets(cwd, home string) (func(), error) {
 			os.Remove(createdDirs[i])
 		}
 	}
+
+	ensureParent := func(dest string) error {
+		parent := filepath.Dir(dest)
+		if parent == wsDir {
+			return nil
+		}
+		if _, statErr := os.Stat(parent); errors.Is(statErr, os.ErrNotExist) {
+			if err := os.MkdirAll(parent, 0755); err != nil {
+				return fmt.Errorf("creating %s: %w", parent, err)
+			}
+			createdDirs = append(createdDirs, parent)
+		} else if statErr != nil {
+			return fmt.Errorf("checking %s: %w", parent, statErr)
+		}
+		return nil
+	}
+
 	for _, n := range scaffold.AssetNames {
 		dest := filepath.Join(wsDir, n)
 		if _, statErr := os.Stat(dest); statErr == nil {
@@ -488,18 +506,9 @@ func materializeBuildAssets(cwd, home string) (func(), error) {
 			rollback()
 			return func() {}, fmt.Errorf("checking %s: %w", dest, statErr)
 		}
-		parent := filepath.Dir(dest)
-		if parent != wsDir {
-			if _, statErr := os.Stat(parent); errors.Is(statErr, os.ErrNotExist) {
-				if err := os.MkdirAll(parent, 0755); err != nil {
-					rollback()
-					return func() {}, fmt.Errorf("creating %s: %w", parent, err)
-				}
-				createdDirs = append(createdDirs, parent)
-			} else if statErr != nil {
-				rollback()
-				return func() {}, fmt.Errorf("checking %s: %w", parent, statErr)
-			}
+		if err := ensureParent(dest); err != nil {
+			rollback()
+			return func() {}, err
 		}
 		data, _, err := scaffold.ResolveSource(home, "", n)
 		if err != nil {
@@ -512,7 +521,44 @@ func materializeBuildAssets(cwd, home string) (func(), error) {
 		}
 		written = append(written, dest)
 	}
+
+	for _, asset := range reg.AllAssets() {
+		dest := filepath.Join(wsDir, asset.Name)
+		if _, statErr := os.Stat(dest); statErr == nil {
+			continue
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			rollback()
+			return func() {}, fmt.Errorf("checking %s: %w", dest, statErr)
+		}
+		if err := ensureParent(dest); err != nil {
+			rollback()
+			return func() {}, err
+		}
+		data, err := resolvePluginAsset(home, asset)
+		if err != nil {
+			rollback()
+			return func() {}, fmt.Errorf("resolving %s: %w", asset.Name, err)
+		}
+		if err := os.WriteFile(dest, data, asset.FileMode); err != nil {
+			rollback()
+			return func() {}, fmt.Errorf("writing %s: %w", asset.Name, err)
+		}
+		written = append(written, dest)
+	}
+
 	return rollback, nil
+}
+
+// resolvePluginAsset returns the bytes to use for a plugin asset.
+// Checks user template override first; falls back to the asset's embedded bytes.
+func resolvePluginAsset(home string, asset plugins.Asset) ([]byte, error) {
+	userPath := filepath.Join(home, ".config", "ra", "template", asset.Name)
+	if data, err := os.ReadFile(userPath); err == nil {
+		return data, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("reading user template %s: %w", asset.Name, err)
+	}
+	return asset.Bytes, nil
 }
 
 // dockerBuildArgs returns the buildx args used by `ra create`, centralized so

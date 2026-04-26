@@ -7,6 +7,8 @@ import (
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
+	"github.com/adamtait/remote-agent/internal/plugins"
+	claudeplugin "github.com/adamtait/remote-agent/internal/plugins/claude"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -15,7 +17,12 @@ var (
 	cfg    *config.Config
 	client *gcloud.Client
 	runner gcloud.Runner
+	reg    *plugins.Registry
 )
+
+func init() {
+	reg = plugins.NewRegistry(claudeplugin.New())
+}
 
 var rootCmd = &cobra.Command{
 	Use:           "ra",
@@ -52,7 +59,7 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 		cfg.ProjectConfigPath = projectCfgPath
-		if err := config.Validate(cfg); err != nil {
+		if err := config.Validate(cfg, reg.ValidateAll(cfg)); err != nil {
 			return err
 		}
 		runner = gcloud.RealRunner{}

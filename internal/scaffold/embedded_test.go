@@ -82,20 +82,6 @@ func TestEmbedded_DockerfileCopiesStagedProfileD(t *testing.T) {
 	}
 }
 
-func TestEmbeddedClaudeInstall_HasNpmPackage(t *testing.T) {
-	if len(embeddedClaudeInstall) == 0 {
-		t.Fatal("embeddedClaudeInstall is empty")
-	}
-	if !bytes.HasPrefix(embeddedClaudeInstall, []byte("#!/bin/bash")) {
-		t.Errorf("install.sh should start with '#!/bin/bash'")
-	}
-	if !bytes.Contains(embeddedClaudeInstall, []byte("@anthropic-ai/claude-code")) {
-		t.Errorf("install.sh should install @anthropic-ai/claude-code")
-	}
-	if !bytes.Contains(embeddedClaudeInstall, []byte("set -euo pipefail")) {
-		t.Errorf("install.sh should use strict mode")
-	}
-}
 
 func TestEmbeddedEntrypoint_NoClaudeSpecifics(t *testing.T) {
 	// Guardrail: the main entrypoint must stay harness-agnostic. Claude-owned
@@ -179,49 +165,3 @@ func TestEmbeddedEntrypoint_HasClaudeSourceHook(t *testing.T) {
 	}
 }
 
-func TestEmbeddedClaudeSetup_InstallsOnFirstBoot(t *testing.T) {
-	for _, want := range []string{
-		"_ra_claude_install_if_missing",
-		"/etc/ra/claude-install.sh",
-	} {
-		if !bytes.Contains(embeddedClaudeSetup, []byte(want)) {
-			t.Errorf("setup.sh missing %q — first-boot install hook broken", want)
-		}
-	}
-}
-
-func TestEmbeddedClaudeSetup_UsesAbsolutePathForVersionAndSmokeTest(t *testing.T) {
-	// `sudo -u user` resets PATH to its secure_path default and strips
-	// /home/user/.npm-global/bin, so bare `claude` is not found. The version
-	// detection and the smoke test must invoke claude by absolute path
-	// (CLAUDE_BIN_PATH). Without this fix, both calls fail silently and the
-	// onboarding seed proceeds without a version string while the smoke test
-	// reports "token or account may be stale" on every fresh boot.
-	s := embeddedClaudeSetup
-	if bytes.Contains(s, []byte(`sudo -u "${USER_NAME}" claude --version`)) {
-		t.Errorf("setup.sh: version check must use ${CLAUDE_BIN_PATH}, not bare `claude` (sudo strips PATH)")
-	}
-	if bytes.Contains(s, []byte(`claude -p "respond with OK"`)) {
-		t.Errorf("setup.sh: smoke test must invoke ${CLAUDE_BIN_PATH}, not bare `claude` (sudo strips PATH)")
-	}
-	if !bytes.Contains(s, []byte(`"${CLAUDE_BIN_PATH}" --version`)) {
-		t.Errorf(`setup.sh: expected '"${CLAUDE_BIN_PATH}" --version' for the version check`)
-	}
-	if !bytes.Contains(s, []byte(`"${CLAUDE_BIN_PATH}" -p "respond with OK"`)) {
-		t.Errorf(`setup.sh: expected '"${CLAUDE_BIN_PATH}" -p "respond with OK"' for the smoke test`)
-	}
-}
-
-func TestEmbeddedClaudeSetup_HasHandlerFunction(t *testing.T) {
-	if len(embeddedClaudeSetup) == 0 {
-		t.Fatal("embeddedClaudeSetup is empty")
-	}
-	if !bytes.Contains(embeddedClaudeSetup, []byte("ra_claude_handle_secret")) {
-		t.Errorf("setup.sh must define ra_claude_handle_secret() for the main dispatch hook")
-	}
-	for _, want := range []string{"claude_oauth", "claude_apikey", "apiKeyHelper"} {
-		if !bytes.Contains(embeddedClaudeSetup, []byte(want)) {
-			t.Errorf("setup.sh missing expected marker %q", want)
-		}
-	}
-}
