@@ -1,7 +1,10 @@
 package plugins
 
 import (
+	"bufio"
+	"io"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -86,5 +89,130 @@ func TestFilePlugin_Assets_WithScripts(t *testing.T) {
 	}
 	if assets[0].FileMode != 0755 {
 		t.Errorf("assets[0].FileMode = %v", assets[0].FileMode)
+	}
+}
+
+func TestFilePlugin_DefaultConfigFragments(t *testing.T) {
+	p, _ := LoadPlugin(testPluginFS(nil))
+	cfg, secrets := p.DefaultConfigFragments()
+	if secrets != "" {
+		t.Errorf("secrets block should be empty, got %q", secrets)
+	}
+	if !strings.Contains(cfg, "plugins:") {
+		t.Errorf("config block missing 'plugins:', got:\n%s", cfg)
+	}
+	if !strings.Contains(cfg, "myplugin:") {
+		t.Errorf("config block missing 'myplugin:', got:\n%s", cfg)
+	}
+	if !strings.Contains(cfg, "enabled: false") {
+		t.Errorf("config block missing 'enabled: false', got:\n%s", cfg)
+	}
+}
+
+func TestFilePlugin_ContainerEnvPairsFrom(t *testing.T) {
+	p, _ := LoadPlugin(testPluginFS(nil))
+	cfg := map[string]interface{}{
+		"enabled":       true,
+		"auth_provider": "oauth",
+	}
+	pairs := p.containerEnvPairsFrom(cfg)
+	wantEnabled := "RA_PLUGIN_MYPLUGIN_ENABLED=true"
+	wantProvider := "RA_PLUGIN_MYPLUGIN_AUTH_PROVIDER=oauth"
+	if !sliceContains(pairs, wantEnabled) {
+		t.Errorf("pairs missing %q; got %v", wantEnabled, pairs)
+	}
+	if !sliceContains(pairs, wantProvider) {
+		t.Errorf("pairs missing %q; got %v", wantProvider, pairs)
+	}
+}
+
+func TestFilePlugin_ValidateConfig_RequiredField(t *testing.T) {
+	raw := `
+name: strict
+version: "1.0.0"
+description: "d"
+config:
+  - name: token
+    type: string
+    description: "A token"
+    required: true
+`
+	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}}
+	p, _ := LoadPlugin(fsys)
+	errs := p.validateConfig(map[string]interface{}{})
+	if len(errs) == 0 {
+		t.Fatal("expected error for missing required field")
+	}
+}
+
+func TestFilePlugin_ValidateConfig_InvalidProvider(t *testing.T) {
+	p, _ := LoadPlugin(testPluginFS(nil))
+	pluginCfg := map[string]interface{}{
+		"enabled":       true,
+		"auth_provider": "nonexistent",
+	}
+	errs := p.validateConfig(pluginCfg)
+	if len(errs) == 0 {
+		t.Fatal("expected error for invalid auth_provider")
+	}
+}
+
+func TestFilePlugin_ValidateConfig_MissingProvider(t *testing.T) {
+	p, _ := LoadPlugin(testPluginFS(nil))
+	pluginCfg := map[string]interface{}{"enabled": true}
+	errs := p.validateConfig(pluginCfg)
+	if len(errs) == 0 {
+		t.Fatal("expected error when auth_providers non-empty and auth_provider not set")
+	}
+}
+
+func TestFilePlugin_ValidateConfig_Disabled(t *testing.T) {
+	p, _ := LoadPlugin(testPluginFS(nil))
+	errs := p.validateConfig(map[string]interface{}{"enabled": false})
+	if len(errs) != 0 {
+		t.Errorf("expected no errors when disabled, got %v", errs)
+	}
+}
+
+func sliceContains(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func TestFilePlugin_Prompt_Disabled(t *testing.T) {
+	p, _ := LoadPlugin(testPluginFS(nil))
+	r := bufio.NewReader(strings.NewReader("N\n"))
+	cfg, secrets, err := p.Prompt(r, io.Discard)
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if !strings.Contains(cfg, "enabled: false") {
+		t.Errorf("expected enabled: false, got %q", cfg)
+	}
+	if secrets != "" {
+		t.Errorf("expected empty secrets block, got %q", secrets)
+	}
+}
+
+func TestFilePlugin_Prompt_Enabled_OAuth(t *testing.T) {
+	p, _ := LoadPlugin(testPluginFS(nil))
+	// "y\n" → enabled=true; "1\n" → first auth provider (oauth)
+	r := bufio.NewReader(strings.NewReader("y\n1\n"))
+	cfg, secrets, err := p.Prompt(r, io.Discard)
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if !strings.Contains(cfg, "enabled: true") {
+		t.Errorf("expected enabled: true, got %q", cfg)
+	}
+	if !strings.Contains(cfg, "auth_provider: oauth") {
+		t.Errorf("expected auth_provider: oauth, got %q", cfg)
+	}
+	if !strings.Contains(secrets, "my_oauth") {
+		t.Errorf("expected my_oauth in secrets block, got %q", secrets)
 	}
 }
