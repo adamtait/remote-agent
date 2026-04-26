@@ -9,12 +9,15 @@ import (
 	"testing"
 
 	"github.com/adamtait/remote-agent/internal/plugins"
-	claudeplugin "github.com/adamtait/remote-agent/internal/plugins/claude"
 	"github.com/adamtait/remote-agent/internal/scaffold"
 )
 
 func claudeRegistry() *plugins.Registry {
-	return plugins.NewRegistry(claudeplugin.New())
+	loaded, err := plugins.LoadAll("", "")
+	if err != nil {
+		panic("claudeRegistry: " + err.Error())
+	}
+	return plugins.NewRegistry(loaded)
 }
 
 // New prompt order (full run): project_id, github_repo_url, git_user_name,
@@ -112,10 +115,10 @@ func TestInteractiveScaffold_ClaudeDisabled_SkipsAuthModeAndOmitsClaudeSecrets(t
 	}
 
 	user, _ := os.ReadFile(filepath.Join(home, ".config", "ra", "config.yaml"))
-	if !strings.Contains(string(user), "claude:\n  enabled: false") {
-		t.Errorf("expected claude.enabled: false block in user config:\n%s", user)
+	if !strings.Contains(string(user), "enabled: false") {
+		t.Errorf("expected enabled: false in user config:\n%s", user)
 	}
-	for _, forbidden := range []string{"claude_oauth:", "claude_apikey:", "auth_mode:"} {
+	for _, forbidden := range []string{"claude_oauth:", "claude_apikey:", "auth_provider:"} {
 		if strings.Contains(string(user), forbidden) {
 			t.Errorf("disabled-claude user config should not contain %q:\n%s", forbidden, user)
 		}

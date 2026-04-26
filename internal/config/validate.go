@@ -20,8 +20,6 @@ var reservedEnvVars = []string{
 	"GIT_USER_NAME",
 	"GIT_USER_EMAIL",
 	"RA_SECRETS",
-	"RA_CLAUDE_ENABLED",
-	"RA_CODEX_ENABLED",
 }
 
 // Validate asserts the merged Config is complete and internally consistent.

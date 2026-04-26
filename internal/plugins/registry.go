@@ -4,23 +4,23 @@ import "github.com/adamtait/remote-agent/internal/config"
 
 // Registry holds the ordered list of active plugins.
 type Registry struct {
-	plugins []Plugin
+	plugins []*FilePlugin
 }
 
-// NewRegistry creates a Registry containing the provided plugins.
-func NewRegistry(ps ...Plugin) *Registry {
+// NewRegistry creates a Registry from the provided FilePlugin slice.
+func NewRegistry(ps []*FilePlugin) *Registry {
 	return &Registry{plugins: ps}
 }
 
-// All returns all registered plugins in registration order.
-func (r *Registry) All() []Plugin {
+// All returns all plugins.
+func (r *Registry) All() []*FilePlugin {
 	if r == nil {
 		return nil
 	}
 	return r.plugins
 }
 
-// AllAssets returns the union of all plugin assets in registration order.
+// AllAssets returns the union of all plugin assets.
 func (r *Registry) AllAssets() []Asset {
 	if r == nil {
 		return nil

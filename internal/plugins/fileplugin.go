@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/adamtait/remote-agent/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -255,6 +256,31 @@ func buildPluginsConfigBlock(name string, cfg map[string]interface{}) string {
 		"plugins": map[string]interface{}{name: cfg},
 	})
 	return string(out)
+}
+
+// Schema returns the plugin's parsed schema.
+func (p *FilePlugin) Schema() PluginSchema { return p.schema }
+
+// Validate checks required config fields and auth_provider validity.
+func (p *FilePlugin) Validate(cfg *config.Config) []string {
+	pluginCfg := map[string]interface{}{}
+	if cfg != nil && cfg.Plugins != nil {
+		if c, ok := cfg.Plugins[p.schema.Name]; ok {
+			pluginCfg = c
+		}
+	}
+	return p.validateConfig(pluginCfg)
+}
+
+// ContainerEnvPairs returns RA_PLUGIN_<NAME>_<FIELD>=<value> pairs for --container-env.
+func (p *FilePlugin) ContainerEnvPairs(cfg *config.Config) []string {
+	pluginCfg := map[string]interface{}{}
+	if cfg != nil && cfg.Plugins != nil {
+		if c, ok := cfg.Plugins[p.schema.Name]; ok {
+			pluginCfg = c
+		}
+	}
+	return p.containerEnvPairsFrom(pluginCfg)
 }
 
 // buildSecretsBlock returns indented YAML entries (no root key) for injection into a

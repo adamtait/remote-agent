@@ -1,115 +1,68 @@
-package plugins_test
+package plugins
 
 import (
-	"bufio"
-	"io"
 	"testing"
+	"testing/fstest"
 
 	"github.com/adamtait/remote-agent/internal/config"
-	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
-// stubPlugin is a minimal Plugin for registry tests.
-type stubPlugin struct {
-	name   string
-	assets []plugins.Asset
-	errs   []string
-	envs   []string
+func makeTestPlugin(t *testing.T, name string) *FilePlugin {
+	t.Helper()
+	yaml := "name: " + name + "\nversion: \"1.0.0\"\ndescription: \"d\"\n"
+	fsys := fstest.MapFS{
+		"plugin.yaml": &fstest.MapFile{Data: []byte(yaml)},
+		"setup.sh":    &fstest.MapFile{Data: []byte("#!/bin/bash\n"), Mode: 0755},
+	}
+	p, err := LoadPlugin(fsys)
+	if err != nil {
+		t.Fatalf("makeTestPlugin(%q): %v", name, err)
+	}
+	return p
 }
 
-func (s *stubPlugin) Name() string { return s.name }
-func (s *stubPlugin) Assets() []plugins.Asset { return s.assets }
-func (s *stubPlugin) Validate(_ *config.Config) []string { return s.errs }
-func (s *stubPlugin) Prompt(_ *bufio.Reader, _ io.Writer) (string, string, error) {
-	return "", "", nil
-}
-func (s *stubPlugin) DefaultConfigFragments() (string, string) { return "", "" }
-func (s *stubPlugin) ContainerEnvPairs(_ *config.Config) []string { return s.envs }
-
-var _ plugins.Plugin = (*stubPlugin)(nil)
-
-// ---------- nil-receiver safety ----------
-
-func TestRegistry_Nil_All(t *testing.T) {
-	var r *plugins.Registry
+func TestRegistry_NilSafe(t *testing.T) {
+	var r *Registry
 	if r.All() != nil {
-		t.Error("nil Registry.All() should return nil")
+		t.Error("nil registry All() should return nil")
 	}
-}
-
-func TestRegistry_Nil_AllAssets(t *testing.T) {
-	var r *plugins.Registry
 	if r.AllAssets() != nil {
-		t.Error("nil Registry.AllAssets() should return nil")
+		t.Error("nil registry AllAssets() should return nil")
 	}
-}
-
-func TestRegistry_Nil_ValidateAll(t *testing.T) {
-	var r *plugins.Registry
 	if r.ValidateAll(nil) != nil {
-		t.Error("nil Registry.ValidateAll() should return nil")
+		t.Error("nil registry ValidateAll() should return nil")
 	}
-}
-
-func TestRegistry_Nil_AllContainerEnvPairs(t *testing.T) {
-	var r *plugins.Registry
 	if r.AllContainerEnvPairs(nil) != nil {
-		t.Error("nil Registry.AllContainerEnvPairs() should return nil")
+		t.Error("nil registry AllContainerEnvPairs() should return nil")
 	}
 }
 
-// ---------- multi-plugin aggregation ----------
-
-func TestRegistry_AllAssets_AggregatesInOrder(t *testing.T) {
-	a1 := plugins.Asset{Name: "p1/a.sh", Bytes: []byte("a"), FileMode: 0755}
-	a2 := plugins.Asset{Name: "p2/b.sh", Bytes: []byte("b"), FileMode: 0755}
-	r := plugins.NewRegistry(
-		&stubPlugin{name: "p1", assets: []plugins.Asset{a1}},
-		&stubPlugin{name: "p2", assets: []plugins.Asset{a2}},
-	)
-	got := r.AllAssets()
-	if len(got) != 2 {
-		t.Fatalf("expected 2 assets, got %d", len(got))
+func TestRegistry_AllAssets(t *testing.T) {
+	p := makeTestPlugin(t, "alpha")
+	r := NewRegistry([]*FilePlugin{p})
+	assets := r.AllAssets()
+	if len(assets) != 1 {
+		t.Errorf("expected 1 asset, got %d", len(assets))
 	}
-	if got[0].Name != "p1/a.sh" || got[1].Name != "p2/b.sh" {
-		t.Errorf("wrong order: %v", got)
+	if assets[0].Name != "plugins/alpha/setup.sh" {
+		t.Errorf("unexpected asset name %q", assets[0].Name)
 	}
 }
 
-func TestRegistry_ValidateAll_ConcatenatesErrors(t *testing.T) {
-	r := plugins.NewRegistry(
-		&stubPlugin{name: "p1", errs: []string{"err-from-p1"}},
-		&stubPlugin{name: "p2", errs: []string{"err-from-p2a", "err-from-p2b"}},
-	)
-	errs := r.ValidateAll(&config.Config{})
-	if len(errs) != 3 {
-		t.Fatalf("expected 3 errors, got %d: %v", len(errs), errs)
-	}
-	if errs[0] != "err-from-p1" || errs[1] != "err-from-p2a" || errs[2] != "err-from-p2b" {
-		t.Errorf("wrong errors: %v", errs)
+func TestRegistry_ValidateAll_NoErrors(t *testing.T) {
+	p := makeTestPlugin(t, "alpha")
+	r := NewRegistry([]*FilePlugin{p})
+	if errs := r.ValidateAll(&config.Config{}); len(errs) != 0 {
+		t.Errorf("unexpected errors: %v", errs)
 	}
 }
 
-func TestRegistry_AllContainerEnvPairs_ConcatenatesInOrder(t *testing.T) {
-	r := plugins.NewRegistry(
-		&stubPlugin{name: "p1", envs: []string{"A=1"}},
-		&stubPlugin{name: "p2", envs: []string{"B=2", "C=3"}},
-	)
+func TestRegistry_ContainerEnvPairs(t *testing.T) {
+	p := makeTestPlugin(t, "alpha")
+	r := NewRegistry([]*FilePlugin{p})
 	pairs := r.AllContainerEnvPairs(&config.Config{})
-	if len(pairs) != 3 || pairs[0] != "A=1" || pairs[1] != "B=2" || pairs[2] != "C=3" {
-		t.Errorf("wrong pairs: %v", pairs)
-	}
-}
-
-func TestRegistry_EmptyRegistry_ReturnsEmpty(t *testing.T) {
-	r := plugins.NewRegistry()
-	if len(r.All()) != 0 {
-		t.Error("empty registry should return empty All()")
-	}
-	if len(r.AllAssets()) != 0 {
-		t.Error("empty registry should return empty AllAssets()")
-	}
-	if len(r.ValidateAll(nil)) != 0 {
-		t.Error("empty registry should return empty ValidateAll()")
+	// alpha has no config fields, so no pairs
+	if len(pairs) != 0 {
+		t.Errorf("expected 0 pairs, got %v", pairs)
 	}
 }

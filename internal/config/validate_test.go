@@ -7,8 +7,6 @@ import (
 	"github.com/adamtait/remote-agent/internal/config"
 )
 
-func boolPtr(b bool) *bool { return &b }
-
 func fullValidCfg() *config.Config {
 	sleep := 2
 	return &config.Config{
@@ -32,10 +30,6 @@ func fullValidCfg() *config.Config {
 				AutoSleepHours:     &sleep,
 				AutoShutdownHours:  12,
 			},
-		},
-		Claude: config.ClaudeConfig{
-			Enabled:  boolPtr(true),
-			AuthMode: "oauth",
 		},
 		Secrets: map[string]config.SecretEntry{
 			"claude_oauth": {SecretName: "claude-auth", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
@@ -131,7 +125,7 @@ func TestValidate_EnvVarCollision_SecretAndEnv(t *testing.T) {
 }
 
 func TestValidate_EnvVarCollision_Reserved(t *testing.T) {
-	for _, reserved := range []string{"GCP_PROJECT_ID", "GITHUB_REPO_URL", "GIT_USER_NAME", "RA_SECRETS", "RA_SECRET_FOO_NAME", "RA_CLAUDE_ENABLED", "RA_CODEX_ENABLED"} {
+	for _, reserved := range []string{"GCP_PROJECT_ID", "GITHUB_REPO_URL", "GIT_USER_NAME", "RA_SECRETS", "RA_SECRET_FOO_NAME"} {
 		c := fullValidCfg()
 		c.Env = map[string]string{reserved: "v"}
 		if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), reserved) {

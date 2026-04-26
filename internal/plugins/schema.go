@@ -1,5 +1,14 @@
 package plugins
 
+import "os"
+
+// Asset describes a single build asset contributed by a plugin.
+type Asset struct {
+	Name     string
+	Bytes    []byte
+	FileMode os.FileMode
+}
+
 // PluginSchema is the parsed structure of a plugin.yaml file.
 type PluginSchema struct {
 	Name          string         `yaml:"name"`

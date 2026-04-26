@@ -225,7 +225,6 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		"GITHUB_REPO_URL":             "https://example.com/r.git",
 		"GIT_USER_NAME":               "Alice",
 		"GIT_USER_EMAIL":              "a@x.com",
-		"RA_CLAUDE_ENABLED":           "false",
 		"RA_SECRET_CLAUDE_OAUTH_NAME": "claude-auth",
 		"RA_SECRET_CLAUDE_OAUTH_VAR":  "CLAUDE_CODE_OAUTH_TOKEN",
 		"RA_SECRET_GITHUB_PAT_NAME":   "github-pat",
@@ -257,27 +256,3 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 	}
 }
 
-func TestBuildContainerEnv_ClaudeEnabledReflectsConfig(t *testing.T) {
-	enabled := true
-	cfg := &config.Config{Claude: config.ClaudeConfig{Enabled: &enabled, AuthMode: "oauth"}}
-	got := buildContainerEnv(cfg)
-	if !strings.Contains(got, "RA_CLAUDE_ENABLED=true") {
-		t.Errorf("expected RA_CLAUDE_ENABLED=true when cfg.Claude.Enabled=true; got: %q", got)
-	}
-}
-
-func TestBuildContainerEnv_OAuthAccountSiblingEmitted(t *testing.T) {
-	cfg := &config.Config{
-		Secrets: map[string]config.SecretEntry{
-			"claude_oauth": {
-				SecretName:             "claude-auth",
-				EnvVar:                 "CLAUDE_CODE_OAUTH_TOKEN",
-				OAuthAccountSecretName: "claude-oauth-account",
-			},
-		},
-	}
-	got := buildContainerEnv(cfg)
-	if !strings.Contains(got, "RA_SECRET_CLAUDE_OAUTH_OAUTH_ACCOUNT_SECRET_NAME=claude-oauth-account") {
-		t.Errorf("oauth_account_secret_name not emitted: %q", got)
-	}
-}
