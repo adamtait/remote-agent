@@ -78,7 +78,12 @@ func (p *FilePlugin) containerEnvPairsFrom(pluginCfg map[string]interface{}) []s
 	var pairs []string
 	for _, f := range p.schema.Config {
 		key := prefix + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
-		val := fmt.Sprintf("%v", pluginCfg[f.Name])
+		v, ok := pluginCfg[f.Name]
+		if !ok {
+			pairs = append(pairs, key+"=")
+			continue
+		}
+		val := fmt.Sprintf("%v", v)
 		pairs = append(pairs, key+"="+val)
 	}
 	if len(p.schema.AuthProviders) > 0 {
@@ -93,7 +98,7 @@ func (p *FilePlugin) containerEnvPairsFrom(pluginCfg map[string]interface{}) []s
 func (p *FilePlugin) validateConfig(pluginCfg map[string]interface{}) []string {
 	for _, f := range p.schema.Config {
 		if f.Name == "enabled" {
-			if v, ok := pluginCfg["enabled"]; ok && v != true {
+			if v, ok := pluginCfg["enabled"]; !ok || v != true {
 				return nil
 			}
 		}
@@ -167,11 +172,11 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer) (configBlock string,
 func promptField(r *bufio.Reader, out io.Writer, f ConfigField) (interface{}, error) {
 	switch f.Type {
 	case "bool":
-		def := "N"
 		if b, ok := f.Default.(bool); ok && b {
-			def = "Y"
+			fmt.Fprintf(out, "%s [Y/n]: ", f.Description)
+		} else {
+			fmt.Fprintf(out, "%s [y/N]: ", f.Description)
 		}
-		fmt.Fprintf(out, "%s [y/N] [%s]: ", f.Description, def)
 		line, err := r.ReadString('\n')
 		if err != nil && err != io.EOF {
 			return nil, err
@@ -252,6 +257,8 @@ func buildPluginsConfigBlock(name string, cfg map[string]interface{}) string {
 	return string(out)
 }
 
+// buildSecretsBlock returns indented YAML entries (no root key) for injection into a
+// secrets: block. Merges top-level secrets with provider-specific secrets.
 func buildSecretsBlock(topLevel []SecretDef, provider *AuthProvider) string {
 	var defs []SecretDef
 	defs = append(defs, topLevel...)

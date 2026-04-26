@@ -174,6 +174,25 @@ func TestFilePlugin_ValidateConfig_Disabled(t *testing.T) {
 	}
 }
 
+func TestFilePlugin_ValidateConfig_EnabledAbsent(t *testing.T) {
+	p, _ := LoadPlugin(testPluginFS(nil))
+	// No "enabled" key — should skip validation (treat as disabled)
+	errs := p.validateConfig(map[string]interface{}{})
+	if len(errs) != 0 {
+		t.Errorf("expected no errors when enabled absent, got %v", errs)
+	}
+}
+
+func TestFilePlugin_ContainerEnvPairsFrom_MissingField(t *testing.T) {
+	p, _ := LoadPlugin(testPluginFS(nil))
+	pairs := p.containerEnvPairsFrom(map[string]interface{}{}) // no keys
+	for _, pair := range pairs {
+		if strings.Contains(pair, "<nil>") {
+			t.Errorf("pair contains <nil>: %q", pair)
+		}
+	}
+}
+
 func sliceContains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {
