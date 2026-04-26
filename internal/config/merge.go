@@ -1,4 +1,3 @@
-// ws/internal/config/merge.go
 package config
 
 import (

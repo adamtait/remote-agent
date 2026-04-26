@@ -12,8 +12,6 @@ import (
 var envVarPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
 // reservedEnvVars are set directly by ra create; configs must not shadow them.
-// Plugin authors: each plugin that emits an RA_<PLUGIN>_ENABLED env var via
-// ContainerEnvPairs must also add that name here to prevent user collisions.
 var reservedEnvVars = []string{
 	"GCP_PROJECT_ID",
 	"GITHUB_REPO_URL",
@@ -77,6 +75,8 @@ func Validate(cfg *Config, pluginErrs []string) error {
 			errs = append(errs, fmt.Sprintf("secrets.%s.env_var %q must match %s", name, s.EnvVar, envVarPattern))
 		} else if strings.HasPrefix(s.EnvVar, "RA_SECRET_") {
 			errs = append(errs, fmt.Sprintf("secrets.%s.env_var %q collides with ra-reserved RA_SECRET_* prefix", name, s.EnvVar))
+		} else if strings.HasPrefix(s.EnvVar, "RA_PLUGIN_") {
+			errs = append(errs, fmt.Sprintf("secrets.%s.env_var %q collides with ra-reserved RA_PLUGIN_* prefix", name, s.EnvVar))
 		} else if existing, collide := usedEnvVars[s.EnvVar]; collide {
 			errs = append(errs, fmt.Sprintf("secrets.%s.env_var %q collides with %s", name, s.EnvVar, existing))
 		} else {
@@ -91,6 +91,10 @@ func Validate(cfg *Config, pluginErrs []string) error {
 		}
 		if strings.HasPrefix(key, "RA_SECRET_") {
 			errs = append(errs, fmt.Sprintf("env.%s collides with ra-reserved RA_SECRET_* prefix", key))
+			continue
+		}
+		if strings.HasPrefix(key, "RA_PLUGIN_") {
+			errs = append(errs, fmt.Sprintf("env.%s collides with ra-reserved RA_PLUGIN_* prefix", key))
 			continue
 		}
 		if existing, collide := usedEnvVars[key]; collide {

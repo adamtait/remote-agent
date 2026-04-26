@@ -550,8 +550,8 @@ func resolvePluginAsset(home string, asset plugins.Asset) ([]byte, error) {
 
 // dockerBuildArgs returns the buildx args used by `ra create`, centralized so
 // tests can assert on the exact flags. The Dockerfile is harness-agnostic at
-// build time — Claude install is gated at runtime by the RA_CLAUDE_ENABLED
-// container env var, not by a build arg.
+// build time — Claude install is gated at runtime by the `RA_PLUGIN_CLAUDE_ENABLED`
+// env var emitted by the claude plugin.
 func dockerBuildArgs(imageURI string) []string {
 	return []string{
 		"buildx", "build",
