@@ -10,9 +10,8 @@ func TestMerge_UserBaselineNoProject(t *testing.T) {
 	two := 2
 	user := &config.UserConfig{
 		Git: config.GitConfig{
-			UserName:      "Alice",
-			UserEmail:     "alice@example.com",
-			GithubRepoURL: "https://example.com/user.git",
+			UserName:  "Alice",
+			UserEmail: "alice@example.com",
 		},
 		Gcloud: config.GcloudConfig{
 			Project: "user-proj",
@@ -35,7 +34,7 @@ func TestMerge_UserBaselineNoProject(t *testing.T) {
 	if cfg.Gcloud.Workstation.Region != "us-central1" || cfg.Gcloud.Workstation.MachineType != "e2-standard-4" ||
 		cfg.Git.UserName != "Alice" || cfg.Gcloud.Workstation.DiskSizeGB != 50 ||
 		cfg.Gcloud.Workstation.AutoSleepHours == nil || *cfg.Gcloud.Workstation.AutoSleepHours != 2 ||
-		cfg.Gcloud.Workstation.AutoShutdownHours != 12 || cfg.Git.GithubRepoURL != "https://example.com/user.git" ||
+		cfg.Gcloud.Workstation.AutoShutdownHours != 12 ||
 		cfg.Gcloud.Project != "user-proj" {
 		t.Errorf("unexpected merged Config: %+v", cfg)
 	}
@@ -45,7 +44,6 @@ func TestMerge_ProjectOverridesUser(t *testing.T) {
 	one := 1
 	eight := 8
 	user := &config.UserConfig{
-		Git: config.GitConfig{GithubRepoURL: "https://example.com/user.git"},
 		Gcloud: config.GcloudConfig{
 			Project: "user-proj",
 			Workstation: config.WorkstationConfig{
@@ -57,7 +55,6 @@ func TestMerge_ProjectOverridesUser(t *testing.T) {
 		},
 	}
 	project := &config.ProjectConfig{
-		Git: config.GitConfig{GithubRepoURL: "https://example.com/r.git"},
 		Gcloud: config.GcloudConfig{
 			Project: "my-proj",
 			Workstation: config.WorkstationConfig{
@@ -77,7 +74,7 @@ func TestMerge_ProjectOverridesUser(t *testing.T) {
 	if cfg.Gcloud.Workstation.MachineType != "e2-standard-4" {
 		t.Errorf("MachineType: got %q, want e2-standard-4 (from user)", cfg.Gcloud.Workstation.MachineType)
 	}
-	if cfg.Gcloud.Project != "my-proj" || cfg.Git.GithubRepoURL != "https://example.com/r.git" {
+	if cfg.Gcloud.Project != "my-proj" {
 		t.Errorf("project fields missing: %+v", cfg)
 	}
 	if cfg.Gcloud.Workstation.AutoSleepHours == nil || *cfg.Gcloud.Workstation.AutoSleepHours != 1 {
@@ -158,15 +155,6 @@ func TestMerge_GitIdentityUserOnly(t *testing.T) {
 	cfg, _ := config.Merge(user, &config.ProjectConfig{})
 	if cfg.Git.UserName != "Alice" || cfg.Git.UserEmail != "a@x.com" {
 		t.Errorf("git identity lost: %+v", cfg)
-	}
-}
-
-func TestMerge_GitRepoURL_UserDefaultProjectOverride(t *testing.T) {
-	user := &config.UserConfig{Git: config.GitConfig{GithubRepoURL: "https://example.com/user.git"}}
-	project := &config.ProjectConfig{Git: config.GitConfig{GithubRepoURL: "https://example.com/project.git"}}
-	cfg, _ := config.Merge(user, project)
-	if cfg.Git.GithubRepoURL != "https://example.com/project.git" {
-		t.Errorf("git.github_repo_url override lost: %+v", cfg)
 	}
 }
 

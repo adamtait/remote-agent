@@ -60,9 +60,8 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 	sleep := 2
 	cfg := &config.Config{
 		Git: config.GitConfig{
-			UserName:      "Alice",
-			UserEmail:     "a@x.com",
-			GithubRepoURL: "https://example.com/r.git",
+			UserName:  "Alice",
+			UserEmail: "a@x.com",
 		},
 		Gcloud: config.GcloudConfig{
 			Project: "p",
@@ -82,7 +81,6 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		},
 		Secrets: map[string]config.SecretEntry{
 			"claude_oauth": {SecretName: "claude-auth", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
-			"github_pat":   {SecretName: "github-pat", EnvVar: "GH_TOKEN"},
 			"my_extra":     {SecretName: "ex", EnvVar: "MY_EXTRA"},
 		},
 		Env: map[string]string{"STATIC_KEY": "abc"},
@@ -97,13 +95,10 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 	}
 	must := map[string]string{
 		"GCP_PROJECT_ID":              "p",
-		"GITHUB_REPO_URL":             "https://example.com/r.git",
 		"GIT_USER_NAME":               "Alice",
 		"GIT_USER_EMAIL":              "a@x.com",
 		"RA_SECRET_CLAUDE_OAUTH_NAME": "claude-auth",
 		"RA_SECRET_CLAUDE_OAUTH_VAR":  "CLAUDE_CODE_OAUTH_TOKEN",
-		"RA_SECRET_GITHUB_PAT_NAME":   "github-pat",
-		"RA_SECRET_GITHUB_PAT_VAR":    "GH_TOKEN",
 		"RA_SECRET_MY_EXTRA_NAME":     "ex",
 		"RA_SECRET_MY_EXTRA_VAR":      "MY_EXTRA",
 		"STATIC_KEY":                  "abc",
@@ -114,7 +109,7 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		}
 	}
 	parts := strings.Split(m["RA_SECRETS"], "|")
-	wantSet := map[string]bool{"claude_oauth": true, "github_pat": true, "my_extra": true}
+	wantSet := map[string]bool{"claude_oauth": true, "my_extra": true}
 	for _, p := range parts {
 		if !wantSet[p] {
 			t.Errorf("unexpected RA_SECRETS entry: %q", p)

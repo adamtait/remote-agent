@@ -20,9 +20,8 @@ func Merge(u *UserConfig, project *ProjectConfig) (*Config, error) {
 
 	cfg := &Config{
 		Git: GitConfig{
-			UserName:      u.Git.UserName,
-			UserEmail:     u.Git.UserEmail,
-			GithubRepoURL: pick(project.Git.GithubRepoURL, u.Git.GithubRepoURL),
+			UserName:  u.Git.UserName,
+			UserEmail: u.Git.UserEmail,
 		},
 		Gcloud: GcloudConfig{
 			Project: pick(project.Gcloud.Project, u.Gcloud.Project),

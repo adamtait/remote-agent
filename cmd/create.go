@@ -26,7 +26,6 @@ func buildContainerEnv(cfg *config.Config) string {
 	add := func(k, v string) { pairs = append(pairs, k+"="+v) }
 
 	add("GCP_PROJECT_ID", cfg.Gcloud.Project)
-	add("GITHUB_REPO_URL", cfg.Git.GithubRepoURL)
 	add("GIT_USER_NAME", cfg.Git.UserName)
 	add("GIT_USER_EMAIL", cfg.Git.UserEmail)
 	for _, pair := range reg.AllContainerEnvPairs(cfg) {
@@ -80,9 +79,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	ws := &cfg.Gcloud.Workstation
 
 	for field, val := range map[string]string{
-		"git_user_name":   cfg.Git.UserName,
-		"git_user_email":  cfg.Git.UserEmail,
-		"github_repo_url": cfg.Git.GithubRepoURL,
+		"git_user_name":  cfg.Git.UserName,
+		"git_user_email": cfg.Git.UserEmail,
 	} {
 		if strings.ContainsAny(val, ",=") {
 			return fmt.Errorf("%s must not contain ',' or '=' (gcloud --container-env limitation): %q", field, val)
