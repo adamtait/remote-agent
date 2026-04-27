@@ -36,11 +36,10 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 	for _, want := range []string{
 		`  user_name: "Alice"`,
 		`  user_email: "alice@example.com"`,
-		`  github_repo_url: https://github.com/a/b.git`,
 		`  project: my-proj-123`,
 		`    region: us-central1`,
 		`    machine_type: e2-standard-4`,
-		`  github_pat:`,
+		`secrets: {}`,
 		`env: {}`,
 	} {
 		if !strings.Contains(string(user), want) {
@@ -50,7 +49,6 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 
 	project, _ := os.ReadFile(filepath.Join(cwd, ".ra", "config.yaml"))
 	for _, want := range []string{
-		`  github_repo_url: https://github.com/a/b.git`,
 		`  project: my-proj-123`,
 		`#   workstation:`,
 		`# gcloud:`,

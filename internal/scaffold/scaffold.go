@@ -122,18 +122,10 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 			fmt.Fprintf(opts.Stderr, "WARN: could not confirm billing is enabled on %s\n", projectID)
 		}
 
-		repoURL, err := Prompt(stdin, opts.Stdout, "github_repo_url", probed.repoURL, ValidateGithubRepoURL)
+		_, err = Prompt(stdin, opts.Stdout, "github_repo_url", probed.repoURL, ValidateGithubRepoURL)
 		if err != nil {
 			return err
 		}
-		if normalized := NormalizeGithubRepoURL(repoURL); normalized != repoURL {
-			if opts.Stderr != nil {
-				fmt.Fprintf(opts.Stderr, "Converting SSH URL to HTTPS: %s → %s\n", repoURL, normalized)
-			}
-			repoURL = normalized
-		}
-		pv.GithubRepoURL = repoURL
-		uv.GithubRepoURL = repoURL
 	}
 
 	if writeUser && !writeProject {
@@ -144,17 +136,10 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		}
 		uv.GcloudProject = projectID
 
-		repoURL, err := Prompt(stdin, opts.Stdout, "github_repo_url", probed.repoURL, ValidateGithubRepoURL)
+		_, err = Prompt(stdin, opts.Stdout, "github_repo_url", probed.repoURL, ValidateGithubRepoURL)
 		if err != nil {
 			return err
 		}
-		if normalized := NormalizeGithubRepoURL(repoURL); normalized != repoURL {
-			if opts.Stderr != nil {
-				fmt.Fprintf(opts.Stderr, "Converting SSH URL to HTTPS: %s → %s\n", repoURL, normalized)
-			}
-			repoURL = normalized
-		}
-		uv.GithubRepoURL = repoURL
 	}
 
 	if writeUser {

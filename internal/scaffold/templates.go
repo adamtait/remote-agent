@@ -10,7 +10,6 @@ import (
 type UserValues struct {
 	GitUserName   string
 	GitUserEmail  string
-	GithubRepoURL string
 	GcloudProject string
 
 	Region             string
@@ -26,18 +25,9 @@ type UserValues struct {
 	AutoShutdownHours  int
 }
 
-// defaultGithubPatSecretsBlock is the hardcoded github_pat secret entry
-// rendered into the user config. It will move into a github plugin in a
-// follow-up changeset; isolating it here marks the seam.
-const defaultGithubPatSecretsBlock = `  github_pat:
-    secret_name: github-pat
-    env_var: GH_TOKEN
-`
-
 // ProjectValues are the prompt-gathered inputs for .ra/config.yaml.
 type ProjectValues struct {
-	ProjectID     string
-	GithubRepoURL string
+	ProjectID string
 }
 
 // Seed defaults applied when a UserValues field is zero.
@@ -56,7 +46,6 @@ const (
 	placeholderGitUserName = "your-name"
 	placeholderGitEmail    = "your-email@example.com"
 	placeholderProjectID   = "my-gcp-project"
-	placeholderRepoURL     = "https://github.com/my-org/my-repo.git"
 )
 
 func orStr(v, seed string) string {
@@ -77,7 +66,6 @@ func orInt(v, seed int) int {
 func RenderUserConfig(uv UserValues) string {
 	gitName := orStr(uv.GitUserName, placeholderGitUserName)
 	gitEmail := orStr(uv.GitUserEmail, placeholderGitEmail)
-	repoURL := orStr(uv.GithubRepoURL, placeholderRepoURL)
 	projectID := orStr(uv.GcloudProject, placeholderProjectID)
 
 	region := orStr(uv.Region, seedRegion)
@@ -100,7 +88,6 @@ func RenderUserConfig(uv UserValues) string {
 git:
   user_name: %q
   user_email: %q
-  github_repo_url: %s
 
 gcloud:
   project: %s
@@ -121,45 +108,38 @@ gcloud:
 # plugin contributes its own config block under plugins.<name>.*.
 plugins: {}
 
-# secrets — map GCP Secret Manager secrets to container env vars. Each
-# entry has the same {secret_name, env_var} shape. Logical names with
-# special handling:
-#
-#   github_pat    → installs git's credential helper (fresh fetch per git
-#                   op) AND exports env_var (GH_TOKEN) for `+"`gh`"+` CLI.
-#                   Env var is stale on rotation; git operations stay fresh.
-#
-# Other logical names: plain fetch + export. Rotation requires ra stop/start.
-secrets:
-%s
+# secrets — populated by `+"`ra plugin install`"+` for plugins that declare them.
+# Each entry has shape {secret_name, env_var}. Logical names matter to
+# plugin scripts (e.g. the github plugin reads RA_SECRET_GITHUB_PAT_NAME).
+secrets: {}
+
 # env — plain static env vars forwarded to the container (no secret fetch).
 env: {}
 `,
-		gitName, gitEmail, repoURL,
+		gitName, gitEmail,
 		projectID,
-		region, machine, disk, cluster, conf, sa, img, tag, repo, sleep, shutdown,
-		defaultGithubPatSecretsBlock)
+		region, machine, disk, cluster, conf, sa, img, tag, repo, sleep, shutdown)
 	return b.String()
 }
 
-// RenderProjectConfig returns a minimal .ra/config.yaml with the two
-// required project keys and commented-out override examples.
+// RenderProjectConfig returns a minimal .ra/config.yaml with the
+// required project key and commented-out override examples.
 func RenderProjectConfig(pv ProjectValues) string {
 	projectID := orStr(pv.ProjectID, placeholderProjectID)
-	repoURL := orStr(pv.GithubRepoURL, placeholderRepoURL)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, `# ra project config — committed to source control.
 # Precedence: project overrides user. See user config for defaults and
 # the full secrets/env schema.
 
-git:
-  github_repo_url: %s
-
 gcloud:
   project: %s
 
 # Uncomment any of the groups below to override user values for this project.
+#
+# git:
+#   user_name: Project-Specific Name
+#   user_email: project@example.com
 #
 # gcloud:
 #   workstation:
@@ -179,7 +159,7 @@ gcloud:
 #
 # env:
 #   MY_STATIC_VAR: foo
-`, repoURL, projectID)
+`, projectID)
 	return b.String()
 }
 
