@@ -1,0 +1,8 @@
+name: babashka
+version: "1.0.0"
+description: "Installs babashka (bb), a fast-starting native Clojure interpreter"
+config:
+  - name: enabled
+    type: bool
+    description: "Install babashka on the workstation?"
+    default: false
