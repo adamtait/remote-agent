@@ -1,9 +1,9 @@
 #!/bin/bash
-# Babashka plugin — install the bb binary at image build time.
-# To upgrade: update BB_VERSION (check https://github.com/babashka/babashka/releases).
+# Babashka plugin — install the latest bb binary at image build time.
 set -euo pipefail
 
-BB_VERSION="1.12.218"
+BB_VERSION=$(curl -fsSL https://api.github.com/repos/babashka/babashka/releases/latest \
+    | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
 BB_ARCHIVE="babashka-${BB_VERSION}-linux-amd64-static.tar.gz"
 BB_URL="https://github.com/babashka/babashka/releases/download/v${BB_VERSION}/${BB_ARCHIVE}"
 BB_DEST="/usr/local/bin/bb"
