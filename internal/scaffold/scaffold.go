@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
 func fileExists(path string) bool {
@@ -26,8 +24,6 @@ type InteractiveOptions struct {
 	Home   string
 	Prober Prober
 
-	Registry *plugins.Registry
-
 	Force             bool
 	ProjectOnly       bool
 	GlobalOnly        bool
@@ -41,12 +37,47 @@ type TemplateOptions struct {
 	Home   string
 	Prober Prober
 
-	Registry *plugins.Registry
-
 	Force             bool
 	ProjectOnly       bool
 	GlobalOnly        bool
 	WithProjectAssets bool
+}
+
+// WriteCoreAssets writes the embedded Dockerfile, workstation-startup.d
+// script, and profile.d wait script into baseDir (which is either
+// ~/.config/ra/ or .ra/). Skips files that already exist unless force.
+func WriteCoreAssets(baseDir string, force bool, stdout io.Writer) error {
+	return writeCoreAssets(baseDir, force, stdout)
+}
+
+// writeCoreAssets is the internal implementation of WriteCoreAssets.
+func writeCoreAssets(baseDir string, force bool, stdout io.Writer) error {
+	files := []struct {
+		rel  string
+		data []byte
+		mode os.FileMode
+	}{
+		{"Dockerfile", embeddedDockerfile, 0644},
+		{"workstation-startup.d/200_remote-agent-setup.sh", embeddedRemoteAgentSetup, 0755},
+		{"profile.d/00-ra-wait.sh", embeddedWaitScript, 0755},
+	}
+	for _, f := range files {
+		dest := filepath.Join(baseDir, f.rel)
+		if !force {
+			if _, err := os.Stat(dest); err == nil {
+				fmt.Fprintf(stdout, "skip %s (already present)\n", f.rel)
+				continue
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dest, f.data, f.mode); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "wrote %s\n", f.rel)
+	}
+	return nil
 }
 
 func InteractiveScaffold(opts InteractiveOptions) error {
@@ -134,15 +165,6 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		if uv.GitUserEmail, err = Prompt(stdin, opts.Stdout, "git_user_email", probed.gitEmail, nil); err != nil {
 			return err
 		}
-
-		uv.PluginFragments = make([][2]string, 0)
-		for _, p := range opts.Registry.All() {
-			block, secrets, err := p.Prompt(stdin, opts.Stdout)
-			if err != nil {
-				return err
-			}
-			uv.PluginFragments = append(uv.PluginFragments, [2]string{block, secrets})
-		}
 	}
 
 	if writeProject || writeUser {
@@ -165,24 +187,16 @@ func InteractiveScaffold(opts InteractiveOptions) error {
 		}
 	}
 
-	// Materialize build assets to user template dir.
-	userTemplateDir := filepath.Join(opts.Home, ".config", "ra", "template")
-	if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
-		TargetDir: userTemplateDir, Home: opts.Home, Stdout: opts.Stdout,
-		Force: opts.Force, OnlyMissing: !opts.Force,
-		ExtraAssets: opts.Registry.AllAssets(),
-	}); err != nil {
+	// Materialize build assets to user config dir.
+	userConfigDir := filepath.Join(opts.Home, ".config", "ra")
+	if err := writeCoreAssets(userConfigDir, opts.Force, opts.Stdout); err != nil {
 		return err
 	}
 
 	// Optionally also write assets into .ra/.
 	if opts.WithProjectAssets {
 		wsDir := filepath.Join(opts.Cwd, ".ra")
-		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
-			TargetDir: wsDir, Home: opts.Home, Stdout: opts.Stdout,
-			Force: opts.Force, OnlyMissing: !opts.Force,
-			ExtraAssets: opts.Registry.AllAssets(),
-		}); err != nil {
+		if err := writeCoreAssets(wsDir, opts.Force, opts.Stdout); err != nil {
 			return err
 		}
 	}
@@ -207,32 +221,18 @@ func TemplateScaffold(opts TemplateOptions) error {
 		return fmt.Errorf("--project-only and --global-only are mutually exclusive")
 	}
 
-	// Materialize build assets.
-	userTemplateDir := filepath.Join(opts.Home, ".config", "ra", "template")
+	// Materialize build assets to user config dir.
+	userConfigDir := filepath.Join(opts.Home, ".config", "ra")
 	if !opts.GlobalOnly {
-		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
-			TargetDir: userTemplateDir, Home: opts.Home, Stdout: opts.Stdout,
-			Force: opts.Force, OnlyMissing: !opts.Force,
-			ExtraAssets: opts.Registry.AllAssets(),
-		}); err != nil {
+		if err := writeCoreAssets(userConfigDir, opts.Force, opts.Stdout); err != nil {
 			return err
 		}
 	}
 	if opts.WithProjectAssets {
 		wsDir := filepath.Join(opts.Cwd, ".ra")
-		if _, err := ScaffoldAssets(ScaffoldAssetsOptions{
-			TargetDir: wsDir, Home: opts.Home, Stdout: opts.Stdout,
-			Force: opts.Force, OnlyMissing: !opts.Force,
-			ExtraAssets: opts.Registry.AllAssets(),
-		}); err != nil {
+		if err := writeCoreAssets(wsDir, opts.Force, opts.Stdout); err != nil {
 			return err
 		}
-	}
-
-	var templateUV UserValues
-	for _, p := range opts.Registry.All() {
-		block, secrets := p.DefaultConfigFragments()
-		templateUV.PluginFragments = append(templateUV.PluginFragments, [2]string{block, secrets})
 	}
 
 	if !opts.GlobalOnly {
@@ -251,7 +251,7 @@ func TemplateScaffold(opts TemplateOptions) error {
 		if !opts.Force && fileExists(path) {
 			fmt.Fprintf(opts.Stdout, "skip %s (already present); re-run with --force to regenerate\n", path)
 		} else {
-			if err := WriteAtomic(path, []byte(RenderUserConfig(templateUV)), opts.Force); err != nil {
+			if err := WriteAtomic(path, []byte(RenderUserConfig(UserValues{})), opts.Force); err != nil {
 				return err
 			}
 			fmt.Fprintln(opts.Stdout, "Wrote "+path)
@@ -276,7 +276,6 @@ func probeDefaults(p Prober) probedDefaults {
 		gitEmail:  p.GitUserEmail(),
 	}
 }
-
 
 func warnPrereqs(out io.Writer, p Prober) {
 	if out == nil {

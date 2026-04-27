@@ -64,34 +64,6 @@ func TestLoadPlugin_MissingName(t *testing.T) {
 	}
 }
 
-func TestFilePlugin_Assets_NoScripts(t *testing.T) {
-	p, _ := LoadPlugin(testPluginFS(nil))
-	assets := p.Assets()
-	if len(assets) != 0 {
-		t.Errorf("expected 0 assets when scripts absent, got %d", len(assets))
-	}
-}
-
-func TestFilePlugin_Assets_WithScripts(t *testing.T) {
-	p, _ := LoadPlugin(testPluginFS(map[string]string{
-		"install.sh": "#!/bin/bash\necho install",
-		"setup.sh":   "#!/bin/bash\necho setup",
-	}))
-	assets := p.Assets()
-	if len(assets) != 2 {
-		t.Fatalf("expected 2 assets, got %d", len(assets))
-	}
-	if assets[0].Name != "plugins/myplugin/install.sh" {
-		t.Errorf("assets[0].Name = %q", assets[0].Name)
-	}
-	if assets[1].Name != "plugins/myplugin/setup.sh" {
-		t.Errorf("assets[1].Name = %q", assets[1].Name)
-	}
-	if assets[0].FileMode != 0755 {
-		t.Errorf("assets[0].FileMode = %v", assets[0].FileMode)
-	}
-}
-
 func TestFilePlugin_DefaultConfigFragments(t *testing.T) {
 	p, _ := LoadPlugin(testPluginFS(nil))
 	cfg, secrets := p.DefaultConfigFragments()

@@ -36,23 +36,6 @@ func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
 // Name returns the plugin's canonical identifier.
 func (p *FilePlugin) Name() string { return p.schema.Name }
 
-// Assets returns install.sh and setup.sh if present, named plugins/<name>/<script>.
-func (p *FilePlugin) Assets() []Asset {
-	var assets []Asset
-	for _, script := range []string{"install.sh", "setup.sh"} {
-		b, err := fs.ReadFile(p.fsys, script)
-		if err != nil {
-			continue
-		}
-		assets = append(assets, Asset{
-			Name:     "plugins/" + p.schema.Name + "/" + script,
-			Bytes:    b,
-			FileMode: 0755,
-		})
-	}
-	return assets
-}
-
 // DefaultConfigFragments returns the zero-value config YAML block for this plugin.
 func (p *FilePlugin) DefaultConfigFragments() (configBlock string, secretsBlock string) {
 	defaults := make(map[string]interface{})

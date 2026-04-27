@@ -20,18 +20,6 @@ func (r *Registry) All() []*FilePlugin {
 	return r.plugins
 }
 
-// AllAssets returns the union of all plugin assets.
-func (r *Registry) AllAssets() []Asset {
-	if r == nil {
-		return nil
-	}
-	var out []Asset
-	for _, p := range r.plugins {
-		out = append(out, p.Assets()...)
-	}
-	return out
-}
-
 // ValidateAll runs every plugin's Validate and accumulates error strings.
 func (r *Registry) ValidateAll(cfg *config.Config) []string {
 	if r == nil {
