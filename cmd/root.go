@@ -37,7 +37,7 @@ func init() {
 
 var rootCmd = &cobra.Command{
 	Use:           "ra",
-	Short:         "Manage Google Cloud Workstations with Claude Code",
+	Short:         "Provision and manage plugin-extensible Google Cloud Workstations",
 	SilenceErrors: true, // cmd.Execute/ExecuteWithIO print errors explicitly
 	SilenceUsage:  true, // don't dump --help on runtime errors
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

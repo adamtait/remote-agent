@@ -60,7 +60,7 @@ func buildContainerEnv(cfg *config.Config) string {
 
 var createCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Provision a Google Cloud Workstation with Claude Code",
+	Short: "Provision a Google Cloud Workstation",
 	Long: `Always provisions a new workstation. Cluster, config, image, secrets,
 and IAM setup remain idempotent; the workstation itself is freshly created on
 every run. Use --name to set the workstation name (auto-suffixed on collision);
@@ -159,7 +159,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		if err := r.Run("artifacts", "repositories", "create", ws.RepoName,
 			"--repository-format=docker",
 			"--location", ws.Region,
-			"--description=Claude Code workstation images",
+			"--description=ra workstation images",
 			"--project", cfg.Gcloud.Project); err != nil {
 			return fmt.Errorf("creating artifact registry repo: %w", err)
 		}
@@ -372,7 +372,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf(`
 ================================================================
-  Claude Code workstation is ready
+  Workstation is ready
 ================================================================
   Browser IDE  : https://80-%s
   Workstation  : %s
