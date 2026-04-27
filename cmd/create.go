@@ -1,25 +1,20 @@
 package cmd
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/adamtait/remote-agent/internal/config"
-	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/naming"
-	"github.com/adamtait/remote-agent/internal/plugins"
 	"github.com/adamtait/remote-agent/internal/scaffold"
+	"github.com/adamtait/remote-agent/internal/secrets"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 func logicalNameToEnvToken(logical string) string {
@@ -65,7 +60,7 @@ func buildContainerEnv(cfg *config.Config) string {
 
 var createCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Provision a Google Cloud Workstation with Claude Code",
+	Short: "Provision a Google Cloud Workstation",
 	Long: `Always provisions a new workstation. Cluster, config, image, secrets,
 and IAM setup remain idempotent; the workstation itself is freshly created on
 every run. Use --name to set the workstation name (auto-suffixed on collision);
@@ -164,7 +159,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		if err := r.Run("artifacts", "repositories", "create", ws.RepoName,
 			"--repository-format=docker",
 			"--location", ws.Region,
-			"--description=Claude Code workstation images",
+			"--description=ra workstation images",
 			"--project", cfg.Gcloud.Project); err != nil {
 			return fmt.Errorf("creating artifact registry repo: %w", err)
 		}
@@ -181,17 +176,15 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("determining working directory: %w", err)
 	}
-	cleanupAssets, err := materializeBuildAssets(cwd, home)
+	_, buildCleanup, err := scaffold.AssembleBuildContext(scaffold.BuildContextOptions{
+		Cwd:     cwd,
+		Home:    home,
+		Plugins: reg.All(),
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("assembling build context: %w", err)
 	}
-	defer cleanupAssets()
-
-	_, stageCleanup, err := scaffold.StageProfileD(cwd, home)
-	if err != nil {
-		return fmt.Errorf("staging profile.d: %w", err)
-	}
-	defer stageCleanup()
+	defer buildCleanup()
 
 	if err := r.Run("auth", "configure-docker", fmt.Sprintf("%s-docker.pkg.dev", ws.Region), "--quiet"); err != nil {
 		return fmt.Errorf("configuring docker auth: %w", err)
@@ -210,7 +203,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	for _, logical := range secretLogicalOrder {
 		s := cfg.Secrets[logical]
 		prompt := fmt.Sprintf("Enter value for secret %q (env var %s)", s.SecretName, s.EnvVar)
-		if err := ensureSecret(r, cfg.Gcloud.Project, s.SecretName, prompt); err != nil {
+		if err := secrets.EnsureSecret(r, cfg.Gcloud.Project, s.SecretName, prompt, os.Stderr, os.Stdin); err != nil {
 			return fmt.Errorf("ensuring secret %s: %w", s.SecretName, err)
 		}
 	}
@@ -379,7 +372,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf(`
 ================================================================
-  Claude Code workstation is ready
+  Workstation is ready
 ================================================================
   Browser IDE  : https://80-%s
   Workstation  : %s
@@ -406,39 +399,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ensureSecret checks if a secret exists and creates it if not, prompting the user for the value.
-func ensureSecret(r gcloud.Runner, projectID, name, prompt string) error {
-	if r.Check("secrets", "describe", name, "--project", projectID) {
-		fmt.Printf("Secret '%s' already exists (use 'gcloud secrets versions add' to rotate)\n", name)
-		return nil
-	}
-
-	fmt.Fprintf(os.Stderr, "%s: ", prompt)
-	value, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Fprintln(os.Stderr)
-	if err != nil {
-		return fmt.Errorf("reading secret value: %w", err)
-	}
-	if len(strings.TrimSpace(string(value))) == 0 {
-		return fmt.Errorf("secret value cannot be empty")
-	}
-	// Best-effort scrub: only clears the backing array we still hold; Go's GC may have copied it.
-	defer func() {
-		for i := range value {
-			value[i] = 0
-		}
-	}()
-
-	if err := r.RunWithStdin(bytes.NewReader(value),
-		"secrets", "create", name,
-		"--replication-policy=automatic",
-		"--data-file=-",
-		"--project", projectID); err != nil {
-		return fmt.Errorf("creating secret %s: %w", name, err)
-	}
-	return nil
-}
-
 // dockerRunner runs docker commands with stdout/stderr forwarded to the terminal.
 type dockerRunner struct{}
 
@@ -447,105 +407,6 @@ func (d dockerRunner) Run(args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-// materializeBuildAssets ensures all build assets (core + plugin) exist under
-// .ra/ for docker build. Missing files are resolved from user template or
-// embedded defaults. Pre-existing files are untouched. The returned cleanup
-// func removes only files (and empty subdirs) that were created by this call.
-func materializeBuildAssets(cwd, home string) (func(), error) {
-	wsDir := filepath.Join(cwd, ".ra")
-	if err := os.MkdirAll(wsDir, 0755); err != nil {
-		return func() {}, fmt.Errorf("creating .ra/: %w", err)
-	}
-	var written []string
-	var createdDirs []string
-	rollback := func() {
-		for _, p := range written {
-			os.Remove(p)
-		}
-		for i := len(createdDirs) - 1; i >= 0; i-- {
-			os.Remove(createdDirs[i])
-		}
-	}
-
-	ensureParent := func(dest string) error {
-		parent := filepath.Dir(dest)
-		if parent == wsDir {
-			return nil
-		}
-		if _, statErr := os.Stat(parent); errors.Is(statErr, os.ErrNotExist) {
-			if err := os.MkdirAll(parent, 0755); err != nil {
-				return fmt.Errorf("creating %s: %w", parent, err)
-			}
-			createdDirs = append(createdDirs, parent)
-		} else if statErr != nil {
-			return fmt.Errorf("checking %s: %w", parent, statErr)
-		}
-		return nil
-	}
-
-	for _, n := range scaffold.AssetNames {
-		dest := filepath.Join(wsDir, n)
-		if _, statErr := os.Stat(dest); statErr == nil {
-			continue
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			rollback()
-			return func() {}, fmt.Errorf("checking %s: %w", dest, statErr)
-		}
-		if err := ensureParent(dest); err != nil {
-			rollback()
-			return func() {}, err
-		}
-		data, _, err := scaffold.ResolveSource(home, "", n)
-		if err != nil {
-			rollback()
-			return func() {}, fmt.Errorf("resolving %s: %w", n, err)
-		}
-		if err := os.WriteFile(dest, data, scaffold.AssetMode(n)); err != nil {
-			rollback()
-			return func() {}, fmt.Errorf("writing %s: %w", dest, err)
-		}
-		written = append(written, dest)
-	}
-
-	for _, asset := range reg.AllAssets() {
-		dest := filepath.Join(wsDir, asset.Name)
-		if _, statErr := os.Stat(dest); statErr == nil {
-			continue
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			rollback()
-			return func() {}, fmt.Errorf("checking %s: %w", dest, statErr)
-		}
-		if err := ensureParent(dest); err != nil {
-			rollback()
-			return func() {}, err
-		}
-		data, err := resolvePluginAsset(home, asset)
-		if err != nil {
-			rollback()
-			return func() {}, fmt.Errorf("resolving %s: %w", asset.Name, err)
-		}
-		if err := os.WriteFile(dest, data, asset.FileMode); err != nil {
-			rollback()
-			return func() {}, fmt.Errorf("writing %s: %w", asset.Name, err)
-		}
-		written = append(written, dest)
-	}
-
-	return rollback, nil
-}
-
-// resolvePluginAsset returns the bytes to use for a plugin asset.
-// Checks user template override first; falls back to the asset's embedded bytes.
-func resolvePluginAsset(home string, asset plugins.Asset) ([]byte, error) {
-	userPath := filepath.Join(home, ".config", "ra", "template", asset.Name)
-	if data, err := os.ReadFile(userPath); err == nil {
-		return data, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("reading user template %s: %w", asset.Name, err)
-	}
-	return asset.Bytes, nil
 }
 
 // dockerBuildArgs returns the buildx args used by `ra create`, centralized so
@@ -557,8 +418,8 @@ func dockerBuildArgs(imageURI string) []string {
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", imageURI,
-		"-f", ".ra/Dockerfile",
+		"-f", ".ra/.build/Dockerfile",
 		"--push",
-		".",
+		".ra/.build",
 	}
 }

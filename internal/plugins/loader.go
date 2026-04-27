@@ -1,34 +1,15 @@
 package plugins
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 )
 
-// LoadAll returns all plugins from embedded defaults, user-global dir, and
-// project-local dir. Priority (highest last): embedded → user-global → project-local.
-// Plugins of the same name are shadowed entirely by the higher-priority source.
+// LoadAll returns all plugins from user-global dir and project-local dir.
+// Project-local plugins shadow user-global plugins of the same name entirely.
 func LoadAll(userDir, projectDir string) ([]*FilePlugin, error) {
 	byName := make(map[string]*FilePlugin)
-
-	// Embedded defaults (lowest priority).
-	entries, _ := defaultsFS.ReadDir("defaults")
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		sub, err := fs.Sub(defaultsFS, "defaults/"+e.Name())
-		if err != nil {
-			continue
-		}
-		p, err := LoadPlugin(sub)
-		if err != nil {
-			continue
-		}
-		byName[p.Name()] = p
-	}
 
 	loadDir(userDir, byName)
 	loadDir(projectDir, byName)

@@ -24,11 +24,15 @@ type UserValues struct {
 	RepoName           string
 	AutoSleepHours     int
 	AutoShutdownHours  int
-
-	// PluginFragments holds [configBlock, secretsBlock] pairs contributed by
-	// each registered plugin during interactive setup.
-	PluginFragments [][2]string
 }
+
+// defaultGithubPatSecretsBlock is the hardcoded github_pat secret entry
+// rendered into the user config. It will move into a github plugin in a
+// follow-up changeset; isolating it here marks the seam.
+const defaultGithubPatSecretsBlock = `  github_pat:
+    secret_name: github-pat
+    env_var: GH_TOKEN
+`
 
 // ProjectValues are the prompt-gathered inputs for .ra/config.yaml.
 type ProjectValues struct {
@@ -88,13 +92,6 @@ func RenderUserConfig(uv UserValues) string {
 	sleep := orInt(uv.AutoSleepHours, seedAutoSleepHours)
 	shutdown := orInt(uv.AutoShutdownHours, seedAutoShutdownHours)
 
-	var configPluginBlocks strings.Builder
-	var secretsPluginBlocks strings.Builder
-	for _, frag := range uv.PluginFragments {
-		configPluginBlocks.WriteString(frag[0])
-		secretsPluginBlocks.WriteString(frag[1])
-	}
-
 	var b strings.Builder
 	fmt.Fprintf(&b, `# ra user config — baseline for all ra commands.
 # Every required key is set here. Project configs (.ra/config.yaml)
@@ -120,10 +117,10 @@ gcloud:
     auto_sleep_hours: %d
     auto_shutdown_hours: %d
 
-# plugins — per-plugin config. Each plugin declares its own fields;
-# the enabled/auth_provider fields are conventional. Run 'ra plugin list'
-# to see installed plugins.
-%s
+# plugins — installed via 'ra plugin install <git-url-or-path>'. Each
+# plugin contributes its own config block under plugins.<name>.*.
+plugins: {}
+
 # secrets — map GCP Secret Manager secrets to container env vars. Each
 # entry has the same {secret_name, env_var} shape. Logical names with
 # special handling:
@@ -134,18 +131,14 @@ gcloud:
 #
 # Other logical names: plain fetch + export. Rotation requires ra stop/start.
 secrets:
-%s  github_pat:
-    secret_name: github-pat
-    env_var: GH_TOKEN
-
+%s
 # env — plain static env vars forwarded to the container (no secret fetch).
 env: {}
 `,
 		gitName, gitEmail, repoURL,
 		projectID,
 		region, machine, disk, cluster, conf, sa, img, tag, repo, sleep, shutdown,
-		configPluginBlocks.String(),
-		secretsPluginBlocks.String())
+		defaultGithubPatSecretsBlock)
 	return b.String()
 }
 

@@ -8,20 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adamtait/remote-agent/internal/plugins"
 	"github.com/adamtait/remote-agent/internal/scaffold"
 )
-
-func claudeRegistry() *plugins.Registry {
-	loaded, err := plugins.LoadAll("", "")
-	if err != nil {
-		panic("claudeRegistry: " + err.Error())
-	}
-	return plugins.NewRegistry(loaded)
-}
-
-// New prompt order (full run): project_id, github_repo_url, git_user_name,
-// git_user_email, enable_claude, (if enabled) auth_mode, confirm.
 
 func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 	cwd := t.TempDir()
@@ -32,8 +20,6 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 		"https://github.com/a/b.git",
 		"Alice",
 		"alice@example.com",
-		"y", // enable claude
-		"1", // oauth
 		"y", // confirm
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
@@ -41,7 +27,6 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("InteractiveScaffold: %v", err)
@@ -55,8 +40,6 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 		`  project: my-proj-123`,
 		`    region: us-central1`,
 		`    machine_type: e2-standard-4`,
-		`  claude_oauth:`,
-		`    secret_name: claude-code-oauth-token`,
 		`  github_pat:`,
 		`env: {}`,
 	} {
@@ -78,107 +61,40 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 		}
 	}
 
-	// User-dir assets exist; .ws/ assets do NOT (default — no --with-project-assets).
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		userAsset := filepath.Join(home, ".config", "ra", "template", name)
-		if _, err := os.Stat(userAsset); err != nil {
-			t.Errorf("user asset %s not materialized: %v", userAsset, err)
-		}
-		projectAsset := filepath.Join(cwd, ".ra", name)
-		if _, err := os.Stat(projectAsset); err == nil {
-			t.Errorf("project asset %s should NOT exist without --with-project-assets", projectAsset)
-		}
+	// User-dir assets exist (written to ~/.config/ra/).
+	userAsset := filepath.Join(home, ".config", "ra", "Dockerfile")
+	if _, err := os.Stat(userAsset); err != nil {
+		t.Errorf("user asset Dockerfile not materialized: %v", err)
+	}
+	// Project-local assets do NOT exist without --with-project-assets.
+	projectAsset := filepath.Join(cwd, ".ra", "Dockerfile")
+	if _, err := os.Stat(projectAsset); err == nil {
+		t.Errorf("project asset Dockerfile should NOT exist without --with-project-assets")
 	}
 }
 
-func TestInteractiveScaffold_ClaudeDisabled_SkipsAuthModeAndOmitsClaudeSecrets(t *testing.T) {
-	cwd := t.TempDir()
-	home := t.TempDir()
-	// After git email we answer "n" to claude_enabled — auth_mode prompt
-	// must NOT run, so fewer lines are consumed than in the enabled case.
-	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123",
-		"https://github.com/a/b.git",
-		"Alice",
-		"alice@example.com",
-		"n",
-		"y",
-	}, "\n") + "\n")
-	var stdout, stderr bytes.Buffer
-	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
-		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
-		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
-	})
-	if err != nil {
-		t.Fatalf("InteractiveScaffold: %v", err)
-	}
-
-	user, _ := os.ReadFile(filepath.Join(home, ".config", "ra", "config.yaml"))
-	if !strings.Contains(string(user), "enabled: false") {
-		t.Errorf("expected enabled: false in user config:\n%s", user)
-	}
-	for _, forbidden := range []string{"claude_oauth:", "claude_apikey:", "auth_provider:"} {
-		if strings.Contains(string(user), forbidden) {
-			t.Errorf("disabled-claude user config should not contain %q:\n%s", forbidden, user)
-		}
-	}
-}
-
-func TestInteractiveScaffold_APIKeyMode(t *testing.T) {
+func TestInteractiveScaffold_WithProjectAssetsCopiesAssetsToDotRA(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123",
-		"https://github.com/a/b.git",
-		"Alice",
-		"alice@example.com",
-		"y", // enable claude
-		"2", // apikey
-		"y", // confirm
+		"my-proj-123", "https://github.com/a/b.git", "Alice", "alice@example.com", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	user, _ := os.ReadFile(filepath.Join(home, ".config", "ra", "config.yaml"))
-	if !strings.Contains(string(user), "claude_apikey:") {
-		t.Errorf("expected claude_apikey entry in apikey mode:\n%s", user)
-	}
-	if strings.Contains(string(user), "claude_oauth:") {
-		t.Errorf("unexpected claude_oauth entry in apikey mode:\n%s", user)
-	}
-}
-
-func TestInteractiveScaffold_WithProjectAssetsCopiesAssetsToDotWS(t *testing.T) {
-	cwd := t.TempDir()
-	home := t.TempDir()
-	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "Alice", "alice@example.com", "y", "1", "y",
-	}, "\n") + "\n")
-	var stdout, stderr bytes.Buffer
-
-	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
-		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
-		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry:          claudeRegistry(),
 		WithProjectAssets: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+	for _, name := range []string{"Dockerfile", "workstation-startup.d/200_remote-agent-setup.sh"} {
 		if _, err := os.Stat(filepath.Join(cwd, ".ra", name)); err != nil {
-			t.Errorf(".ws/%s missing despite --with-project-assets: %v", name, err)
+			t.Errorf(".ra/%s missing despite --with-project-assets: %v", name, err)
 		}
-		if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); err != nil {
-			t.Errorf("user template %s missing: %v", name, err)
+		if _, err := os.Stat(filepath.Join(home, ".config", "ra", name)); err != nil {
+			t.Errorf("user config dir %s missing: %v", name, err)
 		}
 	}
 }
@@ -201,7 +117,6 @@ func TestInteractiveScaffold_IdempotentWithoutForce(t *testing.T) {
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("expected no-op success, got %v", err)
@@ -224,15 +139,14 @@ func TestInteractiveScaffold_ProjectExists_SkipsAndPreserves(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Project exists → user config still prompts for project_id and github_repo_url,
-	// then git_user_name, git_user_email, enable_claude, auth_mode, confirm.
+	// then git_user_name, git_user_email, confirm.
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "Alice", "alice@example.com", "y", "1", "y",
+		"my-proj-123", "https://github.com/a/b.git", "Alice", "alice@example.com", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("expected no error for pre-existing project config, got: %v", err)
@@ -241,9 +155,9 @@ func TestInteractiveScaffold_ProjectExists_SkipsAndPreserves(t *testing.T) {
 	if string(got) != "existing: true\n" {
 		t.Errorf("existing project file modified: %q", got)
 	}
-	// User template assets materialized.
-	if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", "Dockerfile")); err != nil {
-		t.Errorf("Dockerfile not materialized in user template dir: %v", err)
+	// Core assets materialized in user config dir.
+	if _, err := os.Stat(filepath.Join(home, ".config", "ra", "Dockerfile")); err != nil {
+		t.Errorf("Dockerfile not materialized in user config dir: %v", err)
 	}
 }
 
@@ -267,7 +181,6 @@ func TestInteractiveScaffold_BothConfigsExist_IsNoOp(t *testing.T) {
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("expected no error when both configs exist, got: %v", err)
@@ -280,11 +193,9 @@ func TestInteractiveScaffold_BothConfigsExist_IsNoOp(t *testing.T) {
 	if string(global) != "existing: global\n" {
 		t.Errorf("global config modified: %q", global)
 	}
-	// Assets still materialized in user template dir.
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); err != nil {
-			t.Errorf("%s not materialized on re-run: %v", name, err)
-		}
+	// Assets still materialized in user config dir.
+	if _, err := os.Stat(filepath.Join(home, ".config", "ra", "Dockerfile")); err != nil {
+		t.Errorf("Dockerfile not materialized on re-run: %v", err)
 	}
 }
 
@@ -298,7 +209,6 @@ func TestInteractiveScaffold_ProjectOnlySkipsGlobal(t *testing.T) {
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry:    claudeRegistry(),
 		ProjectOnly: true,
 	})
 	if err != nil {
@@ -316,7 +226,6 @@ func TestInteractiveScaffold_MutuallyExclusiveFlags(t *testing.T) {
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
 		Cwd: t.TempDir(), Home: t.TempDir(), Prober: &scaffold.StaticProber{},
-		Registry:    claudeRegistry(),
 		ProjectOnly: true, GlobalOnly: true,
 	})
 	if err == nil {
@@ -328,21 +237,18 @@ func TestInteractiveScaffold_NoCancelsOnProceed(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	// Full run prompts: project_id, github_repo_url, git_user_name,
-	// git_user_email, enable_claude, auth_mode (if enabled), no (cancel).
+	// git_user_email, then "no" to cancel.
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
 		"https://github.com/a/b.git",
 		"Alice",
 		"alice@example.com",
-		"y",
-		"1",
 		"no",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
 	})
 	if err == nil {
 		t.Fatal("expected cancellation error, got nil")
@@ -360,15 +266,12 @@ func TestInteractiveScaffold_DeclineWrapsErrCancelled(t *testing.T) {
 		"https://github.com/a/b.git",
 		"Alice",
 		"alice@example.com",
-		"y",
-		"1",
 		"no",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -387,14 +290,11 @@ func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
 		"Alice",
 		"alice@example.com",
 		"y",
-		"1",
-		"y",
 	}, "\n") + "\n")
 	var stdout bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: stdin, Stdout: &stdout, Stderr: nil,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error with nil Stderr: %v", err)
@@ -421,7 +321,6 @@ func TestInteractiveScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) 
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 		Stdin: stdin, Stdout: &stdout, Stderr: &stderr,
 		Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("expected no error for pre-existing global config, got: %v", err)
@@ -430,10 +329,8 @@ func TestInteractiveScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) 
 	if !bytes.Equal(got, original) {
 		t.Errorf("existing global config modified: %q", got)
 	}
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, statErr := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); statErr != nil {
-			t.Errorf("%s not materialized in user template dir: %v", name, statErr)
-		}
+	if _, statErr := os.Stat(filepath.Join(home, ".config", "ra", "Dockerfile")); statErr != nil {
+		t.Errorf("Dockerfile not materialized in user config dir: %v", statErr)
 	}
 }
 
@@ -452,7 +349,6 @@ func TestTemplateScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) {
 	var stdout bytes.Buffer
 	err := scaffold.TemplateScaffold(scaffold.TemplateOptions{
 		Stdout: &stdout, Cwd: cwd, Home: home, Prober: &scaffold.StaticProber{},
-		Registry: claudeRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("expected no error for pre-existing global config, got: %v", err)
@@ -461,9 +357,7 @@ func TestTemplateScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) {
 	if !bytes.Equal(got, original) {
 		t.Errorf("existing global config modified: %q", got)
 	}
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, statErr := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); statErr != nil {
-			t.Errorf("%s not materialized in user template dir: %v", name, statErr)
-		}
+	if _, statErr := os.Stat(filepath.Join(home, ".config", "ra", "Dockerfile")); statErr != nil {
+		t.Errorf("Dockerfile not materialized in user config dir: %v", statErr)
 	}
 }

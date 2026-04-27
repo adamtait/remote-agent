@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"strings"
 
 	"github.com/adamtait/remote-agent/internal/config"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,23 +37,6 @@ func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
 
 // Name returns the plugin's canonical identifier.
 func (p *FilePlugin) Name() string { return p.schema.Name }
-
-// Assets returns install.sh and setup.sh if present, named plugins/<name>/<script>.
-func (p *FilePlugin) Assets() []Asset {
-	var assets []Asset
-	for _, script := range []string{"install.sh", "setup.sh"} {
-		b, err := fs.ReadFile(p.fsys, script)
-		if err != nil {
-			continue
-		}
-		assets = append(assets, Asset{
-			Name:     "plugins/" + p.schema.Name + "/" + script,
-			Bytes:    b,
-			FileMode: 0755,
-		})
-	}
-	return assets
-}
 
 // DefaultConfigFragments returns the zero-value config YAML block for this plugin.
 func (p *FilePlugin) DefaultConfigFragments() (configBlock string, secretsBlock string) {
@@ -134,14 +119,24 @@ func (p *FilePlugin) validateConfig(pluginCfg map[string]interface{}) []string {
 	return errs
 }
 
-// Prompt interactively collects plugin config from the user and returns YAML fragments.
-func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer) (configBlock string, secretsBlock string, err error) {
-	pluginCfg := make(map[string]interface{})
+// PromptResult is what FilePlugin.Prompt returns: the structured values
+// the caller needs to (a) upload secrets to GCP Secret Manager and
+// (b) write config blocks to config.yaml.
+type PromptResult struct {
+	Config       map[string]any    // field name → value
+	AuthProvider *AuthProvider     // nil if plugin has none
+	SecretValues map[string]string // logical secret name → plaintext value
+}
 
+// Prompt interactively collects plugin config + auth provider + secret
+// values from the user. Returns a structured result; the caller renders
+// YAML and uploads secrets.
+func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, stdin *os.File) (*PromptResult, error) {
+	pluginCfg := make(map[string]any)
 	for _, f := range p.schema.Config {
 		val, e := promptField(r, out, f)
 		if e != nil {
-			return "", "", e
+			return nil, e
 		}
 		pluginCfg[f.Name] = val
 	}
@@ -159,15 +154,66 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer) (configBlock string,
 	if enabled && len(p.schema.AuthProviders) > 0 {
 		ap, e := promptAuthProvider(r, out, p.schema.AuthProviders)
 		if e != nil {
-			return "", "", e
+			return nil, e
 		}
 		pluginCfg["auth_provider"] = ap.Name
 		activeProvider = ap
 	}
 
-	return buildPluginsConfigBlock(p.schema.Name, pluginCfg),
-		buildSecretsBlock(p.schema.Secrets, activeProvider),
-		nil
+	values := make(map[string]string)
+	if enabled {
+		// Top-level secrets (always prompted when enabled).
+		for _, s := range p.schema.Secrets {
+			v, e := promptSecretValue(stdin, stderr, s)
+			if e != nil {
+				return nil, e
+			}
+			values[s.Name] = v
+		}
+		// Active-provider secrets.
+		if activeProvider != nil {
+			for _, s := range activeProvider.Secrets {
+				v, e := promptSecretValue(stdin, stderr, s)
+				if e != nil {
+					return nil, e
+				}
+				values[s.Name] = v
+			}
+		}
+	}
+
+	return &PromptResult{
+		Config:       pluginCfg,
+		AuthProvider: activeProvider,
+		SecretValues: values,
+	}, nil
+}
+
+// promptSecretValue reads a plaintext secret value with hidden input.
+func promptSecretValue(stdin *os.File, stderr io.Writer, s SecretDef) (string, error) {
+	fmt.Fprintf(stderr, "Enter value for secret %q (env var %s): ", s.Name, s.EnvVar)
+	val, err := term.ReadPassword(int(stdin.Fd()))
+	fmt.Fprintln(stderr)
+	if err != nil {
+		return "", fmt.Errorf("reading secret %s: %w", s.Name, err)
+	}
+	v := strings.TrimSpace(string(val))
+	if v == "" {
+		return "", fmt.Errorf("secret %s cannot be empty", s.Name)
+	}
+	return v, nil
+}
+
+// RenderConfigBlock returns the YAML fragment for plugins.<name>.* given
+// a PromptResult — used by `ra plugin install` when writing to config.
+func (p *FilePlugin) RenderConfigBlock(res *PromptResult) string {
+	return buildPluginsConfigBlock(p.schema.Name, res.Config)
+}
+
+// RenderSecretsBlock returns the YAML fragment for the secrets: section
+// (indented entries, no root key) for the secrets relevant to res.
+func (p *FilePlugin) RenderSecretsBlock(res *PromptResult) string {
+	return buildSecretsBlock(p.schema.Secrets, res.AuthProvider)
 }
 
 func promptField(r *bufio.Reader, out io.Writer, f ConfigField) (interface{}, error) {
@@ -257,6 +303,11 @@ func buildPluginsConfigBlock(name string, cfg map[string]interface{}) string {
 	})
 	return string(out)
 }
+
+// FS returns the filesystem rooted at the plugin's directory. Used by
+// callers (e.g. the build-context assembler) that need to walk plugin-
+// contributed asset directories.
+func (p *FilePlugin) FS() fs.FS { return p.fsys }
 
 // Schema returns the plugin's parsed schema.
 func (p *FilePlugin) Schema() PluginSchema { return p.schema }

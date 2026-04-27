@@ -43,7 +43,6 @@ is set.`,
 		return scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
 			Stdin: cmd.InOrStdin(), Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr(),
 			Cwd: cwd, Home: home, Prober: scaffold.RealProber{},
-			Registry:          reg,
 			Force:             f["force"],
 			ProjectOnly:       f["project-only"],
 			GlobalOnly:        f["global-only"],
@@ -69,7 +68,6 @@ var setupTemplateCmd = &cobra.Command{
 		return scaffold.TemplateScaffold(scaffold.TemplateOptions{
 			Stdout: cmd.OutOrStdout(),
 			Cwd:    cwd, Home: home, Prober: scaffold.RealProber{},
-			Registry:          reg,
 			Force:             f["force"],
 			ProjectOnly:       f["project-only"],
 			GlobalOnly:        f["global-only"],

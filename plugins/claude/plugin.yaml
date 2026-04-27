@@ -1,13 +1,11 @@
 name: claude
 version: "1.0.0"
 description: "Installs and configures Claude Code on the workstation"
-
 config:
   - name: enabled
     type: bool
     description: "Enable Claude Code?"
     default: false
-
 auth_providers:
   - name: oauth
     description: "OAuth token (recommended)"
@@ -16,7 +14,6 @@ auth_providers:
         env_var: CLAUDE_CODE_OAUTH_TOKEN
         description: "OAuth token from claude.ai/settings"
         default_secret_name: claude-code-oauth-token
-
   - name: apikey
     description: "API key via helper script"
     secrets:

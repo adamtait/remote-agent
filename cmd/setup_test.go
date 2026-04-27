@@ -124,15 +124,15 @@ func TestSetupTemplate_WritesAssets(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		p := filepath.Join(home, ".config", "ra", "template", name)
+	for _, name := range []string{"Dockerfile", "workstation-startup.d/200_remote-agent-setup.sh"} {
+		p := filepath.Join(home, ".config", "ra", name)
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
 	}
 }
 
-func TestSetupTemplate_GlobalOnly_SkipsAssets(t *testing.T) {
+func TestSetupTemplate_GlobalOnly_SkipsProjectAssets(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -149,6 +149,10 @@ func TestSetupTemplate_GlobalOnly_SkipsAssets(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(cwd, ".ra", "Dockerfile")); !os.IsNotExist(err) {
 		t.Error("--global-only should not write .ra/Dockerfile")
+	}
+	// --global-only skips user config dir assets too (they go with project assets).
+	if _, err := os.Stat(filepath.Join(home, ".config", "ra", "Dockerfile")); !os.IsNotExist(err) {
+		t.Error("--global-only should not write user config dir assets")
 	}
 }
 
@@ -167,8 +171,8 @@ func TestSetupTemplate_ProjectOnly_WritesAssets(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); err != nil {
+	for _, name := range []string{"Dockerfile", "workstation-startup.d/200_remote-agent-setup.sh"} {
+		if _, err := os.Stat(filepath.Join(home, ".config", "ra", name)); err != nil {
 			t.Errorf("missing %s: %v", name, err)
 		}
 	}
@@ -189,12 +193,10 @@ func TestSetupInteractive_AlwaysScaffoldsAssets(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
 	// Pipe pre-canned answers for every prompt in order:
-	//   project_id, github_repo_url, auth_mode, git_user_name, git_user_email,
-	//   Proceed? [Y/n]
+	//   project_id, github_repo_url, git_user_name, git_user_email, Proceed? [Y/n]
 	input := strings.Join([]string{
 		"my-project",
 		"https://github.com/a/b.git",
-		"1", // oauth
 		"Alice",
 		"a@example.com",
 		"Y", // Proceed?
@@ -208,21 +210,21 @@ func TestSetupInteractive_AlwaysScaffoldsAssets(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d. stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
-	// config.yaml still in .ws/
+	// config.yaml in .ra/
 	if _, err := os.Stat(filepath.Join(cwd, ".ra", "config.yaml")); err != nil {
 		t.Errorf("missing .ra/config.yaml: %v", err)
 	}
-	// assets in user template dir
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
-		if _, err := os.Stat(filepath.Join(home, ".config", "ra", "template", name)); err != nil {
-			t.Errorf("missing user template %s: %v", name, err)
+	// assets in user config dir
+	for _, name := range []string{"Dockerfile", "workstation-startup.d/200_remote-agent-setup.sh"} {
+		if _, err := os.Stat(filepath.Join(home, ".config", "ra", name)); err != nil {
+			t.Errorf("missing user config dir %s: %v", name, err)
 		}
 	}
 }
 
 func TestSetupInteractive_RerunSkipsExistingAssets(t *testing.T) {
 	// Re-running ra setup must not error on pre-existing scaffold assets;
-	// OnlyMissing semantics make the scaffold step idempotent.
+	// skip semantics make the scaffold step idempotent.
 	cwd := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -232,18 +234,18 @@ func TestSetupInteractive_RerunSkipsExistingAssets(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	// Pre-create a customized Dockerfile in user template dir that must survive setup.
-	userTemplateDir := filepath.Join(home, ".config", "ra", "template")
-	if err := os.MkdirAll(userTemplateDir, 0755); err != nil {
+	// Pre-create a customized Dockerfile in user config dir that must survive setup.
+	userConfigDir := filepath.Join(home, ".config", "ra")
+	if err := os.MkdirAll(userConfigDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	custom := []byte("# user customization\n")
-	if err := os.WriteFile(filepath.Join(userTemplateDir, "Dockerfile"), custom, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(userConfigDir, "Dockerfile"), custom, 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	input := strings.Join([]string{
-		"my-project", "https://github.com/a/b.git", "1",
+		"my-project", "https://github.com/a/b.git",
 		"Alice", "a@example.com", "Y", "",
 	}, "\n")
 	var stdin bytes.Buffer
@@ -253,11 +255,12 @@ func TestSetupInteractive_RerunSkipsExistingAssets(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d. stderr=%q", code, stderr.String())
 	}
-	got, _ := os.ReadFile(filepath.Join(userTemplateDir, "Dockerfile"))
+	got, _ := os.ReadFile(filepath.Join(userConfigDir, "Dockerfile"))
 	if string(got) != string(custom) {
 		t.Errorf("custom Dockerfile was overwritten:\n%s", got)
 	}
-	if _, err := os.Stat(filepath.Join(userTemplateDir, "entrypoint.sh")); err != nil {
-		t.Errorf("entrypoint.sh should still be scaffolded: %v", err)
+	// The startup script should still be scaffolded.
+	if _, err := os.Stat(filepath.Join(userConfigDir, "workstation-startup.d/200_remote-agent-setup.sh")); err != nil {
+		t.Errorf("workstation-startup.d/200_remote-agent-setup.sh should still be scaffolded: %v", err)
 	}
 }

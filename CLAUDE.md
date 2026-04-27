@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-`ra` is a Go CLI that provisions Google Cloud Workstations with Claude Code preinstalled. It handles the full lifecycle: creating GCP infrastructure (Artifact Registry, Secret Manager, service accounts, workstation cluster/config/instance), building and pushing a Docker image, and seeding the container with credentials fetched at boot from Secret Manager.
+`ra` is a Go CLI that provisions Google Cloud Workstations with a configurable, plugin-based runtime. It handles the full lifecycle: creating GCP infrastructure (Artifact Registry, Secret Manager, service accounts, workstation cluster/config/instance), building and pushing a Docker image, and seeding the container with credentials fetched at boot from Secret Manager.
+
+`ra` itself ships with **no built-in plugins** — Claude Code, GitHub, and any other integrations are external plugins installed via `ra plugin install`.
 
 ## Commands
 
@@ -30,19 +32,65 @@ Two config files are merged at startup (project overrides user):
 
 `internal/config/merge.go` handles merging with field-level precedence. `internal/config/validate.go` enforces required fields and checks for env var collisions.
 
+### On-disk layout
+
+User-global and project-local both mirror the workstation image's `/etc/` layout:
+
+```
+{~/.config/ra,.ra}/
+├── config.yaml
+├── Dockerfile
+├── Dockerfile.d/                     # build-time *.sh hooks (also from plugins)
+├── workstation-startup.d/
+│   └── 200_remote-agent-setup.sh     # generic ra entrypoint
+├── profile.d/
+│   └── 00-ra-wait.sh                 # login-shell sentinel wait
+└── plugins/<name>/...                # installed via `ra plugin install`
+```
+
+### Build context assembly
+
+`internal/scaffold/buildcontext.go` (`AssembleBuildContext`) produces an ephemeral `.ra/.build/` directory each time `ra create` runs. It merges core ra files with all installed plugins' contributions in priority order:
+
+- **Single-file resolution** (`Dockerfile`): project (`.ra/Dockerfile`) → user (`~/.config/ra/Dockerfile`) → embedded.
+- **Directory merge** (`Dockerfile.d/`, `workstation-startup.d/`, `profile.d/`): plugin files first, then user-global, then project-local — same-name files shadow.
+- **Whole-plugin staging** (`plugins/<name>/`): project shadows user; the assembler skips `.ra-install.yaml` so install metadata never lands in the image.
+
+The Dockerfile is generic and references build-context-relative paths (no `.ra/` prefix). `.ra/.build/` is gitignored and removed after every build (success or failure).
+
 ### Subcommands → Core Packages
 
-- **`cmd/setup.go`** calls `scaffold.InteractiveScaffold()` — probes gcloud/git defaults, prompts for missing fields, writes config YAMLs and materializes embedded assets (Dockerfile, entrypoint.sh, profile.d scripts) into `.ra/`
-- **`cmd/create.go`** is the main provisioning pipeline: enable APIs → ensure Artifact Registry → build+push Docker image → create GCP secrets → create service account + IAM → ensure cluster+config → create workstation
-- All gcloud operations go through `internal/gcloud/` — `runner.go` shells out to the `gcloud` binary; `workstation.go` wraps it with typed methods
+- **`cmd/setup.go`** calls `scaffold.InteractiveScaffold()` — probes gcloud/git defaults, prompts for ra-only config (project_id, repo_url, git identity), writes config YAMLs, and materializes core build assets (`Dockerfile`, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`) into `~/.config/ra/` and optionally `.ra/`. It does NOT prompt for plugin config — that moves to `ra plugin install`.
+- **`cmd/plugin.go`** implements `ra plugin install/list/remove`. Install clones (or copies, for local paths), prompts for the install level (user/project), prompts for plugin config + secret values, uploads secret values to GCP Secret Manager, writes `plugins.<name>.*` and `secrets.*` blocks into the chosen-level `config.yaml`, and writes `<plugin-dir>/.ra-install.yaml` with source + install timestamp.
+- **`cmd/create.go`** is the main provisioning pipeline: enable APIs → ensure Artifact Registry → build+push Docker image → ensure GCP secrets → create service account + IAM → ensure cluster+config → create workstation.
+- All gcloud operations go through `internal/gcloud/` — `runner.go` shells out to the `gcloud` binary; `workstation.go` wraps it with typed methods.
+- `internal/secrets/upload.go` centralizes GCP Secret Manager interaction (used by both `ra create` and `ra plugin install`).
+- `internal/configwrite/append.go` provides `MergePluginConfig` and `RemovePluginConfig` for safe YAML edits to `config.yaml`.
+
+### Plugin layout
+
+A plugin's directory mirrors the image destinations its scripts land in:
+
+```
+<plugin>/<name>/
+├── plugin.yaml                       # required: schema, config, secrets
+├── Dockerfile.d/<NNN>_<purpose>.sh   # optional: build-time hooks
+├── workstation-startup.d/<NNN>_<purpose>.sh  # optional: runtime startup scripts
+└── profile.d/<NNN>_<name>.sh         # optional: login-shell scripts
+```
+
+Plugin scripts in `workstation-startup.d/` run independently from `200_remote-agent-setup.sh` (they drop into `/etc/workstation-startup.d/` directly). Each plugin script that needs fetched secrets must source `/run/ra/env` itself:
+
+```bash
+[ -r /run/ra/env ] && set -a && . /run/ra/env && set +a
+[ "${RA_PLUGIN_<NAME>_ENABLED:-false}" = "true" ] || exit 0
+```
+
+`<repo>/plugins/claude/` is the in-tree home for the claude plugin. A subsequent changeset extracts it to a separate git repo.
 
 ### Zero-Secrets Design
 
-Credentials never appear in config. Each secret has a logical name and env var name in config; the actual value lives in GCP Secret Manager. The workstation's service account has IAM access to fetch secrets at boot. `entrypoint.sh` (embedded in binary, materialized to `.ra/entrypoint.sh`) runs at every container start to fetch secrets and seed auth state.
-
-### Embedded Assets
-
-`internal/scaffold/embedded.go` embeds `internal/scaffold/assets/` (Dockerfile, entrypoint.sh, profile.d/) into the binary. `scaffold.ScaffoldAssets()` materializes them; users can then edit freely. `ResolveSource()` in `source.go` prefers user-edited files over embedded defaults.
+Credentials never appear in config. Each secret has a logical name and env var name in config; the actual value lives in GCP Secret Manager. The workstation's service account has IAM access to fetch secrets at boot. `200_remote-agent-setup.sh` (embedded in binary, materialized into the build context) runs at every container start to fetch secrets and write them to `/etc/environment` + `/run/ra/env`.
 
 ### Naming
 
@@ -52,5 +100,6 @@ Credentials never appear in config. Each secret has a logical name and env var n
 
 - All gcloud calls shell out — no GCP Go SDK. Keep it that way.
 - Provisioning steps are idempotent (skip-if-exists) except workstation creation itself.
-- Plugin config lives at `plugins.<name>.*` in YAML; the claude plugin's auth method is set via `plugins.claude.auth_provider: oauth|apikey`.
-- The entrypoint sources each plugin's `setup.sh` after fetching all secrets; plugins guard themselves via `RA_PLUGIN_<NAME>_ENABLED`.
+- `ra` ships with no embedded plugins. Plugin defaults are an external concern.
+- Plugin config lives at `plugins.<name>.*` in YAML; auth method (when applicable) is set via `plugins.<name>.auth_provider`.
+- Plugin scripts in `workstation-startup.d/` run independently after `200_`; they must source `/run/ra/env` and gate on `RA_PLUGIN_<NAME>_ENABLED` themselves.

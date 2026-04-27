@@ -19,12 +19,6 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		RepoName:           "claude-workstation-images",
 		AutoSleepHours:     2,
 		AutoShutdownHours:  12,
-		PluginFragments: [][2]string{
-			{
-				"claude:\n  enabled: true\n  auth_mode: oauth\n",
-				"  claude_oauth:\n    secret_name: claude-code-oauth-token\n    env_var: CLAUDE_CODE_OAUTH_TOKEN\n    # oauth_account_secret_name: claude-oauth-account   # optional\n",
-			},
-		},
 	}
 	got := scaffold.RenderUserConfig(uv)
 	for _, want := range []string{
@@ -46,13 +40,8 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		`    repo_name: claude-workstation-images`,
 		`    auto_sleep_hours: 2`,
 		`    auto_shutdown_hours: 12`,
-		`claude:`,
-		`  enabled: true`,
-		`  auth_mode: oauth`,
+		`plugins: {}`,
 		`secrets:`,
-		`  claude_oauth:`,
-		`    secret_name: claude-code-oauth-token`,
-		`    env_var: CLAUDE_CODE_OAUTH_TOKEN`,
 		`  github_pat:`,
 		`    secret_name: github-pat`,
 		`    env_var: GH_TOKEN`,
@@ -64,49 +53,34 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 	}
 }
 
-func TestRenderUserConfig_APIKeyModeSelectsApiKeyEntry(t *testing.T) {
-	uv := scaffold.UserValues{
-		PluginFragments: [][2]string{
-			{
-				"claude:\n  enabled: true\n  auth_mode: apikey\n",
-				"  claude_apikey:\n    secret_name: anthropic-api-key\n    env_var: ANTHROPIC_API_KEY\n",
-			},
-		},
-	}
-	got := scaffold.RenderUserConfig(uv)
-	if !strings.Contains(got, "claude_apikey:") {
-		t.Errorf("apikey mode did not write claude_apikey entry:\n%s", got)
-	}
-	if strings.Contains(got, "claude_oauth:") {
-		t.Errorf("apikey mode also wrote claude_oauth entry:\n%s", got)
-	}
-	if !strings.Contains(got, "env_var: ANTHROPIC_API_KEY") {
-		t.Errorf("apikey env_var should be ANTHROPIC_API_KEY:\n%s", got)
-	}
-	if !strings.Contains(got, "auth_mode: apikey") {
-		t.Errorf("auth_mode: apikey not emitted:\n%s", got)
+func TestRenderUserConfig_ZeroValues_HasDefaults(t *testing.T) {
+	got := scaffold.RenderUserConfig(scaffold.UserValues{})
+	// Should contain seed defaults.
+	for _, want := range []string{
+		`github_repo_url: https://github.com/my-org/my-repo.git`,
+		`project: my-gcp-project`,
+		`region: us-central1`,
+		`machine_type: e2-standard-4`,
+		`plugins: {}`,
+		`  github_pat:`,
+		`env: {}`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("zero-value user config missing %q\n---\n%s", want, got)
+		}
 	}
 }
 
-func TestRenderUserConfig_ClaudeDisabled_OmitsClaudeSecrets(t *testing.T) {
-	uv := scaffold.UserValues{
-		PluginFragments: [][2]string{
-			{"claude:\n  enabled: false\n", ""},
-		},
-	}
-	got := scaffold.RenderUserConfig(uv)
-	if !strings.Contains(got, "claude:\n  enabled: false") {
-		t.Errorf("expected enabled: false block:\n%s", got)
-	}
-	if strings.Contains(got, "claude_oauth:") || strings.Contains(got, "claude_apikey:") {
-		t.Errorf("disabled mode must not emit claude_* secret entries:\n%s", got)
-	}
-	if strings.Contains(got, "auth_mode:") {
-		t.Errorf("disabled mode must not emit auth_mode:\n%s", got)
-	}
-	// github_pat is shared, still required.
+func TestRenderUserConfig_AlwaysHasGithubPat(t *testing.T) {
+	got := scaffold.RenderUserConfig(scaffold.UserValues{})
 	if !strings.Contains(got, "github_pat:") {
-		t.Errorf("github_pat entry must still be emitted when claude disabled:\n%s", got)
+		t.Errorf("github_pat entry must always be emitted:\n%s", got)
+	}
+	if !strings.Contains(got, "secret_name: github-pat") {
+		t.Errorf("github_pat secret_name must be github-pat:\n%s", got)
+	}
+	if !strings.Contains(got, "env_var: GH_TOKEN") {
+		t.Errorf("github_pat env_var must be GH_TOKEN:\n%s", got)
 	}
 }
 

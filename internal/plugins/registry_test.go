@@ -26,26 +26,11 @@ func TestRegistry_NilSafe(t *testing.T) {
 	if r.All() != nil {
 		t.Error("nil registry All() should return nil")
 	}
-	if r.AllAssets() != nil {
-		t.Error("nil registry AllAssets() should return nil")
-	}
 	if r.ValidateAll(nil) != nil {
 		t.Error("nil registry ValidateAll() should return nil")
 	}
 	if r.AllContainerEnvPairs(nil) != nil {
 		t.Error("nil registry AllContainerEnvPairs() should return nil")
-	}
-}
-
-func TestRegistry_AllAssets(t *testing.T) {
-	p := makeTestPlugin(t, "alpha")
-	r := NewRegistry([]*FilePlugin{p})
-	assets := r.AllAssets()
-	if len(assets) != 1 {
-		t.Errorf("expected 1 asset, got %d", len(assets))
-	}
-	if assets[0].Name != "plugins/alpha/setup.sh" {
-		t.Errorf("unexpected asset name %q", assets[0].Name)
 	}
 }
 
