@@ -18,10 +18,9 @@
 # /etc/workstation-startup.d/ at numbers ≥ 250 — they run independently
 # after this one and can source /run/ra/env to access fetched secrets.
 #
-# Logical names with special handling (still conform to the schema):
-#     github_pat     → install git credential helper AND export $VAR for `gh`.
-#                      (will move into a github plugin in a follow-up changeset)
-#     (any other)    → fetch at boot, export $VAR. Rotation requires restart.
+# All logical names: fetch at boot, export $VAR. Rotation requires restart.
+# Plugins that need per-op rotation (e.g. github) install their own credential
+# helpers in workstation-startup.d/ at numbers ≥ 250.
 #
 set -euo pipefail
 
@@ -29,7 +28,6 @@ USER_NAME="user"
 USER_HOME="/home/${USER_NAME}"
 WORKSPACE_DIR="${USER_HOME}/workspace"
 
-GIT_HELPER_PATH="/usr/local/bin/git-credential-gcp-secret"
 RA_SETUP_LOG_PATH="/var/log/ra-setup.log"
 
 RA_RUNTIME_DIR="/run/ra"
@@ -56,40 +54,6 @@ _ra_export_env() {
     fi
     sed -i "/^${key}=/d" "${RA_ENV_FILE}"
     printf '%s=%s\n' "${key}" "${val}" >> "${RA_ENV_FILE}"
-}
-
-# _ra_handle_github_pat installs a git credential helper that fetches the
-# PAT fresh per git op (so rotation is automatic for git), and also exports
-# the PAT to /etc/environment + /run/ra/env so `gh` CLI sees it.
-# Will move into a github plugin in a follow-up changeset.
-_ra_handle_github_pat() {
-    local secret_name="$1"
-    local target_env_var="$2"
-
-    log "github_pat: installing git credential helper for ${secret_name}"
-    cat > "${GIT_HELPER_PATH}" <<EOF
-#!/bin/bash
-# Auto-generated. Emits GitHub PAT via git credential protocol.
-while IFS= read -r line; do
-    [[ -z "\$line" ]] && break
-done
-pat=\$(gcloud secrets versions access latest \\
-    --secret='${secret_name}' \\
-    --project='${GCP_PROJECT_ID}' 2>/dev/null) || exit 0
-echo "username=x-access-token"
-echo "password=\${pat}"
-EOF
-    chmod 0755 "${GIT_HELPER_PATH}"
-    git config --system credential.helper "${GIT_HELPER_PATH}"
-    log "git credential.helper set to ${GIT_HELPER_PATH}."
-
-    local pat_value
-    pat_value=$(gcloud secrets versions access latest \
-        --secret="${secret_name}" --project="${GCP_PROJECT_ID}" 2>/dev/null || true)
-    if [[ -n "${pat_value}" ]]; then
-        _ra_export_env "${target_env_var}" "${pat_value}"
-        log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
-    fi
 }
 
 # _ra_first_boot_git seeds git identity from container env vars and clones
@@ -128,10 +92,6 @@ command -v gcloud >/dev/null 2>&1 || {
     exit 1
 }
 
-# Clear stale auth state common to every boot (git helper, GH_TOKEN line).
-rm -f "${GIT_HELPER_PATH}"
-sed -i '/^GH_TOKEN=/d' /etc/environment
-
 mkdir -p "${RA_RUNTIME_DIR}"
 chmod 0755 "${RA_RUNTIME_DIR}"
 rm -f "${RA_READY_SENTINEL}"
@@ -153,24 +113,16 @@ for logical in "${ra_secret_names[@]}"; do
         continue
     fi
 
-    case "${logical}" in
-        github_pat)
-            _ra_handle_github_pat "${secret_name}" "${target_env_var}"
-            ;;
-
-        *)
-            log "generic: fetching ${secret_name} → ${target_env_var}"
-            val=$(gcloud secrets versions access latest \
-                --secret="${secret_name}" --project="${GCP_PROJECT_ID}" \
-                2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
-            if [[ -n "${val}" ]]; then
-                _ra_export_env "${target_env_var}" "${val}"
-                log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
-            else
-                log "WARNING: ${secret_name} fetch returned empty."
-            fi
-            ;;
-    esac
+    log "fetching ${secret_name} → ${target_env_var}"
+    val=$(gcloud secrets versions access latest \
+        --secret="${secret_name}" --project="${GCP_PROJECT_ID}" \
+        2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
+    if [[ -n "${val}" ]]; then
+        _ra_export_env "${target_env_var}" "${val}"
+        log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
+    else
+        log "WARNING: ${secret_name} fetch returned empty."
+    fi
 done
 
 # =============================================================================
