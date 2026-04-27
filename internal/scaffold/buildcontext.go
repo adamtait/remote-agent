@@ -32,5 +32,30 @@ func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
 	}
 
 	cleanup := func() { _ = os.RemoveAll(root) }
+
+	if err := writeDockerfile(opts, root); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+
 	return root, cleanup, nil
+}
+
+// writeDockerfile chooses project > user > embedded Dockerfile bytes and
+// writes them into <root>/Dockerfile.
+func writeDockerfile(opts BuildContextOptions, root string) error {
+	candidates := []string{
+		filepath.Join(opts.Cwd, ".ra", "Dockerfile"),
+		filepath.Join(opts.Home, ".config", "ra", "Dockerfile"),
+	}
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err == nil {
+			return os.WriteFile(filepath.Join(root, "Dockerfile"), data, 0644)
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("reading %s: %w", p, err)
+		}
+	}
+	return os.WriteFile(filepath.Join(root, "Dockerfile"), embeddedDockerfile, 0644)
 }
