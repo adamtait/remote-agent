@@ -10,7 +10,8 @@
       "Bash(git push *)",
       "Bash(gh pr *)",
       "Bash(go test *)",
-      "Bash(go vet *)"
+      "Bash(go vet *)",
+      "Bash(go build *)"
     ]
   }
 }
