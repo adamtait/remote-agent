@@ -79,14 +79,6 @@ func init() {
 func runCreate(cmd *cobra.Command, args []string) error {
 	ws := &cfg.Gcloud.Workstation
 
-	// The workstation image ships HTTPS-only credentials (PAT via git helper) —
-	// no SSH keys, no known_hosts. Rewrite SSH URLs so the clone inside the
-	// container doesn't die with "Host key verification failed".
-	if normalized := scaffold.NormalizeGithubRepoURL(cfg.Git.GithubRepoURL); normalized != cfg.Git.GithubRepoURL {
-		fmt.Printf("\033[1;33mWARN:\033[0m rewriting SSH github_repo_url to HTTPS for container clone: %s → %s\n",
-			cfg.Git.GithubRepoURL, normalized)
-		cfg.Git.GithubRepoURL = normalized
-	}
 	for field, val := range map[string]string{
 		"git_user_name":   cfg.Git.UserName,
 		"git_user_email":  cfg.Git.UserEmail,

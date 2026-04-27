@@ -17,7 +17,6 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
-		"https://github.com/a/b.git",
 		"Alice",
 		"alice@example.com",
 		"y", // confirm
@@ -75,7 +74,7 @@ func TestInteractiveScaffold_WithProjectAssetsCopiesAssetsToDotRA(t *testing.T) 
 	cwd := t.TempDir()
 	home := t.TempDir()
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "Alice", "alice@example.com", "y",
+		"my-proj-123", "Alice", "alice@example.com", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 
@@ -136,10 +135,10 @@ func TestInteractiveScaffold_ProjectExists_SkipsAndPreserves(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".ra", "config.yaml"), []byte("existing: true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Project exists → user config still prompts for project_id and github_repo_url,
+	// Project exists → user config still prompts for project_id,
 	// then git_user_name, git_user_email, confirm.
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "Alice", "alice@example.com", "y",
+		"my-proj-123", "Alice", "alice@example.com", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
@@ -201,7 +200,7 @@ func TestInteractiveScaffold_ProjectOnlySkipsGlobal(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "y",
+		"my-proj-123", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	err := scaffold.InteractiveScaffold(scaffold.InteractiveOptions{
@@ -234,11 +233,10 @@ func TestInteractiveScaffold_MutuallyExclusiveFlags(t *testing.T) {
 func TestInteractiveScaffold_NoCancelsOnProceed(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
-	// Full run prompts: project_id, github_repo_url, git_user_name,
+	// Full run prompts: project_id, git_user_name,
 	// git_user_email, then "no" to cancel.
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
-		"https://github.com/a/b.git",
 		"Alice",
 		"alice@example.com",
 		"no",
@@ -261,7 +259,6 @@ func TestInteractiveScaffold_DeclineWrapsErrCancelled(t *testing.T) {
 	home := t.TempDir()
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
-		"https://github.com/a/b.git",
 		"Alice",
 		"alice@example.com",
 		"no",
@@ -284,7 +281,6 @@ func TestInteractiveScaffold_NilStderrDoesNotPanic(t *testing.T) {
 	home := t.TempDir()
 	stdin := strings.NewReader(strings.Join([]string{
 		"my-proj-123",
-		"https://github.com/a/b.git",
 		"Alice",
 		"alice@example.com",
 		"y",
@@ -310,9 +306,9 @@ func TestInteractiveScaffold_GlobalExists_SkipsAndScaffoldsAssets(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), original, 0644); err != nil {
 		t.Fatal(err)
 	}
-	// User config exists → only project prompts: project_id, github_repo_url, confirm
+	// User config exists → only project prompts: project_id, confirm
 	stdin := strings.NewReader(strings.Join([]string{
-		"my-proj-123", "https://github.com/a/b.git", "y",
+		"my-proj-123", "y",
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 
