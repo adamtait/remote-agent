@@ -19,7 +19,7 @@ auth flows) lives in the relevant plugin.
 - `main.go` / `cmd/` / `internal/` — `ra` CLI (idempotent provisioning)
 - `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
 - `internal/scaffold/assets/` — embedded core build assets (Dockerfile, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`)
-- `plugins/claude/` — in-tree home of the Claude Code plugin (will move to its own repo in a follow-up changeset)
+- `plugins/claude/`, `plugins/github/` — in-tree homes of the Claude Code and GitHub plugins (each will move to its own repo in a follow-up changeset)
 - `~/.config/ra/` — your user-global ra config + materialized core assets + installed plugins
 - `.ra/` — project-local ra config + (optional) overrides + installed plugins
 
@@ -40,16 +40,15 @@ auth flows) lives in the relevant plugin.
 ```bash
 make install                                 # installs ra to ~/.local/bin
 ra setup                                     # writes config.yaml + core assets
+ra plugin install ./plugins/github --user    # installs gh CLI + PAT credential helper,
+                                             #   prompts for repo_url and PAT
 ra plugin install ./plugins/claude --user    # install the in-tree claude plugin
-                                             #   (when claude moves to its own
-                                             #    repo, use the git URL instead)
 ra create                                    # provisions the workstation
 ```
 
 `ra setup` prompts for the minimum ra needs:
 1. **GCP project ID** — the project where the workstation cluster lives
-2. **GitHub repo URL** — the repo to clone inside the workstation
-3. **Git identity** — name and email for commits inside the workstation
+2. **Git identity** — name and email for commits inside the workstation
 
 It writes:
 - **`~/.config/ra/config.yaml`** — your personal baseline
@@ -118,7 +117,7 @@ Rotation behavior depends on how each secret is consumed:
 At every workstation boot:
 
 1. The base image's startup machinery runs `/etc/workstation-startup.d/200_remote-agent-setup.sh`.
-2. That script iterates `RA_SECRETS` (passed via container env from `ra create`), fetches each from Secret Manager, and writes them to `/etc/environment` + `/run/ra/env`. The `github_pat` logical name is special-cased to also install a git credential helper (will move to a github plugin in a follow-up changeset).
+2. That script iterates `RA_SECRETS` (passed via container env from `ra create`), fetches each from Secret Manager, and writes them to `/etc/environment` + `/run/ra/env`. Plugin scripts in `/etc/workstation-startup.d/` (numbered ≥ 250) run after 200_; they fetch their own helpers and gate on `RA_PLUGIN_<NAME>_ENABLED`. The github plugin, for example, installs a per-git-op credential helper that fetches the PAT fresh from Secret Manager.
 3. Other `/etc/workstation-startup.d/` scripts (numbered ≥ 250, contributed by plugins) run independently. Each plugin script sources `/run/ra/env` and gates on `RA_PLUGIN_<NAME>_ENABLED`.
 4. The script writes `/run/ra/ready`, unblocking login shells via `/etc/profile.d/00-ra-wait.sh`.
 
