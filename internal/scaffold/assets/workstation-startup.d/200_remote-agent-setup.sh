@@ -42,6 +42,22 @@ log() {
     echo "${msg}" >> "${RA_SETUP_LOG_PATH}" 2>/dev/null || true
 }
 
+# _ra_export_env writes a key=value pair to both /etc/environment and
+# /run/ra/env (creating the latter lazily). Used by all secret handlers
+# so plugin scripts that source /run/ra/env see fetched values.
+_ra_export_env() {
+    local key="$1"
+    local val="$2"
+    echo "${key}=${val}" >> /etc/environment
+    umask 077
+    if [[ ! -f "${RA_ENV_FILE}" ]]; then
+        : > "${RA_ENV_FILE}"
+        chmod 0644 "${RA_ENV_FILE}"
+    fi
+    sed -i "/^${key}=/d" "${RA_ENV_FILE}"
+    printf '%s=%s\n' "${key}" "${val}" >> "${RA_ENV_FILE}"
+}
+
 # _ra_handle_github_pat installs a git credential helper that fetches the
 # PAT fresh per git op (so rotation is automatic for git), and also exports
 # the PAT to /etc/environment + /run/ra/env so `gh` CLI sees it.
@@ -71,14 +87,7 @@ EOF
     pat_value=$(gcloud secrets versions access latest \
         --secret="${secret_name}" --project="${GCP_PROJECT_ID}" 2>/dev/null || true)
     if [[ -n "${pat_value}" ]]; then
-        echo "${target_env_var}=${pat_value}" >> /etc/environment
-        umask 077
-        if [[ ! -f "${RA_ENV_FILE}" ]]; then
-            : > "${RA_ENV_FILE}"
-            chmod 0644 "${RA_ENV_FILE}"
-        fi
-        sed -i "/^${target_env_var}=/d" "${RA_ENV_FILE}"
-        printf '%s=%s\n' "${target_env_var}" "${pat_value}" >> "${RA_ENV_FILE}"
+        _ra_export_env "${target_env_var}" "${pat_value}"
         log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
     fi
 }
@@ -155,8 +164,8 @@ for logical in "${ra_secret_names[@]}"; do
                 --secret="${secret_name}" --project="${GCP_PROJECT_ID}" \
                 2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
             if [[ -n "${val}" ]]; then
-                echo "${target_env_var}=${val}" >> /etc/environment
-                log "Exported ${target_env_var}."
+                _ra_export_env "${target_env_var}" "${val}"
+                log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
             else
                 log "WARNING: ${secret_name} fetch returned empty."
             fi
