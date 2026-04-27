@@ -258,6 +258,11 @@ func buildPluginsConfigBlock(name string, cfg map[string]interface{}) string {
 	return string(out)
 }
 
+// FS returns the filesystem rooted at the plugin's directory. Used by
+// callers (e.g. the build-context assembler) that need to walk plugin-
+// contributed asset directories.
+func (p *FilePlugin) FS() fs.FS { return p.fsys }
+
 // Schema returns the plugin's parsed schema.
 func (p *FilePlugin) Schema() PluginSchema { return p.schema }
 

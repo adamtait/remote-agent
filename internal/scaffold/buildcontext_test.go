@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
 func TestAssembleBuildContext_CreatesBuildDir(t *testing.T) {
@@ -144,6 +146,69 @@ func TestAssembleBuildContext_EmptyProfileDGetsKeep(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(path, dir, ".ra-keep")); err != nil {
 			t.Errorf("%s/.ra-keep missing: %v", dir, err)
 		}
+	}
+}
+
+func TestAssembleBuildContext_MergesPluginDirs(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	pluginDir := filepath.Join(home, ".config", "ra", "plugins", "myplug")
+
+	mustWrite(t, filepath.Join(pluginDir, "plugin.yaml"), "name: myplug\nversion: '0.0.1'\ndescription: x\n")
+	mustWrite(t, filepath.Join(pluginDir, "profile.d", "01-myplug.sh"), "PLUG-PROFILE")
+	mustWrite(t, filepath.Join(pluginDir, "workstation-startup.d", "300_myplug.sh"), "PLUG-START")
+	mustWrite(t, filepath.Join(pluginDir, "Dockerfile.d", "200_myplug.sh"), "PLUG-DOCK")
+
+	plug, err := plugins.LoadPlugin(os.DirFS(pluginDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path, cleanup, err := AssembleBuildContext(BuildContextOptions{
+		Cwd: cwd, Home: home,
+		Plugins: []*plugins.FilePlugin{plug},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	cases := []struct{ rel, want string }{
+		{"profile.d/01-myplug.sh", "PLUG-PROFILE"},
+		{"workstation-startup.d/300_myplug.sh", "PLUG-START"},
+		{"Dockerfile.d/200_myplug.sh", "PLUG-DOCK"},
+	}
+	for _, c := range cases {
+		got, err := os.ReadFile(filepath.Join(path, c.rel))
+		if err != nil {
+			t.Errorf("read %s: %v", c.rel, err)
+			continue
+		}
+		if string(got) != c.want {
+			t.Errorf("%s = %q, want %q", c.rel, got, c.want)
+		}
+	}
+}
+
+func TestAssembleBuildContext_ProjectShadowsPlugin(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	pluginDir := filepath.Join(home, ".config", "ra", "plugins", "myplug")
+
+	mustWrite(t, filepath.Join(pluginDir, "plugin.yaml"), "name: myplug\nversion: '0.0.1'\ndescription: x\n")
+	mustWrite(t, filepath.Join(pluginDir, "profile.d", "01-myplug.sh"), "PLUG")
+	mustWrite(t, filepath.Join(cwd, ".ra", "profile.d", "01-myplug.sh"), "PROJECT")
+
+	plug, _ := plugins.LoadPlugin(os.DirFS(pluginDir))
+
+	path, cleanup, _ := AssembleBuildContext(BuildContextOptions{
+		Cwd: cwd, Home: home, Plugins: []*plugins.FilePlugin{plug},
+	})
+	defer cleanup()
+
+	got, _ := os.ReadFile(filepath.Join(path, "profile.d", "01-myplug.sh"))
+	if string(got) != "PROJECT" {
+		t.Errorf("got %q, want PROJECT (project must shadow plugin)", got)
 	}
 }
 

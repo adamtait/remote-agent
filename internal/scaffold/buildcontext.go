@@ -5,6 +5,7 @@ package scaffold
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,10 @@ func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
 	cleanup := func() { _ = os.RemoveAll(root) }
 
 	if err := writeDockerfile(opts, root); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := mergePluginDirs(opts, root); err != nil {
 		cleanup()
 		return "", func() {}, err
 	}
@@ -72,6 +77,49 @@ func writeDockerfile(opts BuildContextOptions, root string) error {
 // mergedDirs are the three image-mirror directories that get merged from
 // project, user, and (later) plugin sources.
 var mergedDirs = []string{"Dockerfile.d", "workstation-startup.d", "profile.d"}
+
+// mergePluginDirs overlays each plugin's contributed dirs (Dockerfile.d/,
+// workstation-startup.d/, profile.d/) into <root>/<dir>/. Called BEFORE
+// the user/project merge so user/project files shadow plugin files.
+func mergePluginDirs(opts BuildContextOptions, root string) error {
+	for _, p := range opts.Plugins {
+		for _, dir := range mergedDirs {
+			dst := filepath.Join(root, dir)
+			if err := os.MkdirAll(dst, 0755); err != nil {
+				return err
+			}
+			if err := copyShellScriptsFromFS(p.FS(), dir, dst); err != nil {
+				return fmt.Errorf("plugin %s %s: %w", p.Name(), dir, err)
+			}
+		}
+	}
+	return nil
+}
+
+// copyShellScriptsFromFS is the fs.FS variant of copyShellScripts. Used
+// for plugin trees, which are accessed via fs.FS.
+func copyShellScriptsFromFS(fsys fs.FS, dir, dst string) error {
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sh") {
+			continue
+		}
+		data, err := fs.ReadFile(fsys, dir+"/"+e.Name())
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // mergeDirs writes <root>/<dir>/ for each dir in mergedDirs by overlaying
 // user-global, then project-local. Project files shadow user files.
