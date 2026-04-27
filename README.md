@@ -55,6 +55,10 @@ It writes:
 - **`.ra/config.yaml`** — project-specific settings (committed to source control)
 - The core build assets (`Dockerfile`, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`) into `~/.config/ra/`
 
+### Upgrading from a pre-plugin ra
+
+If your `~/.config/ra/config.yaml` was written by an older ra and contains `git.github_repo_url` or `secrets.github_pat`, those entries are silently ignored — the github plugin owns those concerns now. Run `ra plugin install ./plugins/github --user` and re-enter the values when prompted; the install writes `plugins.github.repo_url` and `secrets.github_pat` to the new locations. The stale top-level keys can be deleted manually.
+
 `ra plugin install <source>` (where `<source>` is a git URL or a local
 filesystem path):
 1. Acquires the plugin (clone or copy)
