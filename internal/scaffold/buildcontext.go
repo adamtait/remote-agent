@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/adamtait/remote-agent/internal/plugins"
 )
@@ -37,6 +38,14 @@ func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
 		cleanup()
 		return "", func() {}, err
 	}
+	if err := mergeDirs(opts, root); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := writeKeepIfEmpty(root); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
 
 	return root, cleanup, nil
 }
@@ -58,4 +67,81 @@ func writeDockerfile(opts BuildContextOptions, root string) error {
 		}
 	}
 	return os.WriteFile(filepath.Join(root, "Dockerfile"), embeddedDockerfile, 0644)
+}
+
+// mergedDirs are the three image-mirror directories that get merged from
+// project, user, and (later) plugin sources.
+var mergedDirs = []string{"Dockerfile.d", "workstation-startup.d", "profile.d"}
+
+// mergeDirs writes <root>/<dir>/ for each dir in mergedDirs by overlaying
+// user-global, then project-local. Project files shadow user files.
+// Plugin contributions are layered in by mergePluginDirs (Task 5).
+func mergeDirs(opts BuildContextOptions, root string) error {
+	for _, dir := range mergedDirs {
+		dst := filepath.Join(root, dir)
+		if err := os.MkdirAll(dst, 0755); err != nil {
+			return fmt.Errorf("creating %s: %w", dst, err)
+		}
+		// User-global first (lowest priority), then project (overwrites).
+		sources := []string{
+			filepath.Join(opts.Home, ".config", "ra", dir),
+			filepath.Join(opts.Cwd, ".ra", dir),
+		}
+		for _, src := range sources {
+			if err := copyShellScripts(src, dst); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// copyShellScripts copies *.sh files from src to dst (overwriting on
+// collision). Non-existent src is a no-op. Used for the layered merges.
+func copyShellScripts(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading %s: %w", src, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sh") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			return fmt.Errorf("reading %s/%s: %w", src, e.Name(), err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0755); err != nil {
+			return fmt.Errorf("writing %s/%s: %w", dst, e.Name(), err)
+		}
+	}
+	return nil
+}
+
+// writeKeepIfEmpty drops a .ra-keep placeholder so docker COPY of an
+// otherwise-empty directory does not fail. Called after all merges.
+func writeKeepIfEmpty(root string) error {
+	for _, dir := range mergedDirs {
+		full := filepath.Join(root, dir)
+		entries, err := os.ReadDir(full)
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", full, err)
+		}
+		hasContent := false
+		for _, e := range entries {
+			if e.Name() != ".ra-keep" {
+				hasContent = true
+				break
+			}
+		}
+		if !hasContent {
+			if err := os.WriteFile(filepath.Join(full, ".ra-keep"), nil, 0644); err != nil {
+				return fmt.Errorf("writing .ra-keep in %s: %w", full, err)
+			}
+		}
+	}
+	return nil
 }
