@@ -1,0 +1,33 @@
+name: aws
+version: "1.0.0"
+description: "Installs the AWS CLI v2 and configures credentials from GCP Secret Manager at boot"
+config:
+  - name: enabled
+    type: bool
+    description: "Enable AWS CLI plugin?"
+    default: false
+  - name: region
+    type: string
+    description: "Default AWS region"
+    default: "us-east-1"
+  - name: output
+    type: string
+    description: "Default AWS CLI output format"
+    default: "json"
+    options:
+      - json
+      - yaml
+      - text
+      - table
+auth_providers:
+  - name: access_keys
+    description: "Access key ID + secret access key"
+    secrets:
+      - name: aws_access_key_id
+        env_var: AWS_ACCESS_KEY_ID
+        description: "AWS Access Key ID"
+        default_secret_name: aws-access-key-id
+      - name: aws_secret_access_key
+        env_var: AWS_SECRET_ACCESS_KEY
+        description: "AWS Secret Access Key"
+        default_secret_name: aws-secret-access-key
