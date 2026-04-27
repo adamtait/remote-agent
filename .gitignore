@@ -5,3 +5,6 @@ ra
 !.ra/profile.d/
 !.ra/profile.d/*.sh
 .ra/profile.d.staged/
+
+# ra: ephemeral docker build context assembled by `ra create`
+.ra/.build/
