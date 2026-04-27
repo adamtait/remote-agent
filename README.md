@@ -1,43 +1,27 @@
-# Claude Code on Google Cloud Workstations (v2.1)
+# ra — Remote Agent on Google Cloud Workstations
 
-Provisions a browser-accessible dev environment with Claude Code preinstalled
-and a private GitHub repo cloned and ready to go.
+`ra` is a Go CLI that provisions a browser-accessible Google Cloud Workstation with the development tooling of your choice, plus a private GitHub repo cloned and ready to go. Tooling is plugin-based: `ra` itself ships with no built-in plugins; you add Claude Code, GitHub-specific helpers, or any other integration via `ra plugin install`.
 
-## What's new in v2.1
+## Design
 
-**Zero secrets in the workstation config.** All credentials — both Claude
-and GitHub — live only in Secret Manager. The container resolves them at
-runtime via its attached service account:
+**Zero secrets in the workstation config.** All credentials live only in GCP Secret Manager. The container resolves them at boot via its attached service account.
 
-- **Claude API key** uses an `apiKeyHelper` script. Claude Code caches the
-  result for ~5 minutes, so rotating propagates within that window with no
-  restart.
-- **Claude OAuth** is fetched at each container boot and written to
-  `/run/ra/env` (a tmpfs) and `/etc/environment`. Rotation →
-  `workstations stop/start`. In OAuth mode, the entrypoint also seeds
-  `~/.claude.json` from a second secret holding the `oauthAccount` block
-  so interactive `claude` skips the browser-based onboarding wizard
-  (which can't complete on a headless VM).
-- **GitHub PAT** uses a custom `credential.helper` script that calls
-  `gcloud secrets versions access` on every git operation. Rotations are
-  picked up immediately on the next push/pull/clone, no restart.
+**Plugin contributions mirror the image.** A plugin's directory contains
+`Dockerfile.d/`, `workstation-startup.d/`, and `profile.d/` subtrees whose
+contents land at the matching paths in the final image (`/etc/...`).
 
-The workstation config carries only pointers (GCP secret names and env var
-names) — no sensitive values. Auth mode is chosen at `ra setup` time by
-selecting `claude_oauth` or `claude_apikey` as the Claude secret type.
+**Generic core, fat plugins.** The core ra Dockerfile and entrypoint are
+plugin-agnostic. Anything tool-specific (Node.js install, custom PATH entries,
+auth flows) lives in the relevant plugin.
 
 ## Files
 
 - `main.go` / `cmd/` / `internal/` — `ra` CLI (idempotent provisioning)
 - `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
-- `.ra/Dockerfile` — custom image: code-oss + Node 20 + gh + Claude Code
-- `.ra/entrypoint.sh` — runs at container boot; sets up git, clones the repo
-- `.ra/profile.d/*.sh` — image-baked login-shell scripts. `00-ra-wait.sh`
-  (shipped by `ra setup scaffold`) blocks on the entrypoint's sentinel;
-  any additional `*.sh` file you drop here is baked into `/etc/profile.d/`.
-- `~/.config/ra/profile.d/*.sh` — same, but scoped to you across all
-  projects. On filename collision with a project-level script the
-  project-level version wins.
+- `internal/scaffold/assets/` — embedded core build assets (Dockerfile, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`)
+- `plugins/claude/` — in-tree home of the Claude Code plugin (will move to its own repo in a follow-up changeset)
+- `~/.config/ra/` — your user-global ra config + materialized core assets + installed plugins
+- `.ra/` — project-local ra config + (optional) overrides + installed plugins
 
 ## Prerequisites
 
@@ -47,129 +31,60 @@ selecting `claude_oauth` or `claude_apikey` as the Claude secret type.
 - A GitHub fine-grained PAT scoped to the target repo with Contents: Read & write
 - If your Google Workspace/Cloud org enforces a session-length / reauth
   policy, the `reauth.googleapis.com` API must be enabled in the workstation
-  project. `ra create` enables it automatically; otherwise
-  gcloud's OAuth token refresh (e.g. during `gcloud workstations ssh`) will
-  fail with `PERMISSION_DENIED: Reauth API has not been used...`.
-- **Claude Code auth**, one of:
-  - **Claude Pro/Max/Team OAuth token** (recommended — uses your subscription).
-    Generate locally with `claude setup-token`, authorize in the browser, copy
-    the `sk-ant-oat01-...` value. Valid ~1 year. OAuth mode also needs the
-    `oauthAccount` block from your laptop's `~/.claude.json` (see below) so
-    the headless VM can skip the onboarding wizard.
-  - **Anthropic API key** (pay-as-you-go). Create in the Anthropic Console.
+  project. `ra create` enables it automatically; otherwise gcloud's OAuth
+  token refresh (e.g. during `gcloud workstations ssh`) will fail with
+  `PERMISSION_DENIED: Reauth API has not been used...`.
 
-The script prompts on first run to choose. Only one is stored and injected —
-setting both in the workstation would cause the API key to override the OAuth
-token and silently bypass your subscription.
-
-## One-time setup
-
-Build and install the `ra` CLI, then scaffold configs and run `ra create`:
+## Getting started
 
 ```bash
-make install                # installs ra to ~/.local/bin
-ra setup                   # writes .ra/config.yaml + ~/.config/ra/config.yaml
-ra create                  # provisions the workstation
+make install                                 # installs ra to ~/.local/bin
+ra setup                                     # writes config.yaml + core assets
+ra plugin install ./plugins/claude --user    # install the in-tree claude plugin
+                                             #   (when claude moves to its own
+                                             #    repo, use the git URL instead)
+ra create                                    # provisions the workstation
 ```
 
-`ra setup` prompts for:
+`ra setup` prompts for the minimum ra needs:
 1. **GCP project ID** — the project where the workstation cluster lives
 2. **GitHub repo URL** — the repo to clone inside the workstation
-3. **Claude auth mode** — `1` for OAuth token, `2` for API key
-4. **Git identity** — name and email for commits inside the workstation
+3. **Git identity** — name and email for commits inside the workstation
 
-It writes two config files:
-- **`.ra/config.yaml`** (committed to source control) — project ID, repo URL,
-  and optional per-project overrides
-- **`~/.config/ra/config.yaml`** (personal baseline) — all workstation
-  parameters, git identity, and secret references
+It writes:
+- **`~/.config/ra/config.yaml`** — your personal baseline
+- **`.ra/config.yaml`** — project-specific settings (committed to source control)
+- The core build assets (`Dockerfile`, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`) into `~/.config/ra/`
 
-After setup, secrets are pushed to Secret Manager the first time you run
-`ra create`. First run takes ~20 minutes (cluster provisioning is the slow
-part). Subsequent runs skip everything that already exists and finish in
-under a minute.
+`ra plugin install <source>` (where `<source>` is a git URL or a local
+filesystem path):
+1. Acquires the plugin (clone or copy)
+2. Asks whether to install at user level (`~/.config/ra/plugins/`) or project level (`.ra/plugins/`)
+3. Prompts for the plugin's config (e.g. `enabled: true`, `auth_provider: oauth`)
+4. Prompts for secret values (hidden input)
+5. Uploads secret values to GCP Secret Manager
+6. Writes `plugins.<name>.*` and `secrets.*` blocks into the chosen-level `config.yaml`
+7. Records install metadata at `<plugin-dir>/.ra-install.yaml`
 
-### Config schema
+`ra create` then assembles `.ra/.build/` (an ephemeral docker build context)
+from your core assets + every installed plugin's contributions, builds and
+pushes the image, ensures secrets and IAM bindings, and creates a workstation.
+First run takes ~20 minutes (cluster provisioning is the slow part).
+Subsequent runs skip everything that already exists.
 
-**`~/.config/ra/config.yaml`** (personal, exhaustive baseline):
-```yaml
-git:
-  user_name: "Alice"
-  user_email: "alice@example.com"
-  github_repo_url: https://github.com/org/repo.git
+## `ra plugin` reference
 
-gcloud:
-  project: my-gcp-project
-  workstation:
-    region: us-central1
-    machine_type: e2-standard-4
-    disk_size_gb: 50
-    cluster_name: claude-dev-cluster
-    # ... other workstation parameters
+```bash
+ra plugin install <git-url-or-path>          # interactive: choose user/project
+ra plugin install <source> --user            # force user-level
+ra plugin install <source> --local           # force project-level
+ra plugin install <source> --force           # overwrite existing at chosen level
 
-claude:
-  enabled: true            # false skips @anthropic-ai/claude-code install
-  auth_mode: oauth         # "oauth" or "apikey"; required when enabled
-
-secrets:
-  claude_oauth:            # required when claude.enabled=true + auth_mode=oauth
-    secret_name: claude-code-oauth-token
-    env_var: CLAUDE_CODE_OAUTH_TOKEN
-  github_pat:
-    secret_name: github-pat
-    env_var: GH_TOKEN
-
-env: {}
+ra plugin list                               # show installed plugins, level, source
+ra plugin remove <name>                      # remove a plugin + its config + secret entries
+                                             #   (GCP Secret Manager values are NOT auto-deleted;
+                                             #    `ra plugin remove` prints the gcloud commands)
 ```
-
-### Migrating from Claude-only configs
-
-Pre-v3 configs didn't have a `claude:` block; Claude Code was always installed
-and `claude_oauth`/`claude_apikey` was mandatory. After upgrading, `ra create`
-will refuse to run with a migration error pointing you to `ra setup --force`.
-
-Old config:
-```yaml
-secrets:
-  claude_oauth: { secret_name: ..., env_var: CLAUDE_CODE_OAUTH_TOKEN }
-  github_pat:   { secret_name: ..., env_var: GH_TOKEN }
-```
-
-New config (Claude still enabled):
-```yaml
-claude:
-  enabled: true
-  auth_mode: oauth         # or "apikey" if you were using claude_apikey
-secrets:
-  claude_oauth: { secret_name: ..., env_var: CLAUDE_CODE_OAUTH_TOKEN }
-  github_pat:   { secret_name: ..., env_var: GH_TOKEN }
-```
-
-To provision without Claude Code (GitHub-only workstation), set
-`claude.enabled: false` and remove the `claude_*` entries from `secrets:`.
-
-**`.ra/config.yaml`** (project-specific, thin overrides):
-```yaml
-git:
-  github_repo_url: https://github.com/org/repo.git
-
-gcloud:
-  project: my-gcp-project
-
-# Optional per-project overrides:
-# gcloud:
-#   workstation:
-#     machine_type: e2-standard-8
-# secrets:
-#   my_api:
-#     secret_name: my-api-key
-#     env_var: MY_API_KEY
-# env:
-#   MY_VAR: value
-```
-
-Config is layered: CLI args override project config, which overrides user
-config.
 
 ## Day-to-day
 
@@ -182,85 +97,30 @@ ra stop           # stop (save $)
 ra delete         # delete the workstation
 ```
 
-Each targeted command accepts an optional name argument; otherwise the
-default `<project_id>-<username>` workstation is used.
+Each targeted command accepts an optional name argument; otherwise the default workstation is used.
 
-Open the printed browser IDE URL, launch a terminal, `cd ~/workspace`, run
-`claude`.
-
-## Rotating credentials
+## Rotating secrets
 
 All rotations happen via Secret Manager — no need to re-run `ra create`.
-The GCP secret names are the `secret_name` values from your
-`~/.config/ra/config.yaml` (defaults shown below).
 
 ```bash
-# Claude API key — auto-picked up within ~5 min, no restart
-echo -n 'sk-ant-newvalue' | gcloud secrets versions add <claude_apikey secret_name> \
-    --data-file=- --project=$PROJECT_ID
-
-# Claude OAuth token — picked up on next `workstations start`
-echo -n 'sk-ant-oat01-newvalue' | gcloud secrets versions add <claude_oauth secret_name> \
-    --data-file=- --project=$PROJECT_ID
-ra stop
-ra create    # starts the workstation back up
-
-# GitHub PAT — picked up on next git operation, no restart
-echo -n 'ghp_newvalue' | gcloud secrets versions add <github_pat secret_name> \
+echo -n 'newvalue' | gcloud secrets versions add <secret-name> \
     --data-file=- --project=$PROJECT_ID
 ```
 
-To switch Claude auth modes (OAuth ↔ API key), re-run `ra setup` to update
-the secret type in `~/.config/ra/config.yaml`, then re-run `ra create` and
-restart the workstation.
+Rotation behavior depends on how each secret is consumed:
+- **`github_pat`** is fetched per-git-operation via a credential helper; rotation is picked up on the next push/pull/clone, no restart.
+- **API key plugins** (e.g. claude apikey mode) typically use a helper that re-reads the secret periodically; rotation is transparent within minutes.
+- **Other secrets** are fetched at boot and exported to `/etc/environment` + `/run/ra/env`. Rotation requires `ra stop` + `ra create` (or `gcloud workstations start`) to take effect.
 
-## How auth actually works at runtime
+## How auth works at runtime
 
-Auth mode is determined at `ra setup` time by which logical secret name you
-configure in `~/.config/ra/config.yaml`: `claude_oauth` or `claude_apikey`.
-The container receives the chosen secret name(s) via environment variables at
-boot.
+At every workstation boot:
 
-**Claude API key mode** (`claude_apikey` in secrets config). At every container
-boot, `entrypoint.sh` writes `/usr/local/bin/claude-apikey-helper.sh` (a
-one-liner that shells out to `gcloud secrets versions access`) and adds
-`"apiKeyHelper": "/usr/local/bin/claude-apikey-helper.sh"` to
-`~/.claude/settings.json`. Claude Code calls this script on startup and then
-every ~5 minutes, so rotating the secret is transparent.
-
-**Claude OAuth mode** (`claude_oauth` in secrets config). At every container
-boot, `entrypoint.sh` fetches the token from Secret Manager and writes it to
-`/run/ra/env` (alongside `GH_TOKEN`). `/run/ra` is a tmpfs, so the file never
-touches disk. Login shells are held at `/etc/profile.d/00-ra-wait.sh` until
-`entrypoint.sh` creates the `/run/ra/ready` sentinel, at which point
-`00-ra-wait.sh` sources `/run/ra/env` and the shell proceeds. This closes the
-race where sshd begins accepting connections before the entrypoint has written
-the token. Non-login sessions (IDE-spawned terminals) continue to read the
-token from `/etc/environment` via PAM. Because `apiKeyHelper` conflicts with
-OAuth tokens in Claude Code, the entrypoint also removes any stale
-`apiKeyHelper` entry from `settings.json` when running in this mode.
-
-In OAuth mode the entrypoint also pre-seeds `/home/user/.claude.json` with
-`hasCompletedOnboarding: true`, `lastOnboardingVersion` (from
-`claude --version`), and an `oauthAccount` block fetched from a second
-Secret Manager secret. Without this, interactive `claude` launches a
-browser-based onboarding wizard that can't complete on a headless VM —
-even though the OAuth token itself is valid and `claude -p` works. The
-seed is merged into any existing `~/.claude.json` so project state
-(trusted dirs, MCP servers, etc.) is preserved across boots.
-
-**GitHub PAT** (`github_pat` in secrets config). At every container boot,
-`entrypoint.sh` writes `/usr/local/bin/git-credential-gcp-secret`, a script
-implementing git's credential helper protocol. On each git operation against
-`github.com`, git invokes the helper, which fetches the current PAT from
-Secret Manager and prints `username=oauth2\npassword=<token>` to stdout. The
-helper ignores other hosts and never persists credentials. `~/.gitconfig` (on
-the persistent home disk) points at this helper via
-`credential.helper = /usr/local/bin/git-credential-gcp-secret`.
-
-**Additional secrets.** Any other logical name defined in the `secrets:` block
-of your config is fetched at boot and exported as the configured `env_var`.
-Rotation requires a workstation restart.
+1. The base image's startup machinery runs `/etc/workstation-startup.d/200_remote-agent-setup.sh`.
+2. That script iterates `RA_SECRETS` (passed via container env from `ra create`), fetches each from Secret Manager, and writes them to `/etc/environment` + `/run/ra/env`. The `github_pat` logical name is special-cased to also install a git credential helper (will move to a github plugin in a follow-up changeset).
+3. Other `/etc/workstation-startup.d/` scripts (numbered ≥ 250, contributed by plugins) run independently. Each plugin script sources `/run/ra/env` and gates on `RA_PLUGIN_<NAME>_ENABLED`.
+4. The script writes `/run/ra/ready`, unblocking login shells via `/etc/profile.d/00-ra-wait.sh`.
 
 ## Cost notes
 
@@ -271,19 +131,6 @@ Rotation requires a workstation restart.
 
 ## Security notes
 
-The workstation config carries zero secret values — only secret names and
-non-sensitive metadata. Anyone with `workstations.configs.get` can read the
-config and learn *which* secrets are in use, but cannot read the secret
-values themselves; that requires `secretmanager.secretAccessor`, granted
-only to the workstation's service account.
+The workstation config carries zero secret values — only secret names and non-sensitive metadata. Anyone with `workstations.configs.get` can read the config and learn *which* secrets are in use, but cannot read the secret values themselves; that requires `secretmanager.secretAccessor`, granted only to the workstation's service account.
 
-In API-key mode, the Claude key is fetched into memory by `apiKeyHelper`
-on demand and never touches disk. In OAuth mode, the token is written to
-`/run/ra/env` (mode 0644) and to `/etc/environment`; `/run/ra` is a
-tmpfs so only `/etc/environment` survives a reboot — and that file is
-rewritten from Secret Manager on the very next boot. The GitHub PAT is
-fetched per-operation by the git credential helper and never persisted.
-
-To audit credential access, look at Secret Manager's data access audit
-logs — every fetch from `apiKeyHelper`, the OAuth boot fetch, and every
-git operation will appear there.
+To audit credential access, look at Secret Manager's data access audit logs — every fetch (boot-time, per-operation, periodic) appears there.
