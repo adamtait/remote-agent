@@ -1,8 +1,9 @@
 #!/bin/bash
 # AWS plugin — install the AWS CLI v2 at image build time.
+# Always installs the latest release; no version is pinned by design.
 set -euo pipefail
 
-if aws --version >/dev/null 2>&1; then
+if [ -x /usr/local/bin/aws ]; then
     echo "AWS CLI already installed, skipping."
     exit 0
 fi

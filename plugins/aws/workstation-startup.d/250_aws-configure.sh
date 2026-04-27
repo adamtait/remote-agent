@@ -18,6 +18,14 @@ AWS_CONFIG_FILE="${AWS_CONFIG_DIR}/config"
 region="${RA_PLUGIN_AWS_REGION:-us-east-1}"
 output="${RA_PLUGIN_AWS_OUTPUT:-json}"
 
+# Guard against explicit empty strings (:-default only fires when unset).
+[ -n "${region}" ] || region="us-east-1"
+[ -n "${output}" ] || output="json"
+
+# Validate against the known-safe value sets.
+[[ "${region}" =~ ^[a-z0-9-]+$ ]] || { echo "[aws-configure] invalid region: ${region}" >&2; exit 1; }
+[[ "${output}" =~ ^(json|yaml|text|table)$ ]] || { echo "[aws-configure] invalid output: ${output}" >&2; exit 1; }
+
 mkdir -p "${AWS_CONFIG_DIR}"
 chown "${USER_NAME}:${USER_NAME}" "${AWS_CONFIG_DIR}"
 
