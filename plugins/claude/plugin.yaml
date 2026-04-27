@@ -1,0 +1,23 @@
+name: claude
+version: "1.0.0"
+description: "Installs and configures Claude Code on the workstation"
+config:
+  - name: enabled
+    type: bool
+    description: "Enable Claude Code?"
+    default: false
+auth_providers:
+  - name: oauth
+    description: "OAuth token (recommended)"
+    secrets:
+      - name: claude_oauth
+        env_var: CLAUDE_CODE_OAUTH_TOKEN
+        description: "OAuth token from claude.ai/settings"
+        default_secret_name: claude-code-oauth-token
+  - name: apikey
+    description: "API key via helper script"
+    secrets:
+      - name: claude_apikey
+        env_var: ANTHROPIC_API_KEY
+        description: "API key from console.anthropic.com"
+        default_secret_name: anthropic-api-key
