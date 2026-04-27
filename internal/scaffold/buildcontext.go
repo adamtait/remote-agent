@@ -43,6 +43,10 @@ func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
 		cleanup()
 		return "", func() {}, err
 	}
+	if err := stagePluginTrees(opts, root); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
 	if err := mergeDirs(opts, root); err != nil {
 		cleanup()
 		return "", func() {}, err
@@ -192,4 +196,53 @@ func writeKeepIfEmpty(root string) error {
 		}
 	}
 	return nil
+}
+
+// stagePluginTrees copies each plugin's whole directory into
+// <root>/plugins/<name>/. .ra-install.yaml is install metadata and is
+// skipped. Project-local plugins shadow user-global plugins entirely
+// (handled in cmd/create.go's plugin loading; the assembler just walks
+// whatever Plugins it's given).
+func stagePluginTrees(opts BuildContextOptions, root string) error {
+	dst := filepath.Join(root, "plugins")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return err
+	}
+	for _, p := range opts.Plugins {
+		pdst := filepath.Join(dst, p.Name())
+		if err := copyTreeFromFS(p.FS(), ".", pdst); err != nil {
+			return fmt.Errorf("staging plugin %s: %w", p.Name(), err)
+		}
+	}
+	return nil
+}
+
+// copyTreeFromFS recursively copies fsys rooted at src into dst on disk.
+// Skips .ra-install.yaml at any depth.
+func copyTreeFromFS(fsys fs.FS, src, dst string) error {
+	return fs.WalkDir(fsys, src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Name() == ".ra-install.yaml" {
+			return nil
+		}
+		rel := p
+		if src != "." {
+			rel = strings.TrimPrefix(p, src+"/")
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		data, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		mode := os.FileMode(0644)
+		if strings.HasSuffix(p, ".sh") {
+			mode = 0755
+		}
+		return os.WriteFile(target, data, mode)
+	})
 }

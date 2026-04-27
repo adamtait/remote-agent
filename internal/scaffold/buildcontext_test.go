@@ -212,6 +212,39 @@ func TestAssembleBuildContext_ProjectShadowsPlugin(t *testing.T) {
 	}
 }
 
+func TestAssembleBuildContext_StagesPluginTree(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	pluginDir := filepath.Join(home, ".config", "ra", "plugins", "myplug")
+
+	mustWrite(t, filepath.Join(pluginDir, "plugin.yaml"), "name: myplug\nversion: '0.0.1'\ndescription: x\n")
+	mustWrite(t, filepath.Join(pluginDir, "workstation-startup.d", "300_myplug.sh"), "X")
+	mustWrite(t, filepath.Join(pluginDir, ".ra-install.yaml"), "source: foo\n")
+
+	plug, _ := plugins.LoadPlugin(os.DirFS(pluginDir))
+
+	path, cleanup, err := AssembleBuildContext(BuildContextOptions{
+		Cwd: cwd, Home: home, Plugins: []*plugins.FilePlugin{plug},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	// plugin.yaml + scripts copied into build/plugins/<name>/
+	if _, err := os.Stat(filepath.Join(path, "plugins", "myplug", "plugin.yaml")); err != nil {
+		t.Errorf("plugin.yaml not staged: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(path, "plugins", "myplug", "workstation-startup.d", "300_myplug.sh")); err != nil {
+		t.Errorf("plugin script not staged: %v", err)
+	}
+
+	// .ra-install.yaml is install metadata; do NOT copy into image
+	if _, err := os.Stat(filepath.Join(path, "plugins", "myplug", ".ra-install.yaml")); !os.IsNotExist(err) {
+		t.Errorf(".ra-install.yaml should NOT be staged into the image, but Stat returned: %v", err)
+	}
+}
+
 // mustWrite is a test helper that writes content with parent-dir mkdir.
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
