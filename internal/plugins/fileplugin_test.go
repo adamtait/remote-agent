@@ -177,33 +177,77 @@ func sliceContains(ss []string, s string) bool {
 func TestFilePlugin_Prompt_Disabled(t *testing.T) {
 	p, _ := LoadPlugin(testPluginFS(nil))
 	r := bufio.NewReader(strings.NewReader("N\n"))
-	cfg, secrets, err := p.Prompt(r, io.Discard)
+	res, err := p.Prompt(r, io.Discard, io.Discard, nil)
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	if !strings.Contains(cfg, "enabled: false") {
-		t.Errorf("expected enabled: false, got %q", cfg)
+	if v, ok := res.Config["enabled"]; !ok || v != false {
+		t.Errorf("expected Config[enabled]=false, got %v", res.Config["enabled"])
 	}
-	if secrets != "" {
-		t.Errorf("expected empty secrets block, got %q", secrets)
+	if res.AuthProvider != nil {
+		t.Errorf("expected no AuthProvider when disabled, got %v", res.AuthProvider)
+	}
+	if len(res.SecretValues) != 0 {
+		t.Errorf("expected empty SecretValues when disabled, got %v", res.SecretValues)
+	}
+	// RenderConfigBlock should contain enabled: false
+	cfg := p.RenderConfigBlock(res)
+	if !strings.Contains(cfg, "enabled: false") {
+		t.Errorf("RenderConfigBlock: expected 'enabled: false', got %q", cfg)
+	}
+	// RenderSecretsBlock should be empty when disabled (no provider)
+	if sec := p.RenderSecretsBlock(res); sec != "" {
+		t.Errorf("RenderSecretsBlock: expected empty, got %q", sec)
 	}
 }
 
+// testPluginNoSecretsYAML defines a plugin with auth providers but no secrets,
+// so Prompt_Enabled tests don't require a real TTY for term.ReadPassword.
+const testPluginNoSecretsYAML = `
+name: myplugin
+version: "1.0.0"
+description: "Test plugin"
+config:
+  - name: enabled
+    type: bool
+    description: "Enable?"
+    default: false
+auth_providers:
+  - name: oauth
+    description: "OAuth"
+`
+
 func TestFilePlugin_Prompt_Enabled_OAuth(t *testing.T) {
-	p, _ := LoadPlugin(testPluginFS(nil))
+	fsys := fstest.MapFS{
+		"plugin.yaml": &fstest.MapFile{Data: []byte(testPluginNoSecretsYAML)},
+	}
+	p, _ := LoadPlugin(fsys)
 	// "y\n" → enabled=true; "1\n" → first auth provider (oauth)
 	r := bufio.NewReader(strings.NewReader("y\n1\n"))
-	cfg, secrets, err := p.Prompt(r, io.Discard)
+	res, err := p.Prompt(r, io.Discard, io.Discard, nil)
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	if !strings.Contains(cfg, "enabled: true") {
-		t.Errorf("expected enabled: true, got %q", cfg)
+	if v, ok := res.Config["enabled"]; !ok || v != true {
+		t.Errorf("expected Config[enabled]=true, got %v", res.Config["enabled"])
 	}
+	if v, ok := res.Config["auth_provider"]; !ok || v != "oauth" {
+		t.Errorf("expected Config[auth_provider]=oauth, got %v", res.Config["auth_provider"])
+	}
+	if res.AuthProvider == nil || res.AuthProvider.Name != "oauth" {
+		t.Errorf("expected AuthProvider.Name=oauth, got %v", res.AuthProvider)
+	}
+	if len(res.SecretValues) != 0 {
+		t.Errorf("expected no SecretValues (provider has no secrets), got %v", res.SecretValues)
+	}
+	// RenderConfigBlock should contain auth_provider: oauth
+	cfg := p.RenderConfigBlock(res)
 	if !strings.Contains(cfg, "auth_provider: oauth") {
-		t.Errorf("expected auth_provider: oauth, got %q", cfg)
+		t.Errorf("RenderConfigBlock: expected 'auth_provider: oauth', got %q", cfg)
 	}
-	if !strings.Contains(secrets, "my_oauth") {
-		t.Errorf("expected my_oauth in secrets block, got %q", secrets)
+	// RenderSecretsBlock should reflect provider secrets (none here)
+	sec := p.RenderSecretsBlock(res)
+	if sec != "" {
+		t.Errorf("RenderSecretsBlock: expected empty (no secrets), got %q", sec)
 	}
 }
