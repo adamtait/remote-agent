@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
@@ -12,11 +11,10 @@ import (
 	"time"
 
 	"github.com/adamtait/remote-agent/internal/config"
-	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/naming"
 	"github.com/adamtait/remote-agent/internal/scaffold"
+	"github.com/adamtait/remote-agent/internal/secrets"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 func logicalNameToEnvToken(logical string) string {
@@ -205,7 +203,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	for _, logical := range secretLogicalOrder {
 		s := cfg.Secrets[logical]
 		prompt := fmt.Sprintf("Enter value for secret %q (env var %s)", s.SecretName, s.EnvVar)
-		if err := ensureSecret(r, cfg.Gcloud.Project, s.SecretName, prompt); err != nil {
+		if err := secrets.EnsureSecret(r, cfg.Gcloud.Project, s.SecretName, prompt, os.Stderr, os.Stdin); err != nil {
 			return fmt.Errorf("ensuring secret %s: %w", s.SecretName, err)
 		}
 	}
@@ -398,39 +396,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		workstationName,
 	)
 
-	return nil
-}
-
-// ensureSecret checks if a secret exists and creates it if not, prompting the user for the value.
-func ensureSecret(r gcloud.Runner, projectID, name, prompt string) error {
-	if r.Check("secrets", "describe", name, "--project", projectID) {
-		fmt.Printf("Secret '%s' already exists (use 'gcloud secrets versions add' to rotate)\n", name)
-		return nil
-	}
-
-	fmt.Fprintf(os.Stderr, "%s: ", prompt)
-	value, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Fprintln(os.Stderr)
-	if err != nil {
-		return fmt.Errorf("reading secret value: %w", err)
-	}
-	if len(strings.TrimSpace(string(value))) == 0 {
-		return fmt.Errorf("secret value cannot be empty")
-	}
-	// Best-effort scrub: only clears the backing array we still hold; Go's GC may have copied it.
-	defer func() {
-		for i := range value {
-			value[i] = 0
-		}
-	}()
-
-	if err := r.RunWithStdin(bytes.NewReader(value),
-		"secrets", "create", name,
-		"--replication-policy=automatic",
-		"--data-file=-",
-		"--project", projectID); err != nil {
-		return fmt.Errorf("creating secret %s: %w", name, err)
-	}
 	return nil
 }
 
