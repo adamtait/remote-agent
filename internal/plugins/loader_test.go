@@ -6,53 +6,40 @@ import (
 	"testing"
 )
 
-func TestLoadAll_EmbeddedDefaults(t *testing.T) {
-	// No filesystem dirs — should still get embedded claude plugin.
+// writePlugin is a helper that creates a minimal plugin.yaml under dir/<name>/plugin.yaml.
+func writePlugin(t *testing.T, dir, name, version string) {
+	t.Helper()
+	d := filepath.Join(dir, name)
+	if err := os.MkdirAll(d, 0755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "name: " + name + "\nversion: \"" + version + "\"\ndescription: \"d\"\n"
+	if err := os.WriteFile(filepath.Join(d, "plugin.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadAll_EmptyDirs(t *testing.T) {
+	// With no dirs and no embedded defaults, LoadAll should return an empty list.
 	plugins, err := LoadAll("", "")
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	var names []string
-	for _, p := range plugins {
-		names = append(names, p.Name())
-	}
-	found := false
-	for _, n := range names {
-		if n == "claude" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected embedded claude plugin, got %v", names)
+	if len(plugins) != 0 {
+		t.Errorf("expected no plugins, got %d: %v", len(plugins), plugins)
 	}
 }
 
-func TestLoadAll_FilesystemShadowsEmbedded(t *testing.T) {
+func TestLoadAll_UserDir(t *testing.T) {
 	dir := t.TempDir()
-	pluginDir := filepath.Join(dir, "claude")
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	yaml := "name: claude\nversion: \"99.0.0\"\ndescription: \"Override\"\n"
-	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(yaml), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writePlugin(t, dir, "myplugin", "1.0.0")
 
 	plugins, err := LoadAll(dir, "")
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	var claude *FilePlugin
-	for _, p := range plugins {
-		if p.Name() == "claude" {
-			claude = p
-		}
-	}
-	if claude == nil {
-		t.Fatal("claude plugin not found")
-	}
-	if claude.schema.Version != "99.0.0" {
-		t.Errorf("expected override version 99.0.0, got %q", claude.schema.Version)
+	if len(plugins) != 1 || plugins[0].Name() != "myplugin" {
+		t.Errorf("expected [myplugin], got %v", plugins)
 	}
 }
 
@@ -60,18 +47,8 @@ func TestLoadAll_ProjectShadowsUser(t *testing.T) {
 	userDir := t.TempDir()
 	projDir := t.TempDir()
 
-	write := func(dir, version string) {
-		d := filepath.Join(dir, "myplugin")
-		if err := os.MkdirAll(d, 0755); err != nil {
-			t.Fatal(err)
-		}
-		yaml := "name: myplugin\nversion: \"" + version + "\"\ndescription: \"d\"\n"
-		if err := os.WriteFile(filepath.Join(d, "plugin.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(userDir, "1.0.0")
-	write(projDir, "2.0.0")
+	writePlugin(t, userDir, "myplugin", "1.0.0")
+	writePlugin(t, projDir, "myplugin", "2.0.0")
 
 	plugins, err := LoadAll(userDir, projDir)
 	if err != nil {
