@@ -64,7 +64,7 @@ var createCmd = &cobra.Command{
 and IAM setup remain idempotent; the workstation itself is freshly created on
 every run. Use --name to set the workstation name (auto-suffixed on collision);
 omit it for an auto-generated memorable name.
-Requires .ra/config.yaml in the project root with git.github_repo_url and gcloud.project set.`,
+Requires .ra/config.yaml in the project root with gcloud.project set.`,
 	RunE: runCreate,
 }
 

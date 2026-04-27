@@ -193,10 +193,9 @@ func TestSetupInteractive_AlwaysScaffoldsAssets(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
 	// Pipe pre-canned answers for every prompt in order:
-	//   project_id, github_repo_url, git_user_name, git_user_email, Proceed? [Y/n]
+	//   project_id, git_user_name, git_user_email, Proceed? [Y/n]
 	input := strings.Join([]string{
 		"my-project",
-		"https://github.com/a/b.git",
 		"Alice",
 		"a@example.com",
 		"Y", // Proceed?
@@ -245,8 +244,11 @@ func TestSetupInteractive_RerunSkipsExistingAssets(t *testing.T) {
 	}
 
 	input := strings.Join([]string{
-		"my-project", "https://github.com/a/b.git",
-		"Alice", "a@example.com", "Y", "",
+		"my-project",
+		"Alice",
+		"a@example.com",
+		"Y", // Proceed?
+		"",  // trailing newline
 	}, "\n")
 	var stdin bytes.Buffer
 	stdin.WriteString(input)
