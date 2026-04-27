@@ -187,22 +187,21 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("prompting plugin config: %w", err)
 		}
 
-		// ── 6. write config.yaml ──────────────────────────────────────────
+		// ── 6. require GCP project; upload secrets before touching config ─
+		if cfg == nil || cfg.Gcloud.Project == "" {
+			return fmt.Errorf("ra config not loaded — run 'ra setup' first")
+		}
+		if err := uploadPluginSecrets(p, res, cfg.Gcloud.Project); err != nil {
+			return fmt.Errorf("uploading secrets: %w", err)
+		}
+
+		// ── 7. write config.yaml ──────────────────────────────────────────
 		cfgPath, err := pluginCfgPath(level)
 		if err != nil {
 			return err
 		}
 		if err := writePluginToConfig(cfgPath, p, res); err != nil {
 			return err
-		}
-
-		// ── 7. upload secrets to GCP ──────────────────────────────────────
-		if cfg != nil && cfg.Gcloud.Project != "" {
-			if err := uploadPluginSecrets(p, res, cfg.Gcloud.Project); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to upload secrets to GCP: %v\n", err)
-			}
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "note: GCP project not configured — skipping secret upload\n")
 		}
 
 		// ── 8. write .ra-install.yaml ─────────────────────────────────────
