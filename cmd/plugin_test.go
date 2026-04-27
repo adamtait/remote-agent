@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"strings"
 	"testing"
+	"testing/fstest"
+
+	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
 func TestPluginListCommand_Registered(t *testing.T) {
@@ -114,5 +118,82 @@ func TestChooseInstallLevel_Interactive_Project(t *testing.T) {
 	}
 	if level != "project" {
 		t.Errorf("got %q, want project", level)
+	}
+}
+
+func makePluginWithSecret(t *testing.T, name, secretName, defaultSecretName string) *plugins.FilePlugin {
+	t.Helper()
+	yaml := `name: ` + name + `
+auth_providers:
+  - name: pat
+    description: "PAT"
+    secrets:
+      - name: ` + secretName + `
+        env_var: GH_TOKEN
+        description: "token"
+        default_secret_name: ` + defaultSecretName
+	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(yaml)}}
+	p, err := plugins.LoadPlugin(fsys)
+	if err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	return p
+}
+
+func TestResolveSecretNames_UserLevel_UsesDefault(t *testing.T) {
+	p := makePluginWithSecret(t, "github", "github_pat", "github-pat")
+	res := &plugins.PromptResult{
+		Config:       map[string]any{"enabled": true, "auth_provider": "pat"},
+		AuthProvider: &plugins.AuthProvider{Name: "pat", Secrets: p.Schema().AuthProviders[0].Secrets},
+		SecretValues: map[string]string{"github_pat": "tok"},
+	}
+
+	var out bytes.Buffer
+	r := bufio.NewReader(strings.NewReader(""))
+	names := resolveSecretNames(r, &out, p, res, "user", "/home/user/myproject")
+
+	if got := names["github_pat"]; got != "github-pat" {
+		t.Errorf("user level: got %q, want %q", got, "github-pat")
+	}
+	if out.Len() != 0 {
+		t.Errorf("user level should not prompt; got output: %q", out.String())
+	}
+}
+
+func TestResolveSecretNames_ProjectLevel_UsesProjectSuffix(t *testing.T) {
+	p := makePluginWithSecret(t, "github", "github_pat", "github-pat")
+	res := &plugins.PromptResult{
+		Config:       map[string]any{"enabled": true, "auth_provider": "pat"},
+		AuthProvider: &plugins.AuthProvider{Name: "pat", Secrets: p.Schema().AuthProviders[0].Secrets},
+		SecretValues: map[string]string{"github_pat": "tok"},
+	}
+
+	var out bytes.Buffer
+	r := bufio.NewReader(strings.NewReader("\n")) // accept default
+	names := resolveSecretNames(r, &out, p, res, "project", "/home/user/myproject")
+
+	want := "github-pat-myproject"
+	if got := names["github_pat"]; got != want {
+		t.Errorf("project level default: got %q, want %q", got, want)
+	}
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("prompt should show default %q; got: %q", want, out.String())
+	}
+}
+
+func TestResolveSecretNames_ProjectLevel_CustomName(t *testing.T) {
+	p := makePluginWithSecret(t, "github", "github_pat", "github-pat")
+	res := &plugins.PromptResult{
+		Config:       map[string]any{"enabled": true, "auth_provider": "pat"},
+		AuthProvider: &plugins.AuthProvider{Name: "pat", Secrets: p.Schema().AuthProviders[0].Secrets},
+		SecretValues: map[string]string{"github_pat": "tok"},
+	}
+
+	var out bytes.Buffer
+	r := bufio.NewReader(strings.NewReader("my-custom-pat\n"))
+	names := resolveSecretNames(r, &out, p, res, "project", "/home/user/myproject")
+
+	if got := names["github_pat"]; got != "my-custom-pat" {
+		t.Errorf("custom name: got %q, want %q", got, "my-custom-pat")
 	}
 }

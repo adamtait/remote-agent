@@ -147,13 +147,13 @@ var pluginInstallCmd = &cobra.Command{
 		}
 
 		// ── 4. determine dest directory ───────────────────────────────────
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("determining working directory: %w", err)
+		}
 		var destBase string
 		switch level {
 		case "project":
-			wd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("determining working directory: %w", err)
-			}
 			destBase = filepath.Join(wd, ".ra", "plugins")
 		default: // "user"
 			home, err := os.UserHomeDir()
@@ -187,11 +187,12 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("prompting plugin config: %w", err)
 		}
 
-		// ── 6. require GCP project; upload secrets before touching config ─
+		// ── 6. prompt for GCP secret names; upload secrets before touching config ─
 		if cfg == nil || cfg.Gcloud.Project == "" {
 			return fmt.Errorf("ra config not loaded — run 'ra setup' first")
 		}
-		if err := uploadPluginSecrets(p, res, cfg.Gcloud.Project); err != nil {
+		secretNames := resolveSecretNames(r, cmd.OutOrStdout(), p, res, level, wd)
+		if err := uploadPluginSecrets(p, res, cfg.Gcloud.Project, secretNames); err != nil {
 			return fmt.Errorf("uploading secrets: %w", err)
 		}
 
@@ -200,7 +201,7 @@ var pluginInstallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := writePluginToConfig(cfgPath, p, res); err != nil {
+		if err := writePluginToConfig(cfgPath, p, res, secretNames); err != nil {
 			return err
 		}
 
@@ -503,7 +504,7 @@ func pluginCfgPath(level string) (string, error) {
 }
 
 // writePluginToConfig merges a PromptResult into the appropriate config.yaml.
-func writePluginToConfig(cfgPath string, p *plugins.FilePlugin, res *plugins.PromptResult) error {
+func writePluginToConfig(cfgPath string, p *plugins.FilePlugin, res *plugins.PromptResult, secretNames map[string]string) error {
 	original, err := os.ReadFile(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("config.yaml not found at %s — run 'ra setup' first", cfgPath)
@@ -512,14 +513,8 @@ func writePluginToConfig(cfgPath string, p *plugins.FilePlugin, res *plugins.Pro
 		return fmt.Errorf("reading config.yaml: %w", err)
 	}
 
-	secretNames := make(map[string]string)
 	secretEnvVars := make(map[string]string)
 	for _, sd := range allRelevantSecretDefs(p, res) {
-		gcpName := sd.DefaultSecretName
-		if gcpName == "" {
-			gcpName = sd.Name
-		}
-		secretNames[sd.Name] = gcpName
 		secretEnvVars[sd.Name] = sd.EnvVar
 	}
 
@@ -562,15 +557,39 @@ func gcpSecretName(s plugins.SecretDef) string {
 	return s.Name
 }
 
+// resolveSecretNames returns the GCP secret name for each logical secret.
+// For project-level installs, the default is "<base>-<project-dirname>" so
+// different projects can have independent secrets. The user may override any
+// name by typing at the prompt; pressing Enter accepts the default.
+func resolveSecretNames(r *bufio.Reader, out io.Writer, p *plugins.FilePlugin, res *plugins.PromptResult, level, wd string) map[string]string {
+	names := make(map[string]string)
+	for _, sd := range allRelevantSecretDefs(p, res) {
+		base := gcpSecretName(sd)
+		if level == "project" {
+			proposed := base + "-" + filepath.Base(wd)
+			fmt.Fprintf(out, "GCP secret name for %q [%s]: ", sd.Name, proposed)
+			line, _ := r.ReadString('\n')
+			if name := strings.TrimSpace(line); name != "" {
+				names[sd.Name] = name
+			} else {
+				names[sd.Name] = proposed
+			}
+		} else {
+			names[sd.Name] = base
+		}
+	}
+	return names
+}
+
 // uploadPluginSecrets uploads each secret value gathered during Prompt to GCP
 // Secret Manager. If a secret already exists, a new version is added.
-func uploadPluginSecrets(p *plugins.FilePlugin, res *plugins.PromptResult, projectID string) error {
+func uploadPluginSecrets(p *plugins.FilePlugin, res *plugins.PromptResult, projectID string, secretNames map[string]string) error {
 	for _, sd := range allRelevantSecretDefs(p, res) {
 		value, ok := res.SecretValues[sd.Name]
 		if !ok {
 			continue
 		}
-		if err := uploadSecretValue(projectID, gcpSecretName(sd), value); err != nil {
+		if err := uploadSecretValue(projectID, secretNames[sd.Name], value); err != nil {
 			return err
 		}
 	}
