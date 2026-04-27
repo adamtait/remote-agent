@@ -69,7 +69,7 @@ env:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Git.UserName != "Alice" || cfg.Git.GithubRepoURL != "https://example.com/user.git" ||
+	if cfg.Git.UserName != "Alice" ||
 		cfg.Gcloud.Project != "user-proj" || cfg.Gcloud.Workstation.Region != "us-central1" ||
 		cfg.Gcloud.Workstation.AutoSleepHours == nil || *cfg.Gcloud.Workstation.AutoSleepHours != 2 {
 		t.Errorf("parsed wrong: %+v", cfg)
@@ -105,7 +105,7 @@ env:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Gcloud.Project != "my-proj" || cfg.Git.GithubRepoURL == "" {
+	if cfg.Gcloud.Project != "my-proj" {
 		t.Errorf("config parsed wrong: %+v", cfg)
 	}
 	if cfg.Gcloud.Workstation.MachineType != "e2-standard-8" {

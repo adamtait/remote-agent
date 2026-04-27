@@ -14,7 +14,6 @@ var envVarPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 // reservedEnvVars are set directly by ra create; configs must not shadow them.
 var reservedEnvVars = []string{
 	"GCP_PROJECT_ID",
-	"GITHUB_REPO_URL",
 	"GIT_USER_NAME",
 	"GIT_USER_EMAIL",
 	"RA_SECRETS",
@@ -31,7 +30,6 @@ func Validate(cfg *Config, pluginErrs []string) error {
 		empty bool
 	}{
 		{"gcloud.project", cfg.Gcloud.Project == ""},
-		{"git.github_repo_url", cfg.Git.GithubRepoURL == ""},
 		{"git.user_name", cfg.Git.UserName == ""},
 		{"git.user_email", cfg.Git.UserEmail == ""},
 		{"gcloud.workstation.region", cfg.Gcloud.Workstation.Region == ""},
@@ -53,11 +51,6 @@ func Validate(cfg *Config, pluginErrs []string) error {
 	}
 
 	errs = append(errs, pluginErrs...)
-
-	// github_pat required (shared infrastructure, not Claude-specific).
-	if _, ok := cfg.Secrets["github_pat"]; !ok {
-		errs = append(errs, "secrets.github_pat is required")
-	}
 
 	// Per-secret shape + collision detection.
 	usedEnvVars := map[string]string{}

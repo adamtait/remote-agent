@@ -11,9 +11,8 @@ func fullValidCfg() *config.Config {
 	sleep := 2
 	return &config.Config{
 		Git: config.GitConfig{
-			UserName:      "Alice",
-			UserEmail:     "a@x.com",
-			GithubRepoURL: "https://example.com/r.git",
+			UserName:  "Alice",
+			UserEmail: "a@x.com",
 		},
 		Gcloud: config.GcloudConfig{
 			Project: "p",
@@ -33,7 +32,6 @@ func fullValidCfg() *config.Config {
 		},
 		Secrets: map[string]config.SecretEntry{
 			"claude_oauth": {SecretName: "claude-auth", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
-			"github_pat":   {SecretName: "github-pat", EnvVar: "GH_TOKEN"},
 		},
 	}
 }
@@ -59,7 +57,6 @@ func TestValidate_MissingRequiredKeys(t *testing.T) {
 		want   string
 	}{
 		{func(c *config.Config) { c.Gcloud.Project = "" }, "gcloud.project"},
-		{func(c *config.Config) { c.Git.GithubRepoURL = "" }, "git.github_repo_url"},
 		{func(c *config.Config) { c.Git.UserName = "" }, "git.user_name"},
 		{func(c *config.Config) { c.Git.UserEmail = "" }, "git.user_email"},
 		{func(c *config.Config) { c.Gcloud.Workstation.Region = "" }, "gcloud.workstation.region"},
@@ -84,14 +81,6 @@ func TestValidate_MissingRequiredKeys(t *testing.T) {
 	}
 }
 
-func TestValidate_GithubPatRequired(t *testing.T) {
-	c := fullValidCfg()
-	delete(c.Secrets, "github_pat")
-	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "github_pat") {
-		t.Errorf("want missing-github_pat error, got %v", err)
-	}
-}
-
 func TestValidate_SecretEnvVarShape(t *testing.T) {
 	c := fullValidCfg()
 	c.Secrets["claude_oauth"] = config.SecretEntry{SecretName: "x", EnvVar: "not-valid"}
@@ -110,22 +99,24 @@ func TestValidate_SecretSecretNameNonEmpty(t *testing.T) {
 
 func TestValidate_EnvVarCollision_BetweenSecrets(t *testing.T) {
 	c := fullValidCfg()
-	c.Secrets["extra"] = config.SecretEntry{SecretName: "ex", EnvVar: "GH_TOKEN"} // collides with github_pat
-	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "GH_TOKEN") {
+	c.Secrets["claude_apikey"] = config.SecretEntry{SecretName: "anthropic-api-key", EnvVar: "ANTHROPIC_API_KEY"}
+	c.Secrets["dup"] = config.SecretEntry{SecretName: "dup", EnvVar: "ANTHROPIC_API_KEY"}
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
 		t.Errorf("want collision error, got %v", err)
 	}
 }
 
 func TestValidate_EnvVarCollision_SecretAndEnv(t *testing.T) {
 	c := fullValidCfg()
-	c.Env = map[string]string{"GH_TOKEN": "whatever"}
-	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "GH_TOKEN") {
+	c.Secrets["claude_apikey"] = config.SecretEntry{SecretName: "anthropic-api-key", EnvVar: "ANTHROPIC_API_KEY"}
+	c.Env = map[string]string{"ANTHROPIC_API_KEY": "whatever"}
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
 		t.Errorf("want collision error between secret and env, got %v", err)
 	}
 }
 
 func TestValidate_EnvVarCollision_Reserved(t *testing.T) {
-	for _, reserved := range []string{"GCP_PROJECT_ID", "GITHUB_REPO_URL", "GIT_USER_NAME", "RA_SECRETS", "RA_SECRET_FOO_NAME"} {
+	for _, reserved := range []string{"GCP_PROJECT_ID", "GIT_USER_NAME", "RA_SECRETS", "RA_SECRET_FOO_NAME"} {
 		c := fullValidCfg()
 		c.Env = map[string]string{reserved: "v"}
 		if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), reserved) {

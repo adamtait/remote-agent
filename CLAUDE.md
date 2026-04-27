@@ -60,7 +60,7 @@ The Dockerfile is generic and references build-context-relative paths (no `.ra/`
 
 ### Subcommands → Core Packages
 
-- **`cmd/setup.go`** calls `scaffold.InteractiveScaffold()` — probes gcloud/git defaults, prompts for ra-only config (project_id, repo_url, git identity), writes config YAMLs, and materializes core build assets (`Dockerfile`, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`) into `~/.config/ra/` and optionally `.ra/`. It does NOT prompt for plugin config — that moves to `ra plugin install`.
+- **`cmd/setup.go`** calls `scaffold.InteractiveScaffold()` — probes gcloud/git defaults, prompts for ra-only config (project_id, git identity), writes config YAMLs, and materializes core build assets (`Dockerfile`, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`) into `~/.config/ra/` and optionally `.ra/`. It does NOT prompt for plugin config — that moves to `ra plugin install`.
 - **`cmd/plugin.go`** implements `ra plugin install/list/remove`. Install clones (or copies, for local paths), prompts for the install level (user/project), prompts for plugin config + secret values, uploads secret values to GCP Secret Manager, writes `plugins.<name>.*` and `secrets.*` blocks into the chosen-level `config.yaml`, and writes `<plugin-dir>/.ra-install.yaml` with source + install timestamp.
 - **`cmd/create.go`** is the main provisioning pipeline: enable APIs → ensure Artifact Registry → build+push Docker image → ensure GCP secrets → create service account + IAM → ensure cluster+config → create workstation.
 - All gcloud operations go through `internal/gcloud/` — `runner.go` shells out to the `gcloud` binary; `workstation.go` wraps it with typed methods.
@@ -86,7 +86,7 @@ Plugin scripts in `workstation-startup.d/` run independently from `200_remote-ag
 [ "${RA_PLUGIN_<NAME>_ENABLED:-false}" = "true" ] || exit 0
 ```
 
-`<repo>/plugins/claude/` is the in-tree home for the claude plugin. A subsequent changeset extracts it to a separate git repo.
+`<repo>/plugins/claude/` and `<repo>/plugins/github/` are the in-tree homes for the claude and github plugins. The github plugin (Dockerfile.d/100_github-cli.sh + workstation-startup.d/250_github-credential-helper.sh + workstation-startup.d/260_github-clone.sh) extracts what used to be hardcoded in core: gh CLI install, the PAT git credential helper, and first-boot repo clone. A workstation only does GitHub things if the user runs `ra plugin install ./plugins/github`. A subsequent changeset extracts each plugin to its own git repo.
 
 ### Zero-Secrets Design
 

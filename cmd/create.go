@@ -26,7 +26,6 @@ func buildContainerEnv(cfg *config.Config) string {
 	add := func(k, v string) { pairs = append(pairs, k+"="+v) }
 
 	add("GCP_PROJECT_ID", cfg.Gcloud.Project)
-	add("GITHUB_REPO_URL", cfg.Git.GithubRepoURL)
 	add("GIT_USER_NAME", cfg.Git.UserName)
 	add("GIT_USER_EMAIL", cfg.Git.UserEmail)
 	for _, pair := range reg.AllContainerEnvPairs(cfg) {
@@ -65,7 +64,7 @@ var createCmd = &cobra.Command{
 and IAM setup remain idempotent; the workstation itself is freshly created on
 every run. Use --name to set the workstation name (auto-suffixed on collision);
 omit it for an auto-generated memorable name.
-Requires .ra/config.yaml in the project root with git.github_repo_url and gcloud.project set.`,
+Requires .ra/config.yaml in the project root with gcloud.project set.`,
 	RunE: runCreate,
 }
 
@@ -79,18 +78,9 @@ func init() {
 func runCreate(cmd *cobra.Command, args []string) error {
 	ws := &cfg.Gcloud.Workstation
 
-	// The workstation image ships HTTPS-only credentials (PAT via git helper) —
-	// no SSH keys, no known_hosts. Rewrite SSH URLs so the clone inside the
-	// container doesn't die with "Host key verification failed".
-	if normalized := scaffold.NormalizeGithubRepoURL(cfg.Git.GithubRepoURL); normalized != cfg.Git.GithubRepoURL {
-		fmt.Printf("\033[1;33mWARN:\033[0m rewriting SSH github_repo_url to HTTPS for container clone: %s → %s\n",
-			cfg.Git.GithubRepoURL, normalized)
-		cfg.Git.GithubRepoURL = normalized
-	}
 	for field, val := range map[string]string{
-		"git_user_name":   cfg.Git.UserName,
-		"git_user_email":  cfg.Git.UserEmail,
-		"github_repo_url": cfg.Git.GithubRepoURL,
+		"git_user_name":  cfg.Git.UserName,
+		"git_user_email": cfg.Git.UserEmail,
 	} {
 		if strings.ContainsAny(val, ",=") {
 			return fmt.Errorf("%s must not contain ',' or '=' (gcloud --container-env limitation): %q", field, val)

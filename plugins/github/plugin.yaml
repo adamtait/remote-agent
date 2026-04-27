@@ -1,0 +1,20 @@
+name: github
+version: "1.0.0"
+description: "Installs the GitHub CLI and a PAT-based git credential helper; optionally clones a repo on first boot"
+config:
+  - name: enabled
+    type: bool
+    description: "Enable GitHub plugin?"
+    default: true
+  - name: repo_url
+    type: string
+    description: "Git repository to clone into ~/workspace on first boot (https://, git@github.com:owner/repo, or empty to skip clone)"
+    default: ""
+auth_providers:
+  - name: pat
+    description: "Personal Access Token (rotation auto-picked-up via git credential helper)"
+    secrets:
+      - name: github_pat
+        env_var: GH_TOKEN
+        description: "GitHub Personal Access Token (classic or fine-grained, repo:read+write)"
+        default_secret_name: github-pat

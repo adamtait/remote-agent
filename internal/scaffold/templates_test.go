@@ -25,7 +25,6 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		`git:`,
 		`  user_name: "Alice"`,
 		`  user_email: "alice@example.com"`,
-		`  github_repo_url: https://github.com/my-org/my-repo.git`,
 		`gcloud:`,
 		`  project: my-gcp-project`,
 		`  workstation:`,
@@ -41,10 +40,7 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		`    auto_sleep_hours: 2`,
 		`    auto_shutdown_hours: 12`,
 		`plugins: {}`,
-		`secrets:`,
-		`  github_pat:`,
-		`    secret_name: github-pat`,
-		`    env_var: GH_TOKEN`,
+		`secrets: {}`,
 		`env: {}`,
 	} {
 		if !strings.Contains(got, want) {
@@ -57,12 +53,11 @@ func TestRenderUserConfig_ZeroValues_HasDefaults(t *testing.T) {
 	got := scaffold.RenderUserConfig(scaffold.UserValues{})
 	// Should contain seed defaults.
 	for _, want := range []string{
-		`github_repo_url: https://github.com/my-org/my-repo.git`,
 		`project: my-gcp-project`,
 		`region: us-central1`,
 		`machine_type: e2-standard-4`,
 		`plugins: {}`,
-		`  github_pat:`,
+		`secrets: {}`,
 		`env: {}`,
 	} {
 		if !strings.Contains(got, want) {
@@ -71,30 +66,15 @@ func TestRenderUserConfig_ZeroValues_HasDefaults(t *testing.T) {
 	}
 }
 
-func TestRenderUserConfig_AlwaysHasGithubPat(t *testing.T) {
-	got := scaffold.RenderUserConfig(scaffold.UserValues{})
-	if !strings.Contains(got, "github_pat:") {
-		t.Errorf("github_pat entry must always be emitted:\n%s", got)
-	}
-	if !strings.Contains(got, "secret_name: github-pat") {
-		t.Errorf("github_pat secret_name must be github-pat:\n%s", got)
-	}
-	if !strings.Contains(got, "env_var: GH_TOKEN") {
-		t.Errorf("github_pat env_var must be GH_TOKEN:\n%s", got)
-	}
-}
-
 func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T) {
 	pv := scaffold.ProjectValues{
-		ProjectID:     "my-proj",
-		GithubRepoURL: "https://example.com/r.git",
+		ProjectID: "my-proj",
 	}
 	got := scaffold.RenderProjectConfig(pv)
 	for _, want := range []string{
-		`git:`,
-		`  github_repo_url: https://example.com/r.git`,
 		`gcloud:`,
 		`  project: my-proj`,
+		`# git:`,
 		`# gcloud:`,
 		`#   workstation:`,
 		`#     machine_type: e2-standard-8`,
@@ -117,7 +97,7 @@ func TestRenderProjectConfig_ZeroValuesStillShowCommentedExamples(t *testing.T) 
 			t.Errorf("missing commented example %q", want)
 		}
 	}
-	if !strings.Contains(got, "project:") || !strings.Contains(got, "github_repo_url:") {
+	if !strings.Contains(got, "project:") {
 		t.Error("required keys should still be present as placeholders")
 	}
 }
