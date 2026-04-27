@@ -2,7 +2,7 @@
 #
 # Runs at every workstation boot (as root, inside the container).
 #
-# Contract (v5):
+# Contract (v6):
 #   ra create emits these env vars into the container config:
 #     GCP_PROJECT_ID, GITHUB_REPO_URL, GIT_USER_NAME, GIT_USER_EMAIL
 #     RA_PLUGIN_<NAME>_ENABLED=true|false  — per-plugin toggle
@@ -13,8 +13,14 @@
 #       RA_SECRET_<UPPERCASE_NAME>_VAR=<container env var name>
 #     plus any static key=value entries from config.env.
 #
+# This script does the generic work (fetch secrets, write /run/ra/env, do
+# first-boot git setup). Plugins drop their own scripts into
+# /etc/workstation-startup.d/ at numbers ≥ 250 — they run independently
+# after this one and can source /run/ra/env to access fetched secrets.
+#
 # Logical names with special handling (still conform to the schema):
 #     github_pat     → install git credential helper AND export $VAR for `gh`.
+#                      (will move into a github plugin in a follow-up changeset)
 #     (any other)    → fetch at boot, export $VAR. Rotation requires restart.
 #
 set -euo pipefail
@@ -36,6 +42,69 @@ log() {
     echo "${msg}" >> "${RA_SETUP_LOG_PATH}" 2>/dev/null || true
 }
 
+# _ra_handle_github_pat installs a git credential helper that fetches the
+# PAT fresh per git op (so rotation is automatic for git), and also exports
+# the PAT to /etc/environment + /run/ra/env so `gh` CLI sees it.
+# Will move into a github plugin in a follow-up changeset.
+_ra_handle_github_pat() {
+    local secret_name="$1"
+    local target_env_var="$2"
+
+    log "github_pat: installing git credential helper for ${secret_name}"
+    cat > "${GIT_HELPER_PATH}" <<EOF
+#!/bin/bash
+# Auto-generated. Emits GitHub PAT via git credential protocol.
+while IFS= read -r line; do
+    [[ -z "\$line" ]] && break
+done
+pat=\$(gcloud secrets versions access latest \\
+    --secret='${secret_name}' \\
+    --project='${GCP_PROJECT_ID}' 2>/dev/null) || exit 0
+echo "username=x-access-token"
+echo "password=\${pat}"
+EOF
+    chmod 0755 "${GIT_HELPER_PATH}"
+    git config --system credential.helper "${GIT_HELPER_PATH}"
+    log "git credential.helper set to ${GIT_HELPER_PATH}."
+
+    local pat_value
+    pat_value=$(gcloud secrets versions access latest \
+        --secret="${secret_name}" --project="${GCP_PROJECT_ID}" 2>/dev/null || true)
+    if [[ -n "${pat_value}" ]]; then
+        echo "${target_env_var}=${pat_value}" >> /etc/environment
+        umask 077
+        if [[ ! -f "${RA_ENV_FILE}" ]]; then
+            : > "${RA_ENV_FILE}"
+            chmod 0644 "${RA_ENV_FILE}"
+        fi
+        sed -i "/^${target_env_var}=/d" "${RA_ENV_FILE}"
+        printf '%s=%s\n' "${target_env_var}" "${pat_value}" >> "${RA_ENV_FILE}"
+        log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
+    fi
+}
+
+# _ra_first_boot_git seeds git identity from container env vars and clones
+# the configured repo into the workspace dir. Runs once per workstation;
+# guarded by FIRST_BOOT_MARKER.
+_ra_first_boot_git() {
+    log "First boot: configuring git identity and cloning repo."
+    : "${GITHUB_REPO_URL:?GITHUB_REPO_URL not set}"
+    : "${GIT_USER_NAME:?GIT_USER_NAME not set}"
+    : "${GIT_USER_EMAIL:?GIT_USER_EMAIL not set}"
+
+    sudo -u "${USER_NAME}" git config --global user.name "${GIT_USER_NAME}"
+    sudo -u "${USER_NAME}" git config --global user.email "${GIT_USER_EMAIL}"
+
+    if [[ ! -d "${WORKSPACE_DIR}/.git" ]]; then
+        sudo -u "${USER_NAME}" mkdir -p "${WORKSPACE_DIR}"
+        sudo -u "${USER_NAME}" git clone "${GITHUB_REPO_URL}" "${WORKSPACE_DIR}" \
+            2> >(while read -r line; do log "git: ${line}"; done) \
+            || log "WARNING: repo clone failed; proceeding anyway."
+    fi
+    touch "${FIRST_BOOT_MARKER}"
+    chown "${USER_NAME}:${USER_NAME}" "${FIRST_BOOT_MARKER}"
+}
+
 : > "${RA_SETUP_LOG_PATH}" 2>/dev/null || true
 chmod 0644 "${RA_SETUP_LOG_PATH}" 2>/dev/null || true
 
@@ -51,8 +120,6 @@ command -v gcloud >/dev/null 2>&1 || {
 }
 
 # Clear stale auth state common to every boot (git helper, GH_TOKEN line).
-# Plugin-owned state is cleared by each plugin's own setup.sh at source time,
-# so disabling a plugin doesn't leave ambient credentials behind.
 rm -f "${GIT_HELPER_PATH}"
 sed -i '/^GH_TOKEN=/d' /etc/environment
 
@@ -79,36 +146,7 @@ for logical in "${ra_secret_names[@]}"; do
 
     case "${logical}" in
         github_pat)
-            log "github_pat: installing git credential helper for ${secret_name}"
-            cat > "${GIT_HELPER_PATH}" <<EOF
-#!/bin/bash
-# Auto-generated. Emits GitHub PAT via git credential protocol.
-while IFS= read -r line; do
-    [[ -z "\$line" ]] && break
-done
-pat=\$(gcloud secrets versions access latest \\
-    --secret='${secret_name}' \\
-    --project='${GCP_PROJECT_ID}' 2>/dev/null) || exit 0
-echo "username=x-access-token"
-echo "password=\${pat}"
-EOF
-            chmod 0755 "${GIT_HELPER_PATH}"
-            git config --system credential.helper "${GIT_HELPER_PATH}"
-            log "git credential.helper set to ${GIT_HELPER_PATH}."
-
-            pat_value=$(gcloud secrets versions access latest \
-                --secret="${secret_name}" --project="${GCP_PROJECT_ID}" 2>/dev/null || true)
-            if [[ -n "${pat_value}" ]]; then
-                echo "${target_env_var}=${pat_value}" >> /etc/environment
-                umask 077
-                if [[ ! -f "${RA_ENV_FILE}" ]]; then
-                    : > "${RA_ENV_FILE}"
-                    chmod 0644 "${RA_ENV_FILE}"
-                fi
-                sed -i "/^${target_env_var}=/d" "${RA_ENV_FILE}"
-                printf '%s=%s\n' "${target_env_var}" "${pat_value}" >> "${RA_ENV_FILE}"
-                log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
-            fi
+            _ra_handle_github_pat "${secret_name}" "${target_env_var}"
             ;;
 
         *)
@@ -127,40 +165,11 @@ EOF
 done
 
 # =============================================================================
-# Source plugin setup scripts. Each script guards itself with
-# RA_PLUGIN_<NAME>_ENABLED checks; secrets are already in env from the
-# dispatch loop above.
-# =============================================================================
-for _ra_plugin_setup in /etc/ra/plugins/*/setup.sh; do
-    if [[ -f "${_ra_plugin_setup}" ]]; then
-        log "Sourcing plugin: ${_ra_plugin_setup}"
-        # shellcheck source=/dev/null
-        source "${_ra_plugin_setup}"
-    fi
-done
-unset _ra_plugin_setup
-
-# =============================================================================
 # First-boot-only: gitconfig + repo clone.
 # =============================================================================
 FIRST_BOOT_MARKER="${USER_HOME}/.ra-first-boot-done"
 if [[ ! -f "${FIRST_BOOT_MARKER}" ]]; then
-    log "First boot: configuring git identity and cloning repo."
-    : "${GITHUB_REPO_URL:?GITHUB_REPO_URL not set}"
-    : "${GIT_USER_NAME:?GIT_USER_NAME not set}"
-    : "${GIT_USER_EMAIL:?GIT_USER_EMAIL not set}"
-
-    sudo -u "${USER_NAME}" git config --global user.name "${GIT_USER_NAME}"
-    sudo -u "${USER_NAME}" git config --global user.email "${GIT_USER_EMAIL}"
-
-    if [[ ! -d "${WORKSPACE_DIR}/.git" ]]; then
-        sudo -u "${USER_NAME}" mkdir -p "${WORKSPACE_DIR}"
-        sudo -u "${USER_NAME}" git clone "${GITHUB_REPO_URL}" "${WORKSPACE_DIR}" \
-            2> >(while read -r line; do log "git: ${line}"; done) \
-            || log "WARNING: repo clone failed; proceeding anyway."
-    fi
-    touch "${FIRST_BOOT_MARKER}"
-    chown "${USER_NAME}:${USER_NAME}" "${FIRST_BOOT_MARKER}"
+    _ra_first_boot_git
 fi
 
 touch "${RA_READY_SENTINEL}"
