@@ -3,7 +3,6 @@ package config
 type GitConfig struct {
 	UserName  string `yaml:"user_name"`
 	UserEmail string `yaml:"user_email"`
-	// GithubRepoURL deleted — moved to plugins.github.repo_url
 }
 
 type WorkstationConfig struct {
