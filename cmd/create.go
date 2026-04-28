@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/adamtait/remote-agent/internal/config"
+	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/naming"
 	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/adamtait/remote-agent/internal/secrets"
@@ -115,18 +116,18 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	serviceAccountEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com",
 		ws.ServiceAccountName, cfg.Gcloud.Project)
 
-	logStep := func(msg string) { fmt.Printf("\033[1;34m==>\033[0m %s\n", msg) }
-
 	// Step 1 — Enable APIs
-	logStep("Enabling required GCP APIs...")
+	done := logging.Step("enable_apis", 1, "Enabling required GCP APIs...", cmd.OutOrStdout())
 	if err := r.Run("services", "enable",
 		"workstations.googleapis.com",
 		"artifactregistry.googleapis.com",
 		"secretmanager.googleapis.com",
 		"iam.googleapis.com",
 		"--project", cfg.Gcloud.Project, "--quiet"); err != nil {
+		done(err)
 		return fmt.Errorf("enabling APIs: %w", err)
 	}
+	done(nil)
 
 	// reauth.googleapis.com is only enableable by orgs that have been
 	// allowlisted for it; on other projects Service Usage rejects it with
@@ -137,33 +138,37 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	// best-effort; surface a warning but don't block the rest of setup.
 	if err := r.Run("services", "enable", "reauth.googleapis.com",
 		"--project", cfg.Gcloud.Project, "--quiet"); err != nil {
-		fmt.Printf("\033[1;33mWARN:\033[0m could not enable reauth.googleapis.com (%v).\n"+
+		logging.WarnPrintf(cmd.OutOrStdout(), "could not enable reauth.googleapis.com (%v).\n"+
 			"      This is only required if your org enforces a session/reauth policy.\n"+
 			"      If `gcloud workstations ssh` later fails with SERVICE_DISABLED for\n"+
-			"      reauth.googleapis.com, ask an org admin to enable it.\n", err)
+			"      reauth.googleapis.com, ask an org admin to enable it.", err)
 	}
 
 	// Step 2 — Artifact Registry repo
-	logStep(fmt.Sprintf("Ensuring Artifact Registry repo '%s'...", ws.RepoName))
+	done = logging.Step("ensure_ar_repo", 2, fmt.Sprintf("Ensuring Artifact Registry repo '%s'...", ws.RepoName), cmd.OutOrStdout())
 	if !r.Check("artifacts", "repositories", "describe", ws.RepoName, "--location", ws.Region, "--project", cfg.Gcloud.Project) {
 		if err := r.Run("artifacts", "repositories", "create", ws.RepoName,
 			"--repository-format=docker",
 			"--location", ws.Region,
 			"--description=ra workstation images",
 			"--project", cfg.Gcloud.Project); err != nil {
+			done(err)
 			return fmt.Errorf("creating artifact registry repo: %w", err)
 		}
 	}
+	done(nil)
 
 	// Step 3 — Build and push image
-	logStep(fmt.Sprintf("Building image %s...", imageURI))
+	done = logging.Step("build_image", 3, fmt.Sprintf("Building image %s...", imageURI), cmd.OutOrStdout())
 
 	home, err := os.UserHomeDir()
 	if err != nil {
+		done(err)
 		return fmt.Errorf("determining home directory: %w", err)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
+		done(err)
 		return fmt.Errorf("determining working directory: %w", err)
 	}
 	_, buildCleanup, err := scaffold.AssembleBuildContext(scaffold.BuildContextOptions{
@@ -172,19 +177,23 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		Plugins: reg.All(),
 	})
 	if err != nil {
+		done(err)
 		return fmt.Errorf("assembling build context: %w", err)
 	}
 	defer buildCleanup()
 
 	if err := r.Run("auth", "configure-docker", fmt.Sprintf("%s-docker.pkg.dev", ws.Region), "--quiet"); err != nil {
+		done(err)
 		return fmt.Errorf("configuring docker auth: %w", err)
 	}
 	if err := (dockerRunner{}).Run(dockerBuildArgs(imageURI)...); err != nil {
+		done(err)
 		return fmt.Errorf("building and pushing image: %w", err)
 	}
+	done(nil)
 
 	// Step 4 — Secrets: ensure every configured secret exists in GCP.
-	logStep(fmt.Sprintf("Ensuring %d GCP secret(s)...", len(cfg.Secrets)))
+	done = logging.Step("ensure_secrets", 4, fmt.Sprintf("Ensuring %d GCP secret(s)...", len(cfg.Secrets)), cmd.OutOrStdout())
 	secretLogicalOrder := make([]string, 0, len(cfg.Secrets))
 	for k := range cfg.Secrets {
 		secretLogicalOrder = append(secretLogicalOrder, k)
@@ -194,16 +203,19 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		s := cfg.Secrets[logical]
 		prompt := fmt.Sprintf("Enter value for secret %q (env var %s)", s.SecretName, s.EnvVar)
 		if err := secrets.EnsureSecret(r, cfg.Gcloud.Project, s.SecretName, prompt, os.Stderr, os.Stdin); err != nil {
+			done(err)
 			return fmt.Errorf("ensuring secret %s: %w", s.SecretName, err)
 		}
 	}
+	done(nil)
 
 	// Step 5 — Service account and IAM
-	logStep(fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail))
+	done = logging.Step("ensure_service_acct", 5, fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail), cmd.OutOrStdout())
 	if !r.Check("iam", "service-accounts", "describe", serviceAccountEmail, "--project", cfg.Gcloud.Project) {
 		if err := r.Run("iam", "service-accounts", "create", ws.ServiceAccountName,
 			"--display-name=Claude Workstation SA",
 			"--project", cfg.Gcloud.Project); err != nil {
+			done(err)
 			return fmt.Errorf("creating service account: %w", err)
 		}
 	}
@@ -224,52 +236,60 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			"--role=roles/secretmanager.secretAccessor",
 			"--project", cfg.Gcloud.Project,
 			"--condition=None"); err != nil {
+			done(err)
 			return fmt.Errorf("binding secret %s IAM: %w", secret, err)
 		}
 	}
+	done(nil)
 
 	// Bind Artifact Registry repo
-	logStep(fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName))
+	done = logging.Step("bind_ar_iam", 6, fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName), cmd.OutOrStdout())
 	if err := r.Run("artifacts", "repositories", "add-iam-policy-binding", ws.RepoName,
 		"--location", ws.Region,
 		"--member=serviceAccount:"+serviceAccountEmail,
 		"--role=roles/artifactregistry.reader",
 		"--project", cfg.Gcloud.Project,
 		"--condition=None"); err != nil {
+		done(err)
 		return fmt.Errorf("binding artifact registry IAM: %w", err)
 	}
+	done(nil)
 
 	// Bind project-level roles
-	logStep("Granting logWriter and metricWriter on project...")
+	done = logging.Step("bind_project_iam", 7, "Granting logWriter and metricWriter on project...", cmd.OutOrStdout())
 	for _, role := range []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"} {
 		if err := r.Run("projects", "add-iam-policy-binding", cfg.Gcloud.Project,
 			"--member=serviceAccount:"+serviceAccountEmail,
 			"--role="+role,
 			"--condition=None"); err != nil {
+			done(err)
 			return fmt.Errorf("binding project role %s: %w", role, err)
 		}
 	}
+	done(nil)
 
-	// Step 6 — Workstations cluster
-	logStep(fmt.Sprintf("Ensuring workstations cluster '%s'...", ws.ClusterName))
+	// Step 8 — Workstations cluster
+	done = logging.Step("ensure_cluster", 8, fmt.Sprintf("Ensuring workstations cluster '%s'...", ws.ClusterName), cmd.OutOrStdout())
 	if !r.Check("workstations", "clusters", "describe", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project) {
-		fmt.Printf("\033[1;33mWARN:\033[0m Creating cluster — this takes ~20 minutes on first run.\n")
+		logging.WarnPrintf(cmd.OutOrStdout(), "Creating cluster — this takes ~20 minutes on first run.")
 		if err := r.Run("workstations", "clusters", "create", ws.ClusterName,
 			"--region", ws.Region,
 			"--project", cfg.Gcloud.Project); err != nil {
+			done(err)
 			return fmt.Errorf("creating workstations cluster: %w", err)
 		}
 	}
+	done(nil)
 
-	// Step 7 — Workstations config
-	logStep(fmt.Sprintf("Ensuring workstations config '%s'...", ws.ConfigName))
+	// Step 9 — Workstations config
+	done = logging.Step("ensure_config", 9, fmt.Sprintf("Ensuring workstations config '%s'...", ws.ConfigName), cmd.OutOrStdout())
 	containerEnv := buildContainerEnv(cfg)
 
 	configExists := r.Check("workstations", "configs", "describe", ws.ConfigName,
 		"--cluster", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project)
 
 	if configExists {
-		logStep("Config exists — updating image, env, service account, and scopes...")
+		logging.StepPrintf(cmd.OutOrStdout(), "Config exists — updating image, env, service account, and scopes...")
 		updateArgs := []string{
 			"workstations", "configs", "update", ws.ConfigName,
 			"--cluster", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project,
@@ -285,6 +305,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			updateArgs = append(updateArgs, fmt.Sprintf("--running-timeout=%d", ws.AutoShutdownHours*3600))
 		}
 		if err := r.Run(updateArgs...); err != nil {
+			done(err)
 			return fmt.Errorf("updating workstations config: %w", err)
 		}
 	} else {
@@ -306,9 +327,11 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			createArgs = append(createArgs, fmt.Sprintf("--running-timeout=%d", ws.AutoShutdownHours*3600))
 		}
 		if err := r.Run(createArgs...); err != nil {
+			done(err)
 			return fmt.Errorf("creating workstations config: %w", err)
 		}
 	}
+	done(nil)
 
 	// Step 8 — Resolve a unique workstation name and create it.
 	existing, err := client.List(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName)
@@ -324,7 +347,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if requested, _ := cmd.Flags().GetString("name"); requested != "" {
 		workstationName = naming.UniqueSuffixed(requested, taken)
 		if workstationName != requested {
-			fmt.Printf("\033[1;33mWARN:\033[0m workstation %q exists — using %q instead\n", requested, workstationName)
+			logging.WarnPrintf(cmd.OutOrStdout(), "workstation %q exists — using %q instead", requested, workstationName)
 		}
 	} else {
 		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -334,25 +357,29 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	logStep(fmt.Sprintf("Creating workstation '%s'...", workstationName))
+	done = logging.Step("create_workstation", 10, fmt.Sprintf("Creating workstation '%s'...", workstationName), cmd.OutOrStdout())
 	if err := r.Run("workstations", "create", workstationName,
 		"--cluster", ws.ClusterName, "--config", ws.ConfigName,
 		"--region", ws.Region, "--project", cfg.Gcloud.Project); err != nil {
+		done(err)
 		return fmt.Errorf("creating workstation: %w", err)
 	}
 
 	wsInfo, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, workstationName)
 	if err != nil {
+		done(err)
 		return fmt.Errorf("describing workstation: %w", err)
 	}
 	if wsInfo.State != "STATE_RUNNING" && wsInfo.State != "STATE_STARTING" {
-		logStep("Starting workstation...")
+		logging.StepPrintf(cmd.OutOrStdout(), "Starting workstation...")
 		if err := r.Run("workstations", "start", workstationName,
 			"--cluster", ws.ClusterName, "--config", ws.ConfigName,
 			"--region", ws.Region, "--project", cfg.Gcloud.Project); err != nil {
+			done(err)
 			return fmt.Errorf("starting workstation: %w", err)
 		}
 	}
+	done(nil)
 
 	// Step 9 — Print access info
 	info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, workstationName)
@@ -393,10 +420,19 @@ func runCreate(cmd *cobra.Command, args []string) error {
 type dockerRunner struct{}
 
 func (d dockerRunner) Run(args ...string) error {
-	cmd := exec.Command("docker", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	start := time.Now()
+	logging.L().Debug("docker starting", "args", args)
+	c := exec.Command("docker", args...)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	err := c.Run()
+	dur := time.Since(start)
+	if err != nil {
+		logging.L().Error("docker failed", "duration_s", dur.Seconds(), "error", err.Error())
+	} else {
+		logging.L().Debug("docker ok", "duration_s", dur.Seconds())
+	}
+	return err
 }
 
 // dockerBuildArgs returns the buildx args used by `ra create`, centralized so
