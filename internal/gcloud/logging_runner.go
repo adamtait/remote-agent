@@ -75,11 +75,14 @@ func (r LoggingRunner) Run(args ...string) error {
 
 	dur := time.Since(start)
 	if err != nil {
-		l.Error("gcloud failed",
+		errAttrs := []any{
 			slog.Float64("duration_s", dur.Seconds()),
 			slog.String("error", err.Error()),
-			slog.String("stderr", strings.TrimSpace(stderrBuf.String())),
-		)
+		}
+		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
+			errAttrs = append(errAttrs, slog.String("stderr", s))
+		}
+		l.Error("gcloud failed", errAttrs...)
 	} else {
 		attrs := []any{slog.Float64("duration_s", dur.Seconds())}
 		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
@@ -109,11 +112,14 @@ func (r LoggingRunner) RunWithStdin(stdin io.Reader, args ...string) error {
 
 	dur := time.Since(start)
 	if err != nil {
-		l.Error("gcloud failed",
+		errAttrs := []any{
 			slog.Float64("duration_s", dur.Seconds()),
 			slog.String("error", err.Error()),
-			slog.String("stderr", strings.TrimSpace(stderrBuf.String())),
-		)
+		}
+		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
+			errAttrs = append(errAttrs, slog.String("stderr", s))
+		}
+		l.Error("gcloud failed", errAttrs...)
 	} else {
 		attrs := []any{slog.Float64("duration_s", dur.Seconds())}
 		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
@@ -143,11 +149,14 @@ func (r LoggingRunner) Output(args ...string) ([]byte, error) {
 
 	dur := time.Since(start)
 	if err != nil {
-		l.Error("gcloud failed",
+		errAttrs := []any{
 			slog.Float64("duration_s", dur.Seconds()),
 			slog.String("error", err.Error()),
-			slog.String("stderr", strings.TrimSpace(stderrBuf.String())),
-		)
+		}
+		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
+			errAttrs = append(errAttrs, slog.String("stderr", s))
+		}
+		l.Error("gcloud failed", errAttrs...)
 		return nil, err
 	}
 	attrs := []any{slog.Float64("duration_s", dur.Seconds())}
