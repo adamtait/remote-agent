@@ -83,6 +83,54 @@ func MergePluginConfig(
 	return strings.TrimPrefix(string(out), "---\n"), nil
 }
 
+// MergeSecretEntries adds or replaces secrets.<logical> entries in YAML without
+// touching the plugins: section. Used when secrets are written to a different
+// config file than the plugin config.
+func MergeSecretEntries(
+	original string,
+	secretNames map[string]string,   // logical name → GCP secret name
+	secretEnvVars map[string]string, // logical name → env var name
+) (string, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(original), &root); err != nil {
+		return "", fmt.Errorf("configwrite: parse yaml: %w", err)
+	}
+	if root.Kind == 0 {
+		root = yaml.Node{
+			Kind: yaml.DocumentNode,
+			Content: []*yaml.Node{
+				{Kind: yaml.MappingNode, Tag: "!!map"},
+			},
+		}
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return "", fmt.Errorf("configwrite: unexpected root node kind %v", root.Kind)
+	}
+	docBody := root.Content[0]
+	if docBody.Kind == yaml.ScalarNode && (docBody.Tag == "!!null" || docBody.Value == "null" || docBody.Value == "~" || docBody.Value == "") {
+		docBody = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		root.Content[0] = docBody
+	}
+	if docBody.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("configwrite: top-level YAML must be a mapping, got kind %v", docBody.Kind)
+	}
+
+	secretsNode := ensureMappingChild(docBody, "secrets")
+	for logical, gcpName := range secretNames {
+		envVar := secretEnvVars[logical]
+		entryNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		appendKV(entryNode, "secret_name", gcpName)
+		appendKV(entryNode, "env_var", envVar)
+		setMappingKey(secretsNode, logical, entryNode)
+	}
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return "", fmt.Errorf("configwrite: marshal: %w", err)
+	}
+	return strings.TrimPrefix(string(out), "---\n"), nil
+}
+
 // RemovePluginConfig removes plugins.<name> and the named secrets entries from
 // existing YAML, then returns the updated YAML.
 func RemovePluginConfig(original, pluginName string, secretLogicals []string) (string, error) {

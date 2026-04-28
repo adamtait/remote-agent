@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	osuser "os/user"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -147,13 +148,13 @@ var pluginInstallCmd = &cobra.Command{
 		}
 
 		// ── 4. determine dest directory ───────────────────────────────────
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("determining working directory: %w", err)
+		}
 		var destBase string
 		switch level {
 		case "project":
-			wd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("determining working directory: %w", err)
-			}
 			destBase = filepath.Join(wd, ".ra", "plugins")
 		default: // "user"
 			home, err := os.UserHomeDir()
@@ -177,7 +178,7 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("installing plugin: %w", err)
 		}
 
-		// ── 5. prompt for config + secrets ────────────────────────────────
+		// ── 5. prompt for config + secret values ──────────────────────────
 		r := bufio.NewReader(cmd.InOrStdin())
 		// For secret prompts we need the real stdin fd for term.ReadPassword.
 		// In non-interactive contexts (tests) Prompt will be called but secret
@@ -187,20 +188,35 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("prompting plugin config: %w", err)
 		}
 
+		// ── 5.5 / 5.6. choose secret level + resolve GCP names ────────────
+		secretLevel := level
+		secretNames := map[string]string{}
+		if len(allRelevantSecretDefs(p, res)) > 0 {
+			secretLevel, err = chooseSecretLevel(r, cmd.OutOrStdout(), level)
+			if err != nil {
+				return err
+			}
+			secretNames = resolveSecretNames(r, cmd.OutOrStdout(), p, res, secretLevel, wd)
+		}
+
 		// ── 6. require GCP project; upload secrets before touching config ─
 		if cfg == nil || cfg.Gcloud.Project == "" {
 			return fmt.Errorf("ra config not loaded — run 'ra setup' first")
 		}
-		if err := uploadPluginSecrets(p, res, cfg.Gcloud.Project); err != nil {
+		if err := uploadPluginSecrets(p, res, cfg.Gcloud.Project, secretNames); err != nil {
 			return fmt.Errorf("uploading secrets: %w", err)
 		}
 
-		// ── 7. write config.yaml ──────────────────────────────────────────
-		cfgPath, err := pluginCfgPath(level)
+		// ── 7. write plugin config + secret entries ───────────────────────
+		pluginCfg, err := pluginCfgPath(level)
 		if err != nil {
 			return err
 		}
-		if err := writePluginToConfig(cfgPath, p, res); err != nil {
+		secretCfg, err := pluginCfgPath(secretLevel)
+		if err != nil {
+			return err
+		}
+		if err := writePluginAndSecrets(pluginCfg, secretCfg, p, res, secretNames); err != nil {
 			return err
 		}
 
@@ -502,36 +518,58 @@ func pluginCfgPath(level string) (string, error) {
 	}
 }
 
-// writePluginToConfig merges a PromptResult into the appropriate config.yaml.
-func writePluginToConfig(cfgPath string, p *plugins.FilePlugin, res *plugins.PromptResult) error {
-	original, err := os.ReadFile(cfgPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("config.yaml not found at %s — run 'ra setup' first", cfgPath)
-	}
-	if err != nil {
-		return fmt.Errorf("reading config.yaml: %w", err)
-	}
-
-	secretNames := make(map[string]string)
+// writePluginAndSecrets writes plugin config to pluginCfg and secret entries to
+// secretCfg. When they are the same path both are written in one YAML pass;
+// when different, each file receives only its own portion.
+func writePluginAndSecrets(pluginCfg, secretCfg string, p *plugins.FilePlugin, res *plugins.PromptResult, secretNames map[string]string) error {
 	secretEnvVars := make(map[string]string)
 	for _, sd := range allRelevantSecretDefs(p, res) {
-		gcpName := sd.DefaultSecretName
-		if gcpName == "" {
-			gcpName = sd.Name
-		}
-		secretNames[sd.Name] = gcpName
 		secretEnvVars[sd.Name] = sd.EnvVar
 	}
 
-	updated, err := configwrite.MergePluginConfig(string(original), p.Name(), res.Config, secretNames, secretEnvVars)
+	readCfg := func(path string) (string, error) {
+		b, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("config.yaml not found at %s — run 'ra setup' first", path)
+		}
+		return string(b), err
+	}
+
+	if pluginCfg == secretCfg {
+		original, err := readCfg(pluginCfg)
+		if err != nil {
+			return err
+		}
+		updated, err := configwrite.MergePluginConfig(original, p.Name(), res.Config, secretNames, secretEnvVars)
+		if err != nil {
+			return fmt.Errorf("merging plugin config: %w", err)
+		}
+		return os.WriteFile(pluginCfg, []byte(updated), 0644)
+	}
+
+	// Plugin config file — write plugin block only (nil secretNames → no secret entries).
+	pluginOriginal, err := readCfg(pluginCfg)
+	if err != nil {
+		return err
+	}
+	pluginUpdated, err := configwrite.MergePluginConfig(pluginOriginal, p.Name(), res.Config, nil, nil)
 	if err != nil {
 		return fmt.Errorf("merging plugin config: %w", err)
 	}
-
-	if err := os.WriteFile(cfgPath, []byte(updated), 0644); err != nil {
-		return fmt.Errorf("writing config.yaml: %w", err)
+	if err := os.WriteFile(pluginCfg, []byte(pluginUpdated), 0644); err != nil {
+		return fmt.Errorf("writing plugin config: %w", err)
 	}
-	return nil
+
+	// Secret config file — write only the secrets block.
+	secretOriginal, err := readCfg(secretCfg)
+	if err != nil {
+		return err
+	}
+	secretUpdated, err := configwrite.MergeSecretEntries(secretOriginal, secretNames, secretEnvVars)
+	if err != nil {
+		return fmt.Errorf("merging secret entries: %w", err)
+	}
+	return os.WriteFile(secretCfg, []byte(secretUpdated), 0644)
 }
 
 // allRelevantSecretDefs returns top-level secrets plus active provider's secrets.
@@ -562,15 +600,75 @@ func gcpSecretName(s plugins.SecretDef) string {
 	return s.Name
 }
 
+// chooseSecretLevel asks where to write the secret entries (user or project
+// config). Defaults to the same level as the plugin install.
+func chooseSecretLevel(r *bufio.Reader, out io.Writer, pluginLevel string) (string, error) {
+	defaultIdx := 1
+	if pluginLevel == "project" {
+		defaultIdx = 2
+	}
+	fmt.Fprintln(out, "Store secret entry in:")
+	fmt.Fprintln(out, "  1) user (~/.config/ra/config.yaml)")
+	fmt.Fprintln(out, "  2) project (.ra/config.yaml)")
+	fmt.Fprintf(out, "choice [1-2] [%d]: ", defaultIdx)
+	line, err := r.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	var idx int
+	if _, e := fmt.Sscan(strings.TrimSpace(line), &idx); e != nil || idx < 1 || idx > 2 {
+		idx = defaultIdx
+	}
+	if idx == 2 {
+		return "project", nil
+	}
+	return "user", nil
+}
+
+// resolveSecretNames returns the GCP secret name for each logical secret.
+// User-level secrets get a username suffix; project-level get the project
+// dirname. A prompt is always shown so the user can override the proposed name.
+func resolveSecretNames(r *bufio.Reader, out io.Writer, p *plugins.FilePlugin, res *plugins.PromptResult, secretLevel, wd string) map[string]string {
+	names := make(map[string]string)
+	for _, sd := range allRelevantSecretDefs(p, res) {
+		base := gcpSecretName(sd)
+		var proposed string
+		if secretLevel == "project" {
+			proposed = base + "-" + filepath.Base(wd)
+		} else {
+			proposed = base + "-" + currentUsername()
+		}
+		fmt.Fprintf(out, "GCP secret name for %q [%s]: ", sd.Name, proposed)
+		line, _ := r.ReadString('\n')
+		if name := strings.TrimSpace(line); name != "" {
+			names[sd.Name] = name
+		} else {
+			names[sd.Name] = proposed
+		}
+	}
+	return names
+}
+
+// currentUsername returns the current OS user's login name for use in GCP secret naming.
+func currentUsername() string {
+	if u, err := osuser.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	if v := os.Getenv("USER"); v != "" {
+		return v
+	}
+	return "user"
+}
+
 // uploadPluginSecrets uploads each secret value gathered during Prompt to GCP
-// Secret Manager. If a secret already exists, a new version is added.
-func uploadPluginSecrets(p *plugins.FilePlugin, res *plugins.PromptResult, projectID string) error {
+// Secret Manager using the resolved GCP secret names.
+func uploadPluginSecrets(p *plugins.FilePlugin, res *plugins.PromptResult, projectID string, secretNames map[string]string) error {
 	for _, sd := range allRelevantSecretDefs(p, res) {
 		value, ok := res.SecretValues[sd.Name]
 		if !ok {
 			continue
 		}
-		if err := uploadSecretValue(projectID, gcpSecretName(sd), value); err != nil {
+		if err := uploadSecretValue(projectID, secretNames[sd.Name], value); err != nil {
 			return err
 		}
 	}
