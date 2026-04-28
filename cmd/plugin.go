@@ -105,8 +105,8 @@ var pluginInstallCmd = &cobra.Command{
 	Use:   "install <source>",
 	Short: "Install a plugin from a git repository or local path",
 	Args:  cobra.ExactArgs(1),
-	// No PersistentPreRunE override → inherits root PersistentPreRunE which
-	// loads cfg + runner.
+	// No PersistentPreRunE override → inherits pluginCmd.PersistentPreRunE
+	// which loads cfg (logging and runner are not initialized for plugin subcommands).
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source := args[0]
 
