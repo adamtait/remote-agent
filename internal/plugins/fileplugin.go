@@ -134,6 +134,12 @@ type PromptResult struct {
 func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, stdin *os.File) (*PromptResult, error) {
 	pluginCfg := make(map[string]any)
 	for _, f := range p.schema.Config {
+		// `ra plugin install` always enables the new plugin; users can
+		// flip `enabled: false` in config.yaml to disable later.
+		if f.Name == "enabled" {
+			pluginCfg["enabled"] = true
+			continue
+		}
 		val, e := promptField(r, out, f)
 		if e != nil {
 			return nil, e
@@ -141,17 +147,8 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 		pluginCfg[f.Name] = val
 	}
 
-	enabled := true
-	for _, f := range p.schema.Config {
-		if f.Name == "enabled" {
-			if v, ok := pluginCfg["enabled"]; ok {
-				enabled = v == true
-			}
-		}
-	}
-
 	var activeProvider *AuthProvider
-	if enabled && len(p.schema.AuthProviders) > 0 {
+	if len(p.schema.AuthProviders) > 0 {
 		ap, e := promptAuthProvider(r, out, p.schema.AuthProviders)
 		if e != nil {
 			return nil, e
@@ -161,24 +158,20 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 	}
 
 	values := make(map[string]string)
-	if enabled {
-		// Top-level secrets (always prompted when enabled).
-		for _, s := range p.schema.Secrets {
+	for _, s := range p.schema.Secrets {
+		v, e := promptSecretValue(stdin, stderr, s)
+		if e != nil {
+			return nil, e
+		}
+		values[s.Name] = v
+	}
+	if activeProvider != nil {
+		for _, s := range activeProvider.Secrets {
 			v, e := promptSecretValue(stdin, stderr, s)
 			if e != nil {
 				return nil, e
 			}
 			values[s.Name] = v
-		}
-		// Active-provider secrets.
-		if activeProvider != nil {
-			for _, s := range activeProvider.Secrets {
-				v, e := promptSecretValue(stdin, stderr, s)
-				if e != nil {
-					return nil, e
-				}
-				values[s.Name] = v
-			}
 		}
 	}
 
