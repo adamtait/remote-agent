@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -186,7 +187,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		done(err)
 		return fmt.Errorf("configuring docker auth: %w", err)
 	}
-	if err := (dockerRunner{}).Run(dockerBuildArgs(imageURI)...); err != nil {
+	if err := (dockerRunner{stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr()}).Run(dockerBuildArgs(imageURI)...); err != nil {
 		done(err)
 		return fmt.Errorf("building and pushing image: %w", err)
 	}
@@ -417,15 +418,18 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// dockerRunner runs docker commands with stdout/stderr forwarded to the terminal.
-type dockerRunner struct{}
+// dockerRunner runs docker commands with stdout/stderr forwarded to the provided writers.
+type dockerRunner struct {
+	stdout io.Writer
+	stderr io.Writer
+}
 
 func (d dockerRunner) Run(args ...string) error {
 	start := time.Now()
 	logging.L().Debug("docker starting", "args", args)
 	c := exec.Command("docker", args...)
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	c.Stdout = d.stdout
+	c.Stderr = d.stderr
 	err := c.Run()
 	dur := time.Since(start)
 	if err != nil {
