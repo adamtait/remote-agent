@@ -12,20 +12,19 @@ import (
 	"github.com/adamtait/remote-agent/internal/logging"
 )
 
-// LoggingRunner wraps any Runner, logging each gcloud invocation's
-// sanitized args, duration, and stderr to a *slog.Logger. It satisfies
-// the Runner interface unchanged.
+// LoggingRunner implements Runner by shelling out to gcloud directly,
+// logging each invocation's args, duration, and stderr to a *slog.Logger.
+// It satisfies the Runner interface.
 type LoggingRunner struct {
-	inner  Runner
 	logger *slog.Logger
 }
 
-// NewLoggingRunner returns a LoggingRunner that wraps inner and logs to logger.
-func NewLoggingRunner(inner Runner, logger *slog.Logger) LoggingRunner {
+// NewLoggingRunner returns a LoggingRunner that logs to logger.
+func NewLoggingRunner(logger *slog.Logger) LoggingRunner {
 	if logger == nil {
 		logger = logging.L()
 	}
-	return LoggingRunner{inner: inner, logger: logger}
+	return LoggingRunner{logger: logger}
 }
 
 // gcloudSubcmd returns the first two non-flag args joined by a space,
