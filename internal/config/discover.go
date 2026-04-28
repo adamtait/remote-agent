@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/adamtait/remote-agent/internal/logging"
 )
 
 // FindProjectConfig walks up from startDir looking for .ra/config.yaml,
@@ -14,6 +16,7 @@ func FindProjectConfig(startDir, stopDir string) (string, error) {
 	for {
 		path := filepath.Join(dir, ".ra", "config.yaml")
 		if _, err := os.Stat(path); err == nil {
+			logging.L().Debug("project config found", "path", path)
 			return path, nil
 		}
 		if dir == stopDir || dir == "/" {
@@ -25,5 +28,6 @@ func FindProjectConfig(startDir, stopDir string) (string, error) {
 		}
 		dir = parent
 	}
+	logging.L().Debug("no project config found")
 	return "", fmt.Errorf("no .ra/config.yaml found; create one with 'ra setup' in your project root")
 }

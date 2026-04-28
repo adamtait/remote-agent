@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
@@ -62,19 +63,24 @@ func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
 // writeDockerfile chooses project > user > embedded Dockerfile bytes and
 // writes them into <root>/Dockerfile.
 func writeDockerfile(opts BuildContextOptions, root string) error {
-	candidates := []string{
-		filepath.Join(opts.Cwd, ".ra", "Dockerfile"),
-		filepath.Join(opts.Home, ".config", "ra", "Dockerfile"),
+	candidates := []struct {
+		path   string
+		source string
+	}{
+		{filepath.Join(opts.Cwd, ".ra", "Dockerfile"), "project"},
+		{filepath.Join(opts.Home, ".config", "ra", "Dockerfile"), "user"},
 	}
-	for _, p := range candidates {
-		data, err := os.ReadFile(p)
+	for _, c := range candidates {
+		data, err := os.ReadFile(c.path)
 		if err == nil {
+			logging.L().Debug("dockerfile source", "source", c.source)
 			return os.WriteFile(filepath.Join(root, "Dockerfile"), data, 0644)
 		}
 		if !os.IsNotExist(err) {
-			return fmt.Errorf("reading %s: %w", p, err)
+			return fmt.Errorf("reading %s: %w", c.path, err)
 		}
 	}
+	logging.L().Debug("dockerfile source", "source", "embedded")
 	return os.WriteFile(filepath.Join(root, "Dockerfile"), embeddedDockerfile, 0644)
 }
 
@@ -135,12 +141,16 @@ func mergeDirs(opts BuildContextOptions, root string) error {
 			return fmt.Errorf("creating %s: %w", dst, err)
 		}
 		// User-global first (lowest priority), then project (overwrites).
-		sources := []string{
-			filepath.Join(opts.Home, ".config", "ra", dir),
-			filepath.Join(opts.Cwd, ".ra", dir),
+		sources := []struct {
+			path   string
+			source string
+		}{
+			{filepath.Join(opts.Home, ".config", "ra", dir), "user"},
+			{filepath.Join(opts.Cwd, ".ra", dir), "project"},
 		}
-		for _, src := range sources {
-			if err := copyShellScripts(src, dst); err != nil {
+		for _, s := range sources {
+			logging.L().Debug("merging dir", "dir", dir, "source", s.source)
+			if err := copyShellScripts(s.path, dst); err != nil {
 				return err
 			}
 		}
@@ -209,6 +219,7 @@ func stagePluginTrees(opts BuildContextOptions, root string) error {
 		return err
 	}
 	for _, p := range opts.Plugins {
+		logging.L().Debug("staging plugin", "name", p.Name())
 		pdst := filepath.Join(dst, p.Name())
 		if err := copyTreeFromFS(p.FS(), ".", pdst); err != nil {
 			return fmt.Errorf("staging plugin %s: %w", p.Name(), err)

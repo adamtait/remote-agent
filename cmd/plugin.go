@@ -17,6 +17,7 @@ import (
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/configwrite"
+	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/plugins"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -127,11 +128,15 @@ var pluginInstallCmd = &cobra.Command{
 			}
 		} else {
 			// Remote git URL.
+			logging.L().Debug("git clone starting", "source", source)
 			clone := exec.Command("git", "clone", "--depth=1", source, tmp)
 			clone.Stdout = os.Stdout
 			clone.Stderr = os.Stderr
 			if err := clone.Run(); err != nil {
+				logging.L().Error("git clone failed", "source", source, "error", err.Error())
 				return fmt.Errorf("git clone: %w", err)
+			} else {
+				logging.L().Debug("git clone ok", "source", source)
 			}
 		}
 
@@ -678,21 +683,34 @@ func uploadPluginSecrets(p *plugins.FilePlugin, res *plugins.PromptResult, proje
 // uploadSecretValue creates the secret if it doesn't exist, then adds a version.
 func uploadSecretValue(projectID, gcpSecretName, value string) error {
 	// Check if secret exists.
+	logging.L().Debug("gcloud starting", "subcmd", "secrets describe")
+	checkStart := time.Now()
 	checkCmd := exec.Command("gcloud", "secrets", "describe", gcpSecretName, "--project", projectID)
 	exists := checkCmd.Run() == nil
+	if exists {
+		logging.L().Debug("gcloud ok", "subcmd", "secrets describe", "duration_s", time.Since(checkStart).Seconds())
+	} else {
+		logging.L().Debug("gcloud ok", "subcmd", "secrets describe", "duration_s", time.Since(checkStart).Seconds())
+	}
 
 	if !exists {
+		logging.L().Debug("gcloud starting", "subcmd", "secrets create")
+		createStart := time.Now()
 		createCmd := exec.Command("gcloud", "secrets", "create", gcpSecretName,
 			"--replication-policy=automatic",
 			"--project", projectID)
 		createCmd.Stdout = os.Stdout
 		createCmd.Stderr = os.Stderr
 		if err := createCmd.Run(); err != nil {
+			logging.L().Error("gcloud failed", "subcmd", "secrets create", "duration_s", time.Since(createStart).Seconds())
 			return fmt.Errorf("creating secret %s: %w", gcpSecretName, err)
 		}
+		logging.L().Debug("gcloud ok", "subcmd", "secrets create", "duration_s", time.Since(createStart).Seconds())
 	}
 
 	// Add a new version.
+	logging.L().Debug("gcloud starting", "subcmd", "secrets versions add")
+	addStart := time.Now()
 	addCmd := exec.Command("gcloud", "secrets", "versions", "add", gcpSecretName,
 		"--data-file=-",
 		"--project", projectID)
@@ -700,8 +718,10 @@ func uploadSecretValue(projectID, gcpSecretName, value string) error {
 	addCmd.Stdout = os.Stdout
 	addCmd.Stderr = os.Stderr
 	if err := addCmd.Run(); err != nil {
+		logging.L().Error("gcloud failed", "subcmd", "secrets versions add", "duration_s", time.Since(addStart).Seconds())
 		return fmt.Errorf("adding version to secret %s: %w", gcpSecretName, err)
 	}
+	logging.L().Debug("gcloud ok", "subcmd", "secrets versions add", "duration_s", time.Since(addStart).Seconds())
 	return nil
 }
 
