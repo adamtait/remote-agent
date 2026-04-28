@@ -174,30 +174,26 @@ func sliceContains(ss []string, s string) bool {
 	return false
 }
 
-func TestFilePlugin_Prompt_Disabled(t *testing.T) {
-	p, _ := LoadPlugin(testPluginFS(nil))
-	r := bufio.NewReader(strings.NewReader("N\n"))
+// TestFilePlugin_Prompt_AlwaysEnabled verifies that `ra plugin install`
+// auto-enables the plugin without prompting — users disable later by
+// editing config.yaml.
+func TestFilePlugin_Prompt_AlwaysEnabled(t *testing.T) {
+	fsys := fstest.MapFS{
+		"plugin.yaml": &fstest.MapFile{Data: []byte(testPluginNoSecretsYAML)},
+	}
+	p, _ := LoadPlugin(fsys)
+	// "1\n" picks the first auth provider; no enable/disable prompt is shown.
+	r := bufio.NewReader(strings.NewReader("1\n"))
 	res, err := p.Prompt(r, io.Discard, io.Discard, nil)
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	if v, ok := res.Config["enabled"]; !ok || v != false {
-		t.Errorf("expected Config[enabled]=false, got %v", res.Config["enabled"])
+	if v, ok := res.Config["enabled"]; !ok || v != true {
+		t.Errorf("expected Config[enabled]=true, got %v", res.Config["enabled"])
 	}
-	if res.AuthProvider != nil {
-		t.Errorf("expected no AuthProvider when disabled, got %v", res.AuthProvider)
-	}
-	if len(res.SecretValues) != 0 {
-		t.Errorf("expected empty SecretValues when disabled, got %v", res.SecretValues)
-	}
-	// RenderConfigBlock should contain enabled: false
 	cfg := p.RenderConfigBlock(res)
-	if !strings.Contains(cfg, "enabled: false") {
-		t.Errorf("RenderConfigBlock: expected 'enabled: false', got %q", cfg)
-	}
-	// RenderSecretsBlock should be empty when disabled (no provider)
-	if sec := p.RenderSecretsBlock(res); sec != "" {
-		t.Errorf("RenderSecretsBlock: expected empty, got %q", sec)
+	if !strings.Contains(cfg, "enabled: true") {
+		t.Errorf("RenderConfigBlock: expected 'enabled: true', got %q", cfg)
 	}
 }
 
@@ -222,8 +218,8 @@ func TestFilePlugin_Prompt_Enabled_OAuth(t *testing.T) {
 		"plugin.yaml": &fstest.MapFile{Data: []byte(testPluginNoSecretsYAML)},
 	}
 	p, _ := LoadPlugin(fsys)
-	// "y\n" → enabled=true; "1\n" → first auth provider (oauth)
-	r := bufio.NewReader(strings.NewReader("y\n1\n"))
+	// `enabled` is auto-set to true (no prompt); "1\n" → first auth provider (oauth).
+	r := bufio.NewReader(strings.NewReader("1\n"))
 	res, err := p.Prompt(r, io.Discard, io.Discard, nil)
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
