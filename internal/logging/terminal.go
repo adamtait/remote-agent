@@ -7,7 +7,7 @@ import (
 
 // StepPrintf prints the colored "==>" step marker to out. Does not log —
 // use Step for structured logging with timing and step_num.
-func StepPrintf(out io.Writer, stepName string, msg string) {
+func StepPrintf(out io.Writer, msg string) {
 	fmt.Fprintf(out, "\033[1;34m==>\033[0m %s\n", msg)
 }
 

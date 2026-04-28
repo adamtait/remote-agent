@@ -57,6 +57,9 @@ func (t *TeeHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 // WithGroup returns a new TeeHandler with BOTH children updated.
 // This is required by the slog.Handler contract.
 func (t *TeeHandler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return t
+	}
 	next := &TeeHandler{}
 	if t.terminal != nil {
 		next.terminal = t.terminal.WithGroup(name)

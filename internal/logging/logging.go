@@ -30,6 +30,10 @@ type Config struct {
 // pkgLogger is the package-level logger, goroutine-safe via atomic.Pointer.
 var pkgLogger atomic.Pointer[slog.Logger]
 
+// prevCleanup stores the cleanup func from the previous Init call so that
+// calling Init a second time closes the old log file before opening a new one.
+var prevCleanup atomic.Value
+
 func init() {
 	// Initialize with a discard logger so L() is always safe to call.
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -46,6 +50,11 @@ func L() *slog.Logger {
 // calling it again closes the previous log file and resets state. Returns
 // a cleanup func that logs session_end and closes the log file.
 func Init(cfg Config) (cleanup func(), err error) {
+	// Close the previous log file if Init was called before.
+	if fn, ok := prevCleanup.Load().(func()); ok && fn != nil {
+		fn()
+	}
+
 	if cfg.SessionID == "" {
 		cfg.SessionID = NewSessionID()
 	}
@@ -142,6 +151,7 @@ func Init(cfg Config) (cleanup func(), err error) {
 			}
 		})
 	}
+	prevCleanup.Store(cleanup)
 	return cleanup, nil
 }
 
@@ -149,7 +159,7 @@ func Init(cfg Config) (cleanup func(), err error) {
 // Info, and returns a done func the caller invokes after the step
 // completes (logs step_ok or step_failed with duration).
 func Step(name string, num int, msg string, out io.Writer) func(err error) {
-	StepPrintf(out, name, msg)
+	StepPrintf(out, msg)
 	L().LogAttrs(context.Background(), slog.LevelInfo, "step_start",
 		slog.String("step", name),
 		slog.Int("step_num", num),
@@ -175,7 +185,7 @@ func Step(name string, num int, msg string, out io.Writer) func(err error) {
 }
 
 // NewSessionID returns a short, sortable, URL-safe session identifier:
-// "<unix-ms>-<4-hex-bytes>"  e.g. "1714298732145-a3f7"
+// "<unix-ms>-<4-hex-chars>"  e.g. "1714298732145-a3f7"
 func NewSessionID() string {
 	ms := time.Now().UnixMilli()
 	b := make([]byte, 2)

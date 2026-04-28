@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -177,6 +178,19 @@ func TestTeeHandler_WithGroup_PropagatesBoth(t *testing.T) {
 	if tc.file == nil {
 		t.Error("WithGroup: file child is nil")
 	}
+
+	// Write a record with a grouped attr and verify both buffers capture the group prefix.
+	r := slog.NewRecord(time.Now(), slog.LevelInfo, "with-group-test", 0)
+	r.AddAttrs(slog.String("attr", "val"))
+	if err := tc.Handle(context.Background(), r); err != nil {
+		t.Fatalf("Handle on WithGroup child returned error: %v", err)
+	}
+	if !strings.Contains(th.buf.String(), "mygroup") {
+		t.Errorf("terminal handler did not capture group prefix; got: %q", th.buf.String())
+	}
+	if !strings.Contains(fh.buf.String(), "mygroup") {
+		t.Errorf("file handler did not capture group prefix; got: %q", fh.buf.String())
+	}
 }
 
 // --- Step ---
@@ -261,6 +275,14 @@ func TestOpenLogFile_CloseFnIdempotent(t *testing.T) {
 // --- Init (integration smoke test) ---
 
 func TestInit_SmokeSetsLogger(t *testing.T) {
+	t.Cleanup(func() {
+		// Restore the package-level logger to a discard logger so this test
+		// doesn't interfere with others.
+		discard := slog.New(slog.NewTextHandler(io.Discard, nil))
+		pkgLogger.Store(discard)
+		prevCleanup.Store((func())(nil))
+	})
+
 	cfg := Config{
 		Level:   slog.LevelDebug,
 		NoFile:  true,
