@@ -141,7 +141,7 @@ func parseLogLevel(s string) slog.Level {
 }
 
 func Execute() {
-	defer logCleanup()
+	defer func() { logCleanup() }()
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -155,7 +155,7 @@ func Execute() {
 // tree before Execute, so repeated invocations (as in tests) can't leak flag
 // state from a previous run.
 func ExecuteWithIO(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
-	defer logCleanup()
+	defer func() { logCleanup() }()
 	resetFlagsRecursive(rootCmd)
 	rootCmd.SetIn(stdin)
 	rootCmd.SetOut(stdout)
