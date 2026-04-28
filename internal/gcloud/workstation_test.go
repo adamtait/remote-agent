@@ -46,8 +46,8 @@ func (f *fakeRunner) Check(args ...string) bool {
 func TestClient_List_ParsesTabSeparatedOutput(t *testing.T) {
 	fake := &fakeRunner{
 		outputs: map[string][]byte{
-			"workstations list --cluster cl --config cfg --region us-central1 --project proj --format value(name,state)": []byte(
-				"proj-adam\tSTATE_RUNNING\nproj-bob\tSTATE_STOPPED\n",
+			"workstations list --cluster cl --config cfg --region us-central1 --project proj --format value(name,state,createTime)": []byte(
+				"proj-adam\tSTATE_RUNNING\t2024-01-15T10:00:00Z\nproj-bob\tSTATE_STOPPED\t2024-01-14T08:00:00Z\n",
 			),
 		},
 	}
@@ -59,10 +59,10 @@ func TestClient_List_ParsesTabSeparatedOutput(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("expected 2 workstations, got %d", len(list))
 	}
-	if list[0].Name != "proj-adam" || list[0].State != "STATE_RUNNING" {
+	if list[0].Name != "proj-adam" || list[0].State != "STATE_RUNNING" || list[0].CreateTime != "2024-01-15T10:00:00Z" {
 		t.Errorf("first entry: got %+v", list[0])
 	}
-	if list[1].Name != "proj-bob" || list[1].State != "STATE_STOPPED" {
+	if list[1].Name != "proj-bob" || list[1].State != "STATE_STOPPED" || list[1].CreateTime != "2024-01-14T08:00:00Z" {
 		t.Errorf("second entry: got %+v", list[1])
 	}
 }
@@ -70,7 +70,7 @@ func TestClient_List_ParsesTabSeparatedOutput(t *testing.T) {
 func TestClient_List_EmptyOutput(t *testing.T) {
 	fake := &fakeRunner{
 		outputs: map[string][]byte{
-			"workstations list --cluster cl --config cfg --region us-central1 --project proj --format value(name,state)": []byte(""),
+			"workstations list --cluster cl --config cfg --region us-central1 --project proj --format value(name,state,createTime)": []byte(""),
 		},
 	}
 	client := gcloud.NewClient(fake)

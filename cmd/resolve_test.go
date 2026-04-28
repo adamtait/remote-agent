@@ -79,7 +79,7 @@ func TestResolveWorkstationName_SingleFallback(t *testing.T) {
 			"workstations describe p-user --cluster cl --config cfg --region r --project p": false,
 		},
 		outputs: map[string][]byte{
-			"workstations list --cluster cl --config cfg --region r --project p --format value(name,state)": []byte("other-ws\tSTATE_STOPPED\n"),
+			"workstations list --cluster cl --config cfg --region r --project p --format value(name,state,createTime)": []byte("other-ws\tSTATE_STOPPED\t2024-01-15T10:00:00Z\n"),
 		},
 	}
 	cfg := &config.Config{Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{Region: "r", ClusterName: "cl", ConfigName: "cfg"}}, WorkstationName: "p-user"}
@@ -90,5 +90,29 @@ func TestResolveWorkstationName_SingleFallback(t *testing.T) {
 	}
 	if name != "other-ws" {
 		t.Errorf("got %q, want other-ws", name)
+	}
+}
+
+func TestResolveWorkstationName_MostRecentSelected(t *testing.T) {
+	runner := &testRunner{
+		checks: map[string]bool{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p": false,
+		},
+		outputs: map[string][]byte{
+			"workstations list --cluster cl --config cfg --region r --project p --format value(name,state,createTime)": []byte(
+				"older-ws\tSTATE_STOPPED\t2024-01-10T08:00:00Z\n" +
+					"newest-ws\tSTATE_RUNNING\t2024-01-15T10:00:00Z\n" +
+					"middle-ws\tSTATE_STOPPED\t2024-01-12T09:00:00Z\n",
+			),
+		},
+	}
+	cfg := &config.Config{Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{Region: "r", ClusterName: "cl", ConfigName: "cfg"}}, WorkstationName: "p-user"}
+	client := gcloud.NewClient(runner)
+	name, err := resolveWorkstationName(cfg, client, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "newest-ws" {
+		t.Errorf("got %q, want newest-ws", name)
 	}
 }
