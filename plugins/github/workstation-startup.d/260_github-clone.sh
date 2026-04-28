@@ -16,8 +16,18 @@ FIRST_BOOT_MARKER="${USER_HOME}/.ra-github-first-boot-done"
 
 [ -r /run/ra/env ] && set -a && . /run/ra/env && set +a
 
-[ "${RA_PLUGIN_GITHUB_ENABLED:-false}" = "true" ] || exit 0
 [ -e "${FIRST_BOOT_MARKER}" ] && exit 0
+
+# Always touch the marker on exit so the per-plugin profile.d barrier
+# (01-github-clone-wait.sh) doesn't hang for 60s when the plugin is disabled
+# or when this script aborts before the clone runs.
+mark_done() {
+    touch "${FIRST_BOOT_MARKER}"
+    chown "${USER_NAME}:${USER_NAME}" "${FIRST_BOOT_MARKER}"
+}
+trap mark_done EXIT
+
+[ "${RA_PLUGIN_GITHUB_ENABLED:-false}" = "true" ] || exit 0
 
 # Normalize SSH github URLs to HTTPS — workstation has only HTTPS creds (PAT
 # via the credential helper) and no SSH keys / known_hosts, so SSH URLs
@@ -46,6 +56,3 @@ if [[ -n "${REPO_URL}" ]] && [[ ! -d "${WORKSPACE_DIR}/.git" ]]; then
     sudo -u "${USER_NAME}" git clone "${REPO_URL}" "${WORKSPACE_DIR}" \
         || echo "[github-clone] WARNING: repo clone failed; proceeding anyway."
 fi
-
-touch "${FIRST_BOOT_MARKER}"
-chown "${USER_NAME}:${USER_NAME}" "${FIRST_BOOT_MARKER}"
