@@ -133,7 +133,7 @@ var pluginInstallCmd = &cobra.Command{
 			clone.Stdout = os.Stdout
 			clone.Stderr = os.Stderr
 			if err := clone.Run(); err != nil {
-				logging.L().Error("git clone failed", "source", source, "error", err.Error())
+				logging.L().Debug("git clone failed", "source", source, "error", err.Error())
 				return fmt.Errorf("git clone: %w", err)
 			} else {
 				logging.L().Debug("git clone ok", "source", source)
@@ -690,7 +690,7 @@ func uploadSecretValue(projectID, gcpSecretName, value string) error {
 	if exists {
 		logging.L().Debug("gcloud ok", "subcmd", "secrets describe", "duration_s", time.Since(checkStart).Seconds())
 	} else {
-		logging.L().Debug("gcloud ok", "subcmd", "secrets describe", "duration_s", time.Since(checkStart).Seconds())
+		logging.L().Debug("gcloud not found", "subcmd", "secrets describe", "duration_s", time.Since(checkStart).Seconds())
 	}
 
 	if !exists {
@@ -702,7 +702,7 @@ func uploadSecretValue(projectID, gcpSecretName, value string) error {
 		createCmd.Stdout = os.Stdout
 		createCmd.Stderr = os.Stderr
 		if err := createCmd.Run(); err != nil {
-			logging.L().Error("gcloud failed", "subcmd", "secrets create", "duration_s", time.Since(createStart).Seconds())
+			logging.L().Debug("gcloud failed", "subcmd", "secrets create", "duration_s", time.Since(createStart).Seconds())
 			return fmt.Errorf("creating secret %s: %w", gcpSecretName, err)
 		}
 		logging.L().Debug("gcloud ok", "subcmd", "secrets create", "duration_s", time.Since(createStart).Seconds())
@@ -718,7 +718,7 @@ func uploadSecretValue(projectID, gcpSecretName, value string) error {
 	addCmd.Stdout = os.Stdout
 	addCmd.Stderr = os.Stderr
 	if err := addCmd.Run(); err != nil {
-		logging.L().Error("gcloud failed", "subcmd", "secrets versions add", "duration_s", time.Since(addStart).Seconds())
+		logging.L().Debug("gcloud failed", "subcmd", "secrets versions add", "duration_s", time.Since(addStart).Seconds())
 		return fmt.Errorf("adding version to secret %s: %w", gcpSecretName, err)
 	}
 	logging.L().Debug("gcloud ok", "subcmd", "secrets versions add", "duration_s", time.Since(addStart).Seconds())
