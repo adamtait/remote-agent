@@ -333,9 +333,11 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 	done(nil)
 
-	// Step 8 — Resolve a unique workstation name and create it.
+	// Step 10 — Resolve a unique workstation name and create it.
+	done = logging.Step("create_workstation", 10, "Resolving workstation name and creating...", cmd.OutOrStdout())
 	existing, err := client.List(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName)
 	if err != nil {
+		done(err)
 		return fmt.Errorf("listing existing workstations: %w", err)
 	}
 	taken := make(map[string]bool, len(existing))
@@ -353,11 +355,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 		workstationName, err = naming.GenerateMemorable(cfg.WorkstationName, taken, rng)
 		if err != nil {
+			done(err)
 			return fmt.Errorf("generating workstation name: %w", err)
 		}
 	}
-
-	done = logging.Step("create_workstation", 10, fmt.Sprintf("Creating workstation '%s'...", workstationName), cmd.OutOrStdout())
 	if err := r.Run("workstations", "create", workstationName,
 		"--cluster", ws.ClusterName, "--config", ws.ConfigName,
 		"--region", ws.Region, "--project", cfg.Gcloud.Project); err != nil {
@@ -381,13 +382,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 	done(nil)
 
-	// Step 9 — Print access info
+	// Step 11 — Print access info
 	info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, workstationName)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
 	}
 
-	fmt.Printf(`
+	fmt.Fprintf(cmd.OutOrStdout(), `
 ================================================================
   Workstation is ready
 ================================================================
