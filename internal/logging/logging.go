@@ -149,7 +149,7 @@ func Init(cfg Config) (cleanup func(), err error) {
 // Info, and returns a done func the caller invokes after the step
 // completes (logs step_ok or step_failed with duration).
 func Step(name string, num int, msg string, out io.Writer) func(err error) {
-	fmt.Fprintf(out, "\033[1;34m==>\033[0m %s\n", msg)
+	StepPrintf(out, name, msg)
 	L().LogAttrs(context.Background(), slog.LevelInfo, "step_start",
 		slog.String("step", name),
 		slog.Int("step_num", num),
