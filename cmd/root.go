@@ -91,8 +91,6 @@ var rootCmd = &cobra.Command{
 		if err := config.Validate(cfg, reg.ValidateAll(cfg)); err != nil {
 			return err
 		}
-		runner = gcloud.NewLoggingRunner(logging.L())
-		client = gcloud.NewClient(runner)
 
 		// Parse log flags
 		logLevel, _ := cmd.Root().PersistentFlags().GetString("log-level")
@@ -121,6 +119,9 @@ var rootCmd = &cobra.Command{
 		} else {
 			logCleanup = cleanup
 		}
+
+		runner = gcloud.NewLoggingRunner(logging.L())
+		client = gcloud.NewClient(runner)
 
 		return nil
 	},
