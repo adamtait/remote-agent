@@ -1,11 +1,8 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
+	"sort"
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
@@ -13,8 +10,8 @@ import (
 
 // resolveWorkstationName returns the workstation name to target.
 // If name is non-empty, it is used directly. Otherwise, the default (<project_id>-<username>)
-// is tried; if not found and exactly one workstation exists, that one is used; if multiple
-// exist, the user is prompted to choose.
+// is tried; if not found, all workstations in the cluster are listed and the most recently
+// created one is returned.
 func resolveWorkstationName(cfg *config.Config, client *gcloud.Client, name string) (string, error) {
 	ws := cfg.Gcloud.Workstation
 	if name != "" {
@@ -29,7 +26,7 @@ func resolveWorkstationName(cfg *config.Config, client *gcloud.Client, name stri
 		}
 	}
 
-	// Fall back: list all workstations in the cluster.
+	// Fall back: list all workstations and return the most recently created.
 	workstations, err := client.List(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName)
 	if err != nil {
 		return "", fmt.Errorf("listing workstations: %w", err)
@@ -37,23 +34,9 @@ func resolveWorkstationName(cfg *config.Config, client *gcloud.Client, name stri
 	if len(workstations) == 0 {
 		return "", fmt.Errorf("no workstations found in cluster %q", ws.ClusterName)
 	}
-	if len(workstations) == 1 {
-		return workstations[0].Name, nil
-	}
 
-	// Multiple workstations — prompt.
-	fmt.Fprintln(os.Stderr, "Multiple workstations found:")
-	for i, ws := range workstations {
-		fmt.Fprintf(os.Stderr, "  %d) %s (%s)\n", i+1, ws.Name, ws.State)
-	}
-	fmt.Fprintf(os.Stderr, "Select workstation [1-%d]: ", len(workstations))
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		return "", fmt.Errorf("no selection made")
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(scanner.Text()))
-	if err != nil || n < 1 || n > len(workstations) {
-		return "", fmt.Errorf("invalid selection")
-	}
-	return workstations[n-1].Name, nil
+	sort.Slice(workstations, func(i, j int) bool {
+		return workstations[i].CreateTime > workstations[j].CreateTime
+	})
+	return workstations[0].Name, nil
 }

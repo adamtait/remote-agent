@@ -8,9 +8,10 @@ import (
 
 // WorkstationInfo holds the parsed fields from a gcloud workstations describe/list call.
 type WorkstationInfo struct {
-	Name  string
-	State string
-	Host  string
+	Name       string
+	State      string
+	Host       string
+	CreateTime string // RFC3339; populated by List
 }
 
 // Client wraps a Runner with typed gcloud workstation operations.
@@ -31,7 +32,7 @@ func (c *Client) List(project, region, cluster, cfgName string) ([]WorkstationIn
 		"--config", cfgName,
 		"--region", region,
 		"--project", project,
-		"--format", "value(name,state)",
+		"--format", "value(name,state,createTime)",
 	)
 	if err != nil {
 		return nil, err
@@ -48,6 +49,9 @@ func (c *Client) List(project, region, cluster, cfgName string) ([]WorkstationIn
 		}
 		if len(parts) > 1 {
 			info.State = parts[1]
+		}
+		if len(parts) > 2 {
+			info.CreateTime = parts[2]
 		}
 		result = append(result, info)
 	}
