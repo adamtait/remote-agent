@@ -108,8 +108,22 @@ func (p *FilePlugin) validateConfig(pluginCfg map[string]interface{}) []string {
 	var errs []string
 	for _, f := range p.schema.Config {
 		if f.Required {
-			if _, ok := pluginCfg[f.Name]; !ok {
+			v, ok := pluginCfg[f.Name]
+			if !ok {
 				errs = append(errs, fmt.Sprintf("plugin %s: required config field %q is missing", p.schema.Name, f.Name))
+				continue
+			}
+			if f.Type == "string_list" {
+				empty := false
+				switch typed := v.(type) {
+				case []string:
+					empty = len(typed) == 0
+				case []interface{}:
+					empty = len(typed) == 0
+				}
+				if empty {
+					errs = append(errs, fmt.Sprintf("plugin %s: required config field %q must not be empty", p.schema.Name, f.Name))
+				}
 			}
 		}
 	}

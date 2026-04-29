@@ -138,6 +138,39 @@ func TestFilePlugin_ValidateConfig_MissingProvider(t *testing.T) {
 	}
 }
 
+func TestFilePlugin_ValidateConfig_RequiredStringList_Empty(t *testing.T) {
+	raw := `
+name: strict
+version: "1.0.0"
+description: "d"
+config:
+  - name: targets
+    type: string_list
+    description: "Target list"
+    required: true
+`
+	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}}
+	p, _ := LoadPlugin(fsys)
+
+	// present but empty []string
+	errs := p.validateConfig(map[string]interface{}{"targets": []string{}})
+	if len(errs) == 0 {
+		t.Fatal("expected error for empty required string_list ([]string)")
+	}
+
+	// present but empty []interface{}
+	errs = p.validateConfig(map[string]interface{}{"targets": []interface{}{}})
+	if len(errs) == 0 {
+		t.Fatal("expected error for empty required string_list ([]interface{})")
+	}
+
+	// non-empty passes
+	errs = p.validateConfig(map[string]interface{}{"targets": []string{"a"}})
+	if len(errs) != 0 {
+		t.Errorf("expected no errors for non-empty required string_list, got %v", errs)
+	}
+}
+
 func TestFilePlugin_ValidateConfig_Disabled(t *testing.T) {
 	p, _ := LoadPlugin(testPluginFS(nil))
 	errs := p.validateConfig(map[string]interface{}{"enabled": false})
@@ -188,9 +221,14 @@ func TestPromptField_StringList_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptField: %v", err)
 	}
-	got, _ := val.([]string)
-	if len(got) != 0 {
-		t.Errorf("expected empty, got %v", got)
+	if val != nil {
+		got, ok := val.([]string)
+		if !ok {
+			t.Fatalf("expected []string, got %T", val)
+		}
+		if len(got) != 0 {
+			t.Errorf("expected empty, got %v", got)
+		}
 	}
 }
 
