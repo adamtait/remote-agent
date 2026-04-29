@@ -61,8 +61,12 @@ func (c *Client) List(project, region, cluster, cfgName string) ([]WorkstationIn
 }
 
 // ListAll returns all workstations across all configs in the given project and region.
+// region must be non-empty; it is validated by config.Validate before any command runs.
 // Each WorkstationInfo is populated with ProjectName and ConfigName parsed from the full resource name.
 func (c *Client) ListAll(project, region string) ([]WorkstationInfo, error) {
+	if region == "" {
+		return nil, fmt.Errorf("region is required for ListAll")
+	}
 	out, err := c.runner.Output(
 		"workstations", "list",
 		"--project", project,
