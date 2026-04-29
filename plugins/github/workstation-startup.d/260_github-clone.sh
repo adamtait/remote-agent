@@ -4,7 +4,7 @@
 # Reads from the standard ra contract:
 #   GIT_USER_NAME, GIT_USER_EMAIL  (set by core)
 #   RA_PLUGIN_GITHUB_ENABLED
-#   RA_PLUGIN_GITHUB_REPO_URL      (https://, git@github.com:..., or empty)
+#   RA_PLUGIN_GITHUB_REPO_URLS     (space-separated list of https:// or git@github.com:... URLs)
 #
 # Guarded by FIRST_BOOT_MARKER — only runs once per workstation.
 set -euo pipefail
@@ -29,21 +29,7 @@ trap mark_done EXIT
 
 [ "${RA_PLUGIN_GITHUB_ENABLED:-false}" = "true" ] || exit 0
 
-# Normalize SSH github URLs to HTTPS — workstation has only HTTPS creds (PAT
-# via the credential helper) and no SSH keys / known_hosts, so SSH URLs
-# would die with "Host key verification failed".
-REPO_URL="${RA_PLUGIN_GITHUB_REPO_URL:-}"
-case "${REPO_URL}" in
-    git@github.com:*)
-        rest="${REPO_URL#git@github.com:}"
-        rest="${rest%.git}"
-        REPO_URL="https://github.com/${rest}.git"
-        echo "[github-clone] normalized SSH URL to ${REPO_URL}"
-        ;;
-esac
-
-# Git identity (needs to exist regardless of clone — used by any subsequent
-# git ops the user runs in the workstation).
+# Git identity (used by any subsequent git ops in the workstation).
 if [[ -n "${GIT_USER_NAME:-}" ]]; then
     sudo -u "${USER_NAME}" git config --global user.name "${GIT_USER_NAME}"
 fi
@@ -51,8 +37,35 @@ if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
     sudo -u "${USER_NAME}" git config --global user.email "${GIT_USER_EMAIL}"
 fi
 
-if [[ -n "${REPO_URL}" ]] && [[ ! -d "${WORKSPACE_DIR}/.git" ]]; then
-    sudo -u "${USER_NAME}" mkdir -p "${WORKSPACE_DIR}"
-    sudo -u "${USER_NAME}" git clone "${REPO_URL}" "${WORKSPACE_DIR}" \
-        || echo "[github-clone] WARNING: repo clone failed; proceeding anyway."
-fi
+for REPO_URL in ${RA_PLUGIN_GITHUB_REPO_URLS:-}; do
+    # Normalize SSH GitHub URLs to HTTPS — workstation has only HTTPS creds (PAT
+    # via the credential helper) and no SSH keys / known_hosts.
+    case "${REPO_URL}" in
+        git@github.com:*)
+            rest="${REPO_URL#git@github.com:}"
+            rest="${rest%.git}"
+            REPO_URL="https://github.com/${rest}.git"
+            echo "[github-clone] normalized SSH URL to ${REPO_URL}"
+            ;;
+    esac
+
+    # Extract repo name: last path component, strip .git suffix.
+    repo_name="${REPO_URL##*/}"
+    repo_name="${repo_name%.git}"
+
+    if [[ -z "${repo_name}" ]]; then
+        echo "[github-clone] WARNING: could not determine repo name from ${REPO_URL}; skipping." >&2
+        continue
+    fi
+
+    clone_target="${WORKSPACE_DIR}/${repo_name}"
+
+    if [[ -d "${clone_target}/.git" ]]; then
+        echo "[github-clone] ${clone_target} already cloned; skipping."
+        continue
+    fi
+
+    sudo -u "${USER_NAME}" mkdir -p "${clone_target}"
+    sudo -u "${USER_NAME}" git clone "${REPO_URL}" "${clone_target}" \
+        || echo "[github-clone] WARNING: clone of ${REPO_URL} failed; proceeding anyway."
+done
