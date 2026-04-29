@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/adamtait/remote-agent/internal/config"
@@ -94,6 +95,29 @@ func TestMerge_EmptyProjectDoesNotClobberUser(t *testing.T) {
 	cfg, _ := config.Merge(user, &config.ProjectConfig{})
 	if cfg.Gcloud.Workstation.Region != "us-central1" || cfg.Gcloud.Workstation.MachineType != "e2-standard-4" {
 		t.Errorf("zero-valued project fields should not override user: %+v", cfg)
+	}
+}
+
+func TestConfigName(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{"remote-agent", "remote-agent-config"},
+		{"my_project", "my-project-config"},
+		{"My Project!", "my-project-config"},
+		{"alice", "alice-config"},
+		{"", "user-config"},
+		// Long base: result must be ≤63 chars and end in -config.
+		{strings.Repeat("a", 60), strings.Repeat("a", 56) + "-config"},
+	} {
+		got := config.ConfigName(tc.in)
+		if got != tc.want {
+			t.Errorf("ConfigName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if len(got) > 63 {
+			t.Errorf("ConfigName(%q) = %q: len %d > 63", tc.in, got, len(got))
+		}
 	}
 }
 

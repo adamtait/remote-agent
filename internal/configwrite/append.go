@@ -131,6 +131,44 @@ func MergeSecretEntries(
 	return strings.TrimPrefix(string(out), "---\n"), nil
 }
 
+// MergeConfigName writes (or replaces) gcloud.workstation.config_name in the
+// given YAML document without touching any other keys. Returns updated YAML.
+func MergeConfigName(original, configName string) (string, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(original), &root); err != nil {
+		return "", fmt.Errorf("configwrite: parse yaml: %w", err)
+	}
+	if root.Kind == 0 {
+		root = yaml.Node{
+			Kind: yaml.DocumentNode,
+			Content: []*yaml.Node{
+				{Kind: yaml.MappingNode, Tag: "!!map"},
+			},
+		}
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return "", fmt.Errorf("configwrite: unexpected root node kind %v", root.Kind)
+	}
+	docBody := root.Content[0]
+	if docBody.Kind == yaml.ScalarNode && (docBody.Tag == "!!null" || docBody.Value == "null" || docBody.Value == "~" || docBody.Value == "") {
+		docBody = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		root.Content[0] = docBody
+	}
+	if docBody.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("configwrite: top-level YAML must be a mapping, got kind %v", docBody.Kind)
+	}
+
+	gcloudNode := ensureMappingChild(docBody, "gcloud")
+	workstationNode := ensureMappingChild(gcloudNode, "workstation")
+	setMappingKey(workstationNode, "config_name", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: configName})
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return "", fmt.Errorf("configwrite: marshal: %w", err)
+	}
+	return strings.TrimPrefix(string(out), "---\n"), nil
+}
+
 // RemovePluginConfig removes plugins.<name> and the named secrets entries from
 // existing YAML, then returns the updated YAML.
 func RemovePluginConfig(original, pluginName string, secretLogicals []string) (string, error) {
