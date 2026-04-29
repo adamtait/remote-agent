@@ -8,10 +8,12 @@ import (
 
 // WorkstationInfo holds the parsed fields from a gcloud workstations describe/list call.
 type WorkstationInfo struct {
-	Name       string
-	State      string
-	Host       string
-	CreateTime string // RFC3339; populated by List
+	Name        string
+	State       string
+	Host        string
+	CreateTime  string // RFC3339; populated by List
+	ProjectName string // populated by ListAll
+	ConfigName  string // populated by ListAll
 }
 
 // Client wraps a Runner with typed gcloud workstation operations.
@@ -52,6 +54,44 @@ func (c *Client) List(project, region, cluster, cfgName string) ([]WorkstationIn
 		}
 		if len(parts) > 2 {
 			info.CreateTime = parts[2]
+		}
+		result = append(result, info)
+	}
+	return result, nil
+}
+
+// ListAll returns all workstations across all configs in the given project and region.
+// Each WorkstationInfo is populated with ProjectName and ConfigName parsed from the full resource name.
+func (c *Client) ListAll(project, region string) ([]WorkstationInfo, error) {
+	out, err := c.runner.Output(
+		"workstations", "list",
+		"--project", project,
+		"--region", region,
+		"--format", "value(name,state)",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var result []WorkstationInfo
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		info := WorkstationInfo{}
+		if len(parts) > 0 {
+			// full resource name: projects/P/locations/R/workstationClusters/C/workstationConfigs/F/workstations/N
+			segments := strings.Split(parts[0], "/")
+			if len(segments) == 10 {
+				info.ProjectName = segments[1]
+				info.ConfigName = segments[7]
+				info.Name = segments[9]
+			} else {
+				info.Name = parts[0]
+			}
+		}
+		if len(parts) > 1 {
+			info.State = parts[1]
 		}
 		result = append(result, info)
 	}
