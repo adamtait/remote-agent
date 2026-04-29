@@ -1,6 +1,10 @@
-# ra — Remote Agent on Google Cloud Workstations
+# ra — Remote Agent
 
-`ra` is a Go CLI that provisions a browser-accessible Google Cloud Workstation with the development tooling of your choice, plus a private GitHub repo cloned and ready to go. Tooling is plugin-based: `ra` itself ships with no built-in plugins; you add Claude Code, GitHub-specific helpers, or any other integration via `ra plugin install`.
+`ra` is a simple CLI tool for moving CLI coding agents to the cloud. It's built on the rock-solid Google Cloud Workstations to keep your agents safely contained in a work-friendly environment.
+
+`ra` is a Go CLI that provisions a browser-accessible Google Cloud Workstation with the development tooling of your choice, plus a GitHub repo cloned and ready to go. Tooling is plugin-based: `ra` itself ships with no built-in plugins; you add Claude Code, GitHub-specific helpers, or any other integration via `ra plugin install`.
+
+
 
 ## Design
 
@@ -14,26 +18,15 @@ contents land at the matching paths in the final image (`/etc/...`).
 plugin-agnostic. Anything tool-specific (Node.js install, custom PATH entries,
 auth flows) lives in the relevant plugin.
 
-## Files
+**Git Repo Aware.** `ra` makes it easy to create and connect to remote workstations by project.
 
-- `main.go` / `cmd/` / `internal/` — `ra` CLI (idempotent provisioning)
-- `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
-- `internal/scaffold/assets/` — embedded core build assets (Dockerfile, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`)
-- `plugins/claude/`, `plugins/github/` — in-tree homes of the Claude Code and GitHub plugins (each will move to its own repo in a follow-up changeset)
-- `~/.config/ra/` — your user-global ra config + materialized core assets + installed plugins
-- `.ra/` — project-local ra config + (optional) overrides + installed plugins
 
 ## Prerequisites
 
 - `gcloud` CLI authenticated (`gcloud auth login`)
+- GCP project with billing enabled
 - `docker` with buildx (for cross-arch builds on macOS)
-- A GCP project with billing enabled
-- A GitHub fine-grained PAT scoped to the target repo with Contents: Read & write
-- If your Google Workspace/Cloud org enforces a session-length / reauth
-  policy, the `reauth.googleapis.com` API must be enabled in the workstation
-  project. `ra create` enables it automatically; otherwise gcloud's OAuth
-  token refresh (e.g. during `gcloud workstations ssh`) will fail with
-  `PERMISSION_DENIED: Reauth API has not been used...`.
+
 
 ## Getting started
 
@@ -55,25 +48,30 @@ It writes:
 - **`.ra/config.yaml`** — project-specific settings (committed to source control)
 - The core build assets (`Dockerfile`, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`) into `~/.config/ra/`
 
-### Upgrading from a pre-plugin ra
 
-If your `~/.config/ra/config.yaml` was written by an older ra and contains `git.github_repo_url` or `secrets.github_pat`, those entries are silently ignored — the github plugin owns those concerns now. Run `ra plugin install ./plugins/github --user` and re-enter the values when prompted; the install writes `plugins.github.repo_url` and `secrets.github_pat` to the new locations. The stale top-level keys can be deleted manually.
+## Day-to-day
 
-`ra plugin install <source>` (where `<source>` is a git URL or a local
-filesystem path):
-1. Acquires the plugin (clone or copy)
-2. Asks whether to install at user level (`~/.config/ra/plugins/`) or project level (`.ra/plugins/`)
-3. Prompts for the plugin's config (e.g. `enabled: true`, `auth_provider: oauth`)
-4. Prompts for secret values (hidden input)
-5. Uploads secret values to GCP Secret Manager
-6. Writes `plugins.<name>.*` and `secrets.*` blocks into the chosen-level `config.yaml`
-7. Records install metadata at `<plugin-dir>/.ra-install.yaml`
+```bash
+ra list           # list workstations
+ra url            # print the browser IDE URL
+ra connect        # SSH into the workstation
+ra logs           # tail workstation logs
+ra stop           # stop (save $)
+ra delete         # delete the workstation
+```
 
-`ra create` then assembles `.ra/.build/` (an ephemeral docker build context)
-from your core assets + every installed plugin's contributions, builds and
-pushes the image, ensures secrets and IAM bindings, and creates a workstation.
-First run takes ~20 minutes (cluster provisioning is the slow part).
-Subsequent runs skip everything that already exists.
+Each targeted command accepts an optional name argument; otherwise the default workstation is used.
+
+
+## Files
+
+- `main.go` / `cmd/` / `internal/` — `ra` CLI (idempotent provisioning)
+- `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
+- `internal/scaffold/assets/` — embedded core build assets (Dockerfile, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`)
+- `plugins/claude/`, `plugins/github/` — in-tree homes of the Claude Code and GitHub plugins (each will move to its own repo in a follow-up changeset)
+- `~/.config/ra/` — your user-global ra config + materialized core assets + installed plugins
+- `.ra/` — project-local ra config + (optional) overrides + installed plugins
+
 
 ## `ra plugin` reference
 
@@ -221,19 +219,6 @@ To test a startup script on a running workstation:
 ra connect
 sudo bash /etc/workstation-startup.d/250_my-plugin-setup.sh
 ```
-
-## Day-to-day
-
-```bash
-ra list           # list workstations
-ra url            # print the browser IDE URL
-ra connect        # SSH into the workstation
-ra logs           # tail workstation logs
-ra stop           # stop (save $)
-ra delete         # delete the workstation
-```
-
-Each targeted command accepts an optional name argument; otherwise the default workstation is used.
 
 ## Rotating secrets
 
