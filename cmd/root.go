@@ -3,21 +3,25 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
+	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/plugins"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
 var (
-	cfg    *config.Config
-	client *gcloud.Client
-	runner gcloud.Runner
-	reg    *plugins.Registry
+	cfg        *config.Config
+	client     *gcloud.Client
+	runner     gcloud.Runner
+	reg        *plugins.Registry
+	logCleanup = func() {}
 )
 
 func init() {
@@ -33,6 +37,11 @@ func init() {
 		return
 	}
 	reg = plugins.NewRegistry(loaded)
+
+	rootCmd.PersistentFlags().String("log-level", "info", "Log verbosity: debug, info, warn, error")
+	rootCmd.PersistentFlags().String("log-file", "", "Log file path (default: auto in ~/.local/share/ra/logs/)")
+	rootCmd.PersistentFlags().String("log-format", "json", "Log file format: json or text")
+	rootCmd.PersistentFlags().Bool("no-log-file", false, "Disable file logging")
 }
 
 var rootCmd = &cobra.Command{
@@ -82,13 +91,57 @@ var rootCmd = &cobra.Command{
 		if err := config.Validate(cfg, reg.ValidateAll(cfg)); err != nil {
 			return err
 		}
-		runner = gcloud.RealRunner{}
+
+		// Parse log flags
+		logLevel, _ := cmd.Root().PersistentFlags().GetString("log-level")
+		logFile, _ := cmd.Root().PersistentFlags().GetString("log-file")
+		logFmt, _ := cmd.Root().PersistentFlags().GetString("log-format")
+		noLogFile, _ := cmd.Root().PersistentFlags().GetBool("no-log-file")
+
+		if os.Getenv("RA_NO_LOG_FILE") != "" {
+			noLogFile = true
+		}
+
+		lvl := parseLogLevel(logLevel)
+
+		cleanup, err := logging.Init(logging.Config{
+			Level:   lvl,
+			File:    logFile,
+			Format:  logFmt,
+			NoFile:  noLogFile,
+			Command: cmd.Root().Name() + " " + cmd.Name(),
+			Project: cfg.Gcloud.Project,
+		})
+		if err != nil {
+			// Non-fatal: continue without file logging
+			fmt.Fprintf(os.Stderr, "WARN: could not initialize logging: %v\n", err)
+			logCleanup = func() {}
+		} else {
+			logCleanup = cleanup
+		}
+
+		runner = gcloud.NewLoggingRunner(logging.L())
 		client = gcloud.NewClient(runner)
+
 		return nil
 	},
 }
 
+func parseLogLevel(s string) slog.Level {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
 func Execute() {
+	defer func() { logCleanup() }()
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -102,6 +155,7 @@ func Execute() {
 // tree before Execute, so repeated invocations (as in tests) can't leak flag
 // state from a previous run.
 func ExecuteWithIO(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
+	defer func() { logCleanup() }()
 	resetFlagsRecursive(rootCmd)
 	rootCmd.SetIn(stdin)
 	rootCmd.SetOut(stdout)

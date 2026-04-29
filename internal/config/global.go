@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/adamtait/remote-agent/internal/logging"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +26,7 @@ func UserConfigPath() (string, error) {
 func LoadUserConfig(path string) (*UserConfig, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		logging.L().Debug("config not found, using empty", "path", path, "type", "user")
 		return &UserConfig{}, nil
 	}
 	if err != nil {
@@ -34,6 +36,7 @@ func LoadUserConfig(path string) (*UserConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	logging.L().Debug("config loaded", "path", path, "type", "user")
 	return &cfg, nil
 }
 
