@@ -6,12 +6,14 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/adamtait/remote-agent/internal/config"
+	"github.com/adamtait/remote-agent/internal/configwrite"
 	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/naming"
 	"github.com/adamtait/remote-agent/internal/scaffold"
@@ -107,6 +109,27 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if ws.AutoShutdownHours != 0 {
 		if ws.AutoShutdownHours < 1 || ws.AutoShutdownHours > 168 {
 			return fmt.Errorf("auto_shutdown_hours must be 1–168; got %d", ws.AutoShutdownHours)
+		}
+	}
+
+	// Auto-generate a unique config_name per project if none is set at the project level.
+	// This scopes workstation listings to this project so `ra connect` finds the right one.
+	if cfg.ProjectConfigPath != "" {
+		if rawProject, err := config.LoadProjectConfig(cfg.ProjectConfigPath); err == nil &&
+			rawProject.Gcloud.Workstation.ConfigName == "" {
+			repoDir := filepath.Dir(filepath.Dir(cfg.ProjectConfigPath))
+			configName := config.ConfigName(filepath.Base(repoDir))
+			if origBytes, readErr := os.ReadFile(cfg.ProjectConfigPath); readErr == nil {
+				updated, writeErr := configwrite.MergeConfigName(string(origBytes), configName)
+				if writeErr == nil {
+					writeErr = os.WriteFile(cfg.ProjectConfigPath, []byte(updated), 0644)
+				}
+				if writeErr != nil {
+					fmt.Printf("\033[1;33mWARN:\033[0m could not save config_name to project config: %v\n", writeErr)
+				} else {
+					ws.ConfigName = configName
+				}
+			}
 		}
 	}
 

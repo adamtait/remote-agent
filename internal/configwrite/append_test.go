@@ -91,6 +91,79 @@ func TestMergePluginConfig_InsertIntoExistingSecrets(t *testing.T) {
 	}
 }
 
+func TestMergeConfigName_InsertsIntoExistingWorkstationSection(t *testing.T) {
+	original := `gcloud:
+  project: my-project
+  workstation:
+    region: us-central1
+`
+	result, err := MergeConfigName(original, "remote-agent-config")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := getNestedString(t, result, "gcloud", "workstation", "config_name"); got != "remote-agent-config" {
+		t.Errorf("config_name = %q, want remote-agent-config", got)
+	}
+	if !strings.Contains(result, "my-project") {
+		t.Errorf("gcloud.project lost; got:\n%s", result)
+	}
+	if !strings.Contains(result, "us-central1") {
+		t.Errorf("region lost; got:\n%s", result)
+	}
+}
+
+func TestMergeConfigName_InsertsWithNoGcloudSection(t *testing.T) {
+	original := `secrets:
+  foo:
+    secret_name: bar
+    env_var: BAR
+`
+	result, err := MergeConfigName(original, "myrepo-config")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := getNestedString(t, result, "gcloud", "workstation", "config_name"); got != "myrepo-config" {
+		t.Errorf("config_name = %q, want myrepo-config", got)
+	}
+	if !strings.Contains(result, "foo") {
+		t.Errorf("existing secrets lost; got:\n%s", result)
+	}
+}
+
+func TestMergeConfigName_Idempotent(t *testing.T) {
+	original := `gcloud:
+  project: p
+`
+	first, err := MergeConfigName(original, "my-config")
+	if err != nil {
+		t.Fatalf("first merge: %v", err)
+	}
+	second, err := MergeConfigName(first, "my-config")
+	if err != nil {
+		t.Fatalf("second merge: %v", err)
+	}
+	if first != second {
+		t.Errorf("not idempotent:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestMergeConfigName_OverwritesExisting(t *testing.T) {
+	original := `gcloud:
+  workstation:
+    config_name: old-config
+`
+	result, err := MergeConfigName(original, "new-config")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := getNestedString(t, result, "gcloud", "workstation", "config_name"); got != "new-config" {
+		t.Errorf("config_name = %q, want new-config", got)
+	}
+	if strings.Contains(result, "old-config") {
+		t.Errorf("old config_name not replaced; got:\n%s", result)
+	}
+}
+
 func TestMergePluginConfig_Idempotent(t *testing.T) {
 	original := `gcloud:
   project: p

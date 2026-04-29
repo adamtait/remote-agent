@@ -4,6 +4,8 @@ package scaffold
 import (
 	"fmt"
 	"strings"
+
+	"github.com/adamtait/remote-agent/internal/config"
 )
 
 // UserValues are the prompt-gathered inputs for ~/.config/ra/config.yaml.
@@ -36,7 +38,6 @@ const (
 	seedMachineType        = "e2-standard-4"
 	seedDiskSizeGB         = 50
 	seedClusterName        = "claude-dev-cluster"
-	seedConfigName         = "claude-dev-config"
 	seedServiceAccountName = "claude-workstation-sa"
 	seedImageName          = "claude-code-workstation"
 	seedImageTag           = "latest"
@@ -72,7 +73,7 @@ func RenderUserConfig(uv UserValues) string {
 	machine := orStr(uv.MachineType, seedMachineType)
 	disk := orInt(uv.DiskSizeGB, seedDiskSizeGB)
 	cluster := orStr(uv.ClusterName, seedClusterName)
-	conf := orStr(uv.ConfigName, seedConfigName)
+	conf := orStr(uv.ConfigName, config.ConfigName(config.CurrentUsername()))
 	sa := orStr(uv.ServiceAccountName, seedServiceAccountName)
 	img := orStr(uv.ImageName, seedImageName)
 	tag := orStr(uv.ImageTag, seedImageTag)

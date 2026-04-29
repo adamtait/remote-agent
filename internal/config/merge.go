@@ -52,7 +52,7 @@ func Merge(u *UserConfig, project *ProjectConfig) (*Config, error) {
 	cfg.Secrets = mergeSecretMap(u.Secrets, project.Secrets)
 	cfg.Env = mergeStringMap(u.Env, project.Env)
 
-	cfg.WorkstationName = WorkstationName(cfg.Gcloud.Project, currentUsername())
+	cfg.WorkstationName = WorkstationName(cfg.Gcloud.Project, CurrentUsername())
 	return cfg, nil
 }
 
@@ -119,8 +119,8 @@ func mergePluginsMap(u, project map[string]map[string]interface{}) map[string]ma
 	return out
 }
 
-// currentUsername returns the username used to derive WorkstationName.
-func currentUsername() string {
+// CurrentUsername returns the OS username used to derive resource names.
+func CurrentUsername() string {
 	if u, err := user.Current(); err == nil && u.Username != "" {
 		return u.Username
 	}
@@ -128,6 +128,22 @@ func currentUsername() string {
 		return v
 	}
 	return "user"
+}
+
+// ConfigName returns a GCP-compliant workstation config name derived from
+// a base string (e.g. a directory name or username).
+func ConfigName(base string) string {
+	s := strings.ToLower(base)
+	s = nonAlphanumHyphen.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if s == "" {
+		s = "user"
+	}
+	const suffix = "-config"
+	if len(s) > 63-len(suffix) {
+		s = strings.TrimRight(s[:63-len(suffix)], "-")
+	}
+	return s + suffix
 }
 
 var nonAlphanumHyphen = regexp.MustCompile(`[^a-z0-9]+`)
