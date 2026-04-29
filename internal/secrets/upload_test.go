@@ -15,8 +15,9 @@ type fakeRunner struct {
 	createdValue string
 }
 
-func (f *fakeRunner) Check(args ...string) bool { return f.exists }
-func (f *fakeRunner) Run(args ...string) error  { return nil }
+func (f *fakeRunner) Check(args ...string) bool                        { return f.exists }
+func (f *fakeRunner) Run(args ...string) error                         { return nil }
+func (f *fakeRunner) RunWithStderr(_ io.Writer, _ ...string) error     { return nil }
 func (f *fakeRunner) RunWithStdin(stdin io.Reader, args ...string) error {
 	for i, a := range args {
 		if a == "create" && i+1 < len(args) {

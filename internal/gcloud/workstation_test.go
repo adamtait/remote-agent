@@ -22,6 +22,11 @@ func (f *fakeRunner) Run(args ...string) error {
 	return nil
 }
 
+func (f *fakeRunner) RunWithStderr(_ io.Writer, args ...string) error {
+	f.calls = append(f.calls, args)
+	return nil
+}
+
 func (f *fakeRunner) RunWithStdin(_ io.Reader, args ...string) error {
 	f.calls = append(f.calls, args)
 	return nil

@@ -11,6 +11,9 @@ import (
 type Runner interface {
 	// Run executes gcloud with args, streaming stdout/stderr to the terminal.
 	Run(args ...string) error
+	// RunWithStderr executes gcloud with args, writing stderr to the provided
+	// writer instead of os.Stderr. stdout and stdin are connected to the terminal.
+	RunWithStderr(stderr io.Writer, args ...string) error
 	// RunWithStdin executes gcloud with args, piping stdin into the process.
 	// stdout/stderr stream to the terminal.
 	RunWithStdin(stdin io.Reader, args ...string) error
@@ -24,9 +27,13 @@ type Runner interface {
 type RealRunner struct{}
 
 func (r RealRunner) Run(args ...string) error {
+	return r.RunWithStderr(os.Stderr, args...)
+}
+
+func (r RealRunner) RunWithStderr(stderr io.Writer, args ...string) error {
 	cmd := exec.Command("gcloud", args...)
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
 }

@@ -2,6 +2,7 @@ package gcloud
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -125,7 +126,10 @@ func (c *Client) Delete(project, region, cluster, cfgName, name string) error {
 
 // SSH opens an interactive SSH session to the workstation.
 func (c *Client) SSH(project, region, cluster, cfgName, name string) error {
-	return c.runner.Run(
+	filter := newBrokenPipeFilter(os.Stderr)
+	defer filter.Flush()
+	return c.runner.RunWithStderr(
+		filter,
 		"workstations", "ssh", name,
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,

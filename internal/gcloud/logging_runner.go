@@ -57,6 +57,12 @@ func gcloudSubcmd(args []string) string {
 // Run executes gcloud with args, streaming stdout to the terminal and
 // capturing stderr for logging.
 func (r LoggingRunner) Run(args ...string) error {
+	return r.RunWithStderr(os.Stderr, args...)
+}
+
+// RunWithStderr executes gcloud with args, writing stderr to the provided
+// writer (while also capturing it for logging). stdout and stdin are terminal.
+func (r LoggingRunner) RunWithStderr(stderr io.Writer, args ...string) error {
 	start := time.Now()
 	l := r.logger.With(
 		slog.String("op", "gcloud.Run"),
@@ -68,7 +74,7 @@ func (r LoggingRunner) Run(args ...string) error {
 	var stderrBuf bytes.Buffer
 	cmd := exec.Command("gcloud", args...)
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	cmd.Stderr = io.MultiWriter(stderr, &stderrBuf)
 	cmd.Stdin = os.Stdin
 	err := cmd.Run()
 
