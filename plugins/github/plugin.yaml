@@ -6,10 +6,9 @@ config:
     type: bool
     description: "Enable GitHub plugin?"
     default: true
-  - name: repo_url
-    type: string
-    description: "Git repository to clone into ~/workspace on first boot (https://, git@github.com:owner/repo, or empty to skip clone)"
-    default: ""
+  - name: repo_urls
+    type: string_list
+    description: "Git repositories to clone into ~/workspace/<repo-name> on first boot (https:// or git@github.com:owner/repo); enter one URL per prompt, empty line to finish"
 auth_providers:
   - name: pat
     description: "Personal Access Token (rotation auto-picked-up via git credential helper)"

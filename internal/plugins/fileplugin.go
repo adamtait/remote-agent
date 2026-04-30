@@ -50,6 +50,8 @@ func (p *FilePlugin) DefaultConfigFragments() (configBlock string, secretsBlock 
 				defaults[f.Name] = false
 			case "int":
 				defaults[f.Name] = 0
+			case "string_list":
+				defaults[f.Name] = []string{}
 			default:
 				defaults[f.Name] = ""
 			}
@@ -69,7 +71,20 @@ func (p *FilePlugin) containerEnvPairsFrom(pluginCfg map[string]interface{}) []s
 			pairs = append(pairs, key+"=")
 			continue
 		}
-		val := fmt.Sprintf("%v", v)
+		var val string
+		switch typed := v.(type) {
+		case []string:
+			val = strings.Join(typed, " ")
+		case []interface{}:
+			// yaml.v3 decodes YAML sequences into []interface{} when target is any
+			parts := make([]string, 0, len(typed))
+			for _, item := range typed {
+				parts = append(parts, fmt.Sprintf("%v", item))
+			}
+			val = strings.Join(parts, " ")
+		default:
+			val = fmt.Sprintf("%v", v)
+		}
 		pairs = append(pairs, key+"="+val)
 	}
 	if len(p.schema.AuthProviders) > 0 {
@@ -93,8 +108,22 @@ func (p *FilePlugin) validateConfig(pluginCfg map[string]interface{}) []string {
 	var errs []string
 	for _, f := range p.schema.Config {
 		if f.Required {
-			if _, ok := pluginCfg[f.Name]; !ok {
+			v, ok := pluginCfg[f.Name]
+			if !ok {
 				errs = append(errs, fmt.Sprintf("plugin %s: required config field %q is missing", p.schema.Name, f.Name))
+				continue
+			}
+			if f.Type == "string_list" {
+				empty := false
+				switch typed := v.(type) {
+				case []string:
+					empty = len(typed) == 0
+				case []interface{}:
+					empty = len(typed) == 0
+				}
+				if empty {
+					errs = append(errs, fmt.Sprintf("plugin %s: required config field %q must not be empty", p.schema.Name, f.Name))
+				}
 			}
 		}
 	}
@@ -238,6 +267,22 @@ func promptField(r *bufio.Reader, out io.Writer, f ConfigField) (interface{}, er
 		var v int
 		fmt.Sscan(strings.TrimSpace(line), &v)
 		return v, nil
+	case "string_list":
+		fmt.Fprintf(out, "%s\n(enter one URL per line, empty line to finish):\n", f.Description)
+		var urls []string
+		for {
+			fmt.Fprintf(out, "  URL [%d]: ", len(urls)+1)
+			line, err := r.ReadString('\n')
+			if err != nil && err != io.EOF {
+				return nil, err
+			}
+			v := strings.TrimSpace(line)
+			if v == "" {
+				break
+			}
+			urls = append(urls, v)
+		}
+		return urls, nil
 	default: // string
 		if len(f.Options) > 0 {
 			return promptOptions(r, out, f)

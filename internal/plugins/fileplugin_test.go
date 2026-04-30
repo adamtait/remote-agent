@@ -138,6 +138,39 @@ func TestFilePlugin_ValidateConfig_MissingProvider(t *testing.T) {
 	}
 }
 
+func TestFilePlugin_ValidateConfig_RequiredStringList_Empty(t *testing.T) {
+	raw := `
+name: strict
+version: "1.0.0"
+description: "d"
+config:
+  - name: targets
+    type: string_list
+    description: "Target list"
+    required: true
+`
+	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}}
+	p, _ := LoadPlugin(fsys)
+
+	// present but empty []string
+	errs := p.validateConfig(map[string]interface{}{"targets": []string{}})
+	if len(errs) == 0 {
+		t.Fatal("expected error for empty required string_list ([]string)")
+	}
+
+	// present but empty []interface{}
+	errs = p.validateConfig(map[string]interface{}{"targets": []interface{}{}})
+	if len(errs) == 0 {
+		t.Fatal("expected error for empty required string_list ([]interface{})")
+	}
+
+	// non-empty passes
+	errs = p.validateConfig(map[string]interface{}{"targets": []string{"a"}})
+	if len(errs) != 0 {
+		t.Errorf("expected no errors for non-empty required string_list, got %v", errs)
+	}
+}
+
 func TestFilePlugin_ValidateConfig_Disabled(t *testing.T) {
 	p, _ := LoadPlugin(testPluginFS(nil))
 	errs := p.validateConfig(map[string]interface{}{"enabled": false})
@@ -162,6 +195,69 @@ func TestFilePlugin_ContainerEnvPairsFrom_MissingField(t *testing.T) {
 		if strings.Contains(pair, "<nil>") {
 			t.Errorf("pair contains <nil>: %q", pair)
 		}
+	}
+}
+
+func TestPromptField_StringList(t *testing.T) {
+	f := ConfigField{Name: "repo_urls", Type: "string_list", Description: "Git repos"}
+	r := bufio.NewReader(strings.NewReader("https://github.com/a/b\nhttps://github.com/c/d\n\n"))
+	val, err := promptField(r, io.Discard, f)
+	if err != nil {
+		t.Fatalf("promptField: %v", err)
+	}
+	got, ok := val.([]string)
+	if !ok {
+		t.Fatalf("expected []string, got %T", val)
+	}
+	if len(got) != 2 || got[0] != "https://github.com/a/b" || got[1] != "https://github.com/c/d" {
+		t.Errorf("unexpected result: %v", got)
+	}
+}
+
+func TestPromptField_StringList_Empty(t *testing.T) {
+	f := ConfigField{Name: "repo_urls", Type: "string_list", Description: "Git repos"}
+	r := bufio.NewReader(strings.NewReader("\n"))
+	val, err := promptField(r, io.Discard, f)
+	if err != nil {
+		t.Fatalf("promptField: %v", err)
+	}
+	if val != nil {
+		got, ok := val.([]string)
+		if !ok {
+			t.Fatalf("expected []string, got %T", val)
+		}
+		if len(got) != 0 {
+			t.Errorf("expected empty, got %v", got)
+		}
+	}
+}
+
+func TestContainerEnvPairs_StringList(t *testing.T) {
+	raw := `
+name: ghtest
+version: "1.0.0"
+description: "d"
+config:
+  - name: repo_urls
+    type: string_list
+    description: "repos"
+`
+	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}}
+	p, _ := LoadPlugin(fsys)
+	want := "RA_PLUGIN_GHTEST_REPO_URLS=https://github.com/a/b https://github.com/c/d"
+
+	pairs := p.containerEnvPairsFrom(map[string]interface{}{
+		"repo_urls": []string{"https://github.com/a/b", "https://github.com/c/d"},
+	})
+	if !sliceContains(pairs, want) {
+		t.Errorf("[]string: missing %q; got %v", want, pairs)
+	}
+
+	pairs2 := p.containerEnvPairsFrom(map[string]interface{}{
+		"repo_urls": []interface{}{"https://github.com/a/b", "https://github.com/c/d"},
+	})
+	if !sliceContains(pairs2, want) {
+		t.Errorf("[]interface{}: missing %q; got %v", want, pairs2)
 	}
 }
 

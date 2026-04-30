@@ -13,7 +13,7 @@ type PluginSchema struct {
 // ConfigField declares one user-facing config field.
 type ConfigField struct {
 	Name        string      `yaml:"name"`
-	Type        string      `yaml:"type"` // "bool", "string", "int"
+	Type        string      `yaml:"type"` // "bool", "string", "int", "string_list"
 	Description string      `yaml:"description"`
 	Default     any         `yaml:"default"`
 	Required    bool        `yaml:"required"`
