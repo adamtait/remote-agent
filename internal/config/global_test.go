@@ -44,18 +44,18 @@ gcloud:
     region: us-central1
     machine_type: e2-standard-4
     disk_size_gb: 50
-    cluster_name: claude-dev-cluster
-    config_name: claude-dev-config
-    service_account_name: claude-workstation-sa
-    image_name: claude-code-workstation
+    cluster_name: ra-dev-cluster
+    config_name: ra-dev-config
+    service_account_name: ra-workstation-sa
+    image_name: ra-workstation
     image_tag: latest
-    repo_name: claude-workstation-images
+    repo_name: ra-workstation-images
     auto_sleep_hours: 2
     auto_shutdown_hours: 12
 secrets:
-  claude_oauth:
-    secret_name: claude-auth
-    env_var: CLAUDE_CODE_OAUTH_TOKEN
+  example_secret:
+    secret_name: example-secret
+    env_var: EXAMPLE_TOKEN
   github_pat:
     secret_name: github-pat
     env_var: GH_TOKEN
@@ -74,8 +74,8 @@ env:
 		cfg.Gcloud.Workstation.AutoSleepHours == nil || *cfg.Gcloud.Workstation.AutoSleepHours != 2 {
 		t.Errorf("parsed wrong: %+v", cfg)
 	}
-	if got := cfg.Secrets["claude_oauth"].EnvVar; got != "CLAUDE_CODE_OAUTH_TOKEN" {
-		t.Errorf("claude_oauth.env_var: got %q", got)
+	if got := cfg.Secrets["example_secret"].EnvVar; got != "EXAMPLE_TOKEN" {
+		t.Errorf("example_secret.env_var: got %q", got)
 	}
 	if cfg.Env["EXTRA_KEY"] != "extra_value" {
 		t.Errorf("env map not parsed: %+v", cfg.Env)

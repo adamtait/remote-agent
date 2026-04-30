@@ -299,7 +299,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	done = logging.Step("ensure_service_acct", 5, fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail), cmd.OutOrStdout())
 	if !r.Check("iam", "service-accounts", "describe", serviceAccountEmail, "--project", cfg.Gcloud.Project) {
 		if err := r.Run("iam", "service-accounts", "create", ws.ServiceAccountName,
-			"--display-name=Claude Workstation SA",
+			"--display-name=ra Workstation SA",
 			"--project", cfg.Gcloud.Project); err != nil {
 			done(err)
 			return fmt.Errorf("creating service account: %w", err)
@@ -533,8 +533,8 @@ func (d dockerRunner) Run(args ...string) error {
 
 // dockerBuildArgs returns the buildx args used by `ra create`, centralized so
 // tests can assert on the exact flags. The Dockerfile is harness-agnostic at
-// build time — Claude install is gated at runtime by the `RA_PLUGIN_CLAUDE_ENABLED`
-// env var emitted by the claude plugin.
+// build time — plugin-specific install steps are gated at runtime by their
+// own `RA_PLUGIN_<NAME>_ENABLED` env vars emitted by each plugin.
 func dockerBuildArgs(imageURI string) []string {
 	return []string{
 		"buildx", "build",

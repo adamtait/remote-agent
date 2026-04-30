@@ -18,11 +18,11 @@ func TestMerge_UserBaselineNoProject(t *testing.T) {
 			Project: "user-proj",
 			Workstation: config.WorkstationConfig{
 				Region: "us-central1", MachineType: "e2-standard-4", DiskSizeGB: 50,
-				ClusterName: "claude-dev-cluster", ConfigName: "claude-dev-config",
-				ServiceAccountName: "claude-workstation-sa",
-				ImageName:          "claude-code-workstation",
+				ClusterName: "ra-dev-cluster", ConfigName: "ra-dev-config",
+				ServiceAccountName: "ra-workstation-sa",
+				ImageName:          "ra-workstation",
 				ImageTag:           "latest",
-				RepoName:           "claude-workstation-images",
+				RepoName:           "ra-workstation-images",
 				AutoSleepHours:     &two,
 				AutoShutdownHours:  12,
 			},
@@ -134,8 +134,8 @@ func TestMerge_NoHardcodedDefaultsWhenBothEmpty(t *testing.T) {
 func TestMerge_SecretsMap_UserSeedsProjectOverrides(t *testing.T) {
 	user := &config.UserConfig{
 		Secrets: map[string]config.SecretEntry{
-			"claude_oauth": {SecretName: "claude-auth", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
-			"github_pat":   {SecretName: "github-pat", EnvVar: "GH_TOKEN"},
+			"example_secret": {SecretName: "example-secret", EnvVar: "EXAMPLE_TOKEN"},
+			"github_pat":     {SecretName: "github-pat", EnvVar: "GH_TOKEN"},
 		},
 	}
 	project := &config.ProjectConfig{
@@ -145,8 +145,8 @@ func TestMerge_SecretsMap_UserSeedsProjectOverrides(t *testing.T) {
 		},
 	}
 	cfg, _ := config.Merge(user, project)
-	if got := cfg.Secrets["claude_oauth"].SecretName; got != "claude-auth" {
-		t.Errorf("claude_oauth.secret_name: got %q, want claude-auth (from user)", got)
+	if got := cfg.Secrets["example_secret"].SecretName; got != "example-secret" {
+		t.Errorf("example_secret.secret_name: got %q, want example-secret (from user)", got)
 	}
 	if got := cfg.Secrets["github_pat"].SecretName; got != "proj-github-pat" {
 		t.Errorf("github_pat.secret_name: got %q, want proj-github-pat (project override)", got)

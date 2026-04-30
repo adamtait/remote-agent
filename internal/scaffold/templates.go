@@ -37,11 +37,11 @@ const (
 	seedRegion             = "us-central1"
 	seedMachineType        = "e2-standard-4"
 	seedDiskSizeGB         = 50
-	seedClusterName        = "claude-dev-cluster"
-	seedServiceAccountName = "claude-workstation-sa"
-	seedImageName          = "claude-code-workstation"
+	seedClusterName        = "ra-dev-cluster"
+	seedServiceAccountName = "ra-workstation-sa"
+	seedImageName          = "ra-workstation"
 	seedImageTag           = "latest"
-	seedRepoName           = "claude-workstation-images"
+	seedRepoName           = "ra-workstation-images"
 	seedAutoSleepHours     = 2
 	seedAutoShutdownHours  = 12
 	placeholderGitUserName = "your-name"
@@ -149,9 +149,8 @@ gcloud:
 #     auto_sleep_hours: 1
 #
 # plugins:
-#   claude:
+#   <plugin-name>:
 #     enabled: false        # project-level false overrides user-level true
-#     auth_provider: oauth  # oauth | apikey
 #
 # secrets:
 #   my_extra_secret:
