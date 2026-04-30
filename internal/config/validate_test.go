@@ -20,18 +20,18 @@ func fullValidCfg() *config.Config {
 				Region:             "us-central1",
 				MachineType:        "e2-standard-4",
 				DiskSizeGB:         50,
-				ClusterName:        "claude-dev-cluster",
-				ConfigName:         "claude-dev-config",
-				ServiceAccountName: "claude-workstation-sa",
-				ImageName:          "claude-code-workstation",
+				ClusterName:        "ra-dev-cluster",
+				ConfigName:         "ra-dev-config",
+				ServiceAccountName: "ra-workstation-sa",
+				ImageName:          "ra-workstation",
 				ImageTag:           "latest",
-				RepoName:           "claude-workstation-images",
+				RepoName:           "ra-workstation-images",
 				AutoSleepHours:     &sleep,
 				AutoShutdownHours:  12,
 			},
 		},
 		Secrets: map[string]config.SecretEntry{
-			"claude_oauth": {SecretName: "claude-auth", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
+			"example_secret": {SecretName: "example-secret", EnvVar: "EXAMPLE_TOKEN"},
 		},
 	}
 }
@@ -83,7 +83,7 @@ func TestValidate_MissingRequiredKeys(t *testing.T) {
 
 func TestValidate_SecretEnvVarShape(t *testing.T) {
 	c := fullValidCfg()
-	c.Secrets["claude_oauth"] = config.SecretEntry{SecretName: "x", EnvVar: "not-valid"}
+	c.Secrets["example_secret"] = config.SecretEntry{SecretName: "x", EnvVar: "not-valid"}
 	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "env_var") {
 		t.Errorf("want env_var-shape error, got %v", err)
 	}
@@ -91,7 +91,7 @@ func TestValidate_SecretEnvVarShape(t *testing.T) {
 
 func TestValidate_SecretSecretNameNonEmpty(t *testing.T) {
 	c := fullValidCfg()
-	c.Secrets["claude_oauth"] = config.SecretEntry{SecretName: "", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"}
+	c.Secrets["example_secret"] = config.SecretEntry{SecretName: "", EnvVar: "EXAMPLE_TOKEN"}
 	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "secret_name") {
 		t.Errorf("want secret_name-missing error, got %v", err)
 	}
@@ -99,18 +99,18 @@ func TestValidate_SecretSecretNameNonEmpty(t *testing.T) {
 
 func TestValidate_EnvVarCollision_BetweenSecrets(t *testing.T) {
 	c := fullValidCfg()
-	c.Secrets["claude_apikey"] = config.SecretEntry{SecretName: "anthropic-api-key", EnvVar: "ANTHROPIC_API_KEY"}
-	c.Secrets["dup"] = config.SecretEntry{SecretName: "dup", EnvVar: "ANTHROPIC_API_KEY"}
-	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
+	c.Secrets["another_secret"] = config.SecretEntry{SecretName: "another-secret", EnvVar: "ANOTHER_TOKEN"}
+	c.Secrets["dup"] = config.SecretEntry{SecretName: "dup", EnvVar: "ANOTHER_TOKEN"}
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "ANOTHER_TOKEN") {
 		t.Errorf("want collision error, got %v", err)
 	}
 }
 
 func TestValidate_EnvVarCollision_SecretAndEnv(t *testing.T) {
 	c := fullValidCfg()
-	c.Secrets["claude_apikey"] = config.SecretEntry{SecretName: "anthropic-api-key", EnvVar: "ANTHROPIC_API_KEY"}
-	c.Env = map[string]string{"ANTHROPIC_API_KEY": "whatever"}
-	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
+	c.Secrets["another_secret"] = config.SecretEntry{SecretName: "another-secret", EnvVar: "ANOTHER_TOKEN"}
+	c.Env = map[string]string{"ANOTHER_TOKEN": "whatever"}
+	if err := config.Validate(c, nil); err == nil || !strings.Contains(err.Error(), "ANOTHER_TOKEN") {
 		t.Errorf("want collision error between secret and env, got %v", err)
 	}
 }

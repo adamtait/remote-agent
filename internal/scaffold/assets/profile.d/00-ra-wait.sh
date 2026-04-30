@@ -6,8 +6,8 @@
 # Why this exists:
 #   sshd (started by the base image's 100-series script) accepts connections
 #   before our 200_ra-setup.sh finishes writing /run/ra/env. A login that
-#   lands in that window would have no CLAUDE_CODE_OAUTH_TOKEN / GH_TOKEN in
-#   the shell environment. This script waits for the entrypoint's sentinel
+#   lands in that window would have no plugin-fetched secrets in the shell
+#   environment. This script waits for the entrypoint's sentinel
 #   (/run/ra/ready), then sources the env file, before /etc/profile moves on
 #   to any user-provided profile.d scripts.
 #

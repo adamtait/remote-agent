@@ -20,7 +20,7 @@ var reservedEnvVars = []string{
 }
 
 // Validate asserts the merged Config is complete and internally consistent.
-// pluginErrs are additional errors from registered plugins (e.g. claude validation).
+// pluginErrs are additional errors from registered plugins.
 // Run from cmd/root.go's PersistentPreRunE for every command except setup.
 func Validate(cfg *Config, pluginErrs []string) error {
 	var errs []string

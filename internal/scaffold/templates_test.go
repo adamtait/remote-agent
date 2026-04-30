@@ -12,11 +12,11 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		GitUserName:  "Alice",
 		GitUserEmail: "alice@example.com",
 		Region:       "us-central1", MachineType: "e2-standard-4", DiskSizeGB: 50,
-		ClusterName: "claude-dev-cluster", ConfigName: "claude-dev-config",
-		ServiceAccountName: "claude-workstation-sa",
-		ImageName:          "claude-code-workstation",
+		ClusterName: "ra-dev-cluster", ConfigName: "ra-dev-config",
+		ServiceAccountName: "ra-workstation-sa",
+		ImageName:          "ra-workstation",
 		ImageTag:           "latest",
-		RepoName:           "claude-workstation-images",
+		RepoName:           "ra-workstation-images",
 		AutoSleepHours:     2,
 		AutoShutdownHours:  12,
 	}
@@ -31,12 +31,12 @@ func TestRenderUserConfig_EmitsAllRequiredKeysUncommented(t *testing.T) {
 		`    region: us-central1`,
 		`    machine_type: e2-standard-4`,
 		`    disk_size_gb: 50`,
-		`    cluster_name: claude-dev-cluster`,
-		`    config_name: claude-dev-config`,
-		`    service_account_name: claude-workstation-sa`,
-		`    image_name: claude-code-workstation`,
+		`    cluster_name: ra-dev-cluster`,
+		`    config_name: ra-dev-config`,
+		`    service_account_name: ra-workstation-sa`,
+		`    image_name: ra-workstation`,
 		`    image_tag: latest`,
-		`    repo_name: claude-workstation-images`,
+		`    repo_name: ra-workstation-images`,
 		`    auto_sleep_hours: 2`,
 		`    auto_shutdown_hours: 12`,
 		`plugins: {}`,
@@ -79,7 +79,7 @@ func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T)
 		`#   workstation:`,
 		`#     machine_type: e2-standard-8`,
 		`# plugins:`,
-		`#   claude:`,
+		`#   <plugin-name>:`,
 		`#     enabled: false`,
 		`# secrets:`,
 		`# env:`,
@@ -92,7 +92,7 @@ func TestRenderProjectConfig_EmitsRequiredKeysAndCommentedExamples(t *testing.T)
 
 func TestRenderProjectConfig_ZeroValuesStillShowCommentedExamples(t *testing.T) {
 	got := scaffold.RenderProjectConfig(scaffold.ProjectValues{})
-	for _, want := range []string{`# gcloud:`, `#   workstation:`, `# plugins:`, `#   claude:`, `# secrets:`, `# env:`} {
+	for _, want := range []string{`# gcloud:`, `#   workstation:`, `# plugins:`, `#   <plugin-name>:`, `# secrets:`, `# env:`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing commented example %q", want)
 		}

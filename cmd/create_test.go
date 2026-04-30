@@ -26,10 +26,11 @@ func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
 	}
 }
 
-func TestBuildArgs_NoClaudeBuildArg(t *testing.T) {
-	// Claude install moved to first-boot runtime — there should no longer be
-	// a RA_CLAUDE_ENABLED build arg. The runtime gate lives in the container
-	// env, set by buildContainerEnv.
+func TestBuildArgs_NoLegacyPluginBuildArgs(t *testing.T) {
+	// Plugin enable/disable lives in the container env (set by
+	// buildContainerEnv) and is read at runtime by each plugin's startup
+	// script. No plugin-specific build args should leak into buildx.
+	// RA_CLAUDE_ENABLED is the historical example we guard against.
 	got := dockerBuildArgs("example.com/img:tag")
 	for _, a := range got {
 		if strings.Contains(a, "RA_CLAUDE_ENABLED") {
@@ -80,8 +81,8 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 			},
 		},
 		Secrets: map[string]config.SecretEntry{
-			"claude_oauth": {SecretName: "claude-auth", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
-			"my_extra":     {SecretName: "ex", EnvVar: "MY_EXTRA"},
+			"example_secret": {SecretName: "example-secret", EnvVar: "EXAMPLE_TOKEN"},
+			"my_extra":       {SecretName: "ex", EnvVar: "MY_EXTRA"},
 		},
 		Env: map[string]string{"STATIC_KEY": "abc"},
 	}
@@ -94,14 +95,14 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		}
 	}
 	must := map[string]string{
-		"GCP_PROJECT_ID":              "p",
-		"GIT_USER_NAME":               "Alice",
-		"GIT_USER_EMAIL":              "a@x.com",
-		"RA_SECRET_CLAUDE_OAUTH_NAME": "claude-auth",
-		"RA_SECRET_CLAUDE_OAUTH_VAR":  "CLAUDE_CODE_OAUTH_TOKEN",
-		"RA_SECRET_MY_EXTRA_NAME":     "ex",
-		"RA_SECRET_MY_EXTRA_VAR":      "MY_EXTRA",
-		"STATIC_KEY":                  "abc",
+		"GCP_PROJECT_ID":                "p",
+		"GIT_USER_NAME":                 "Alice",
+		"GIT_USER_EMAIL":                "a@x.com",
+		"RA_SECRET_EXAMPLE_SECRET_NAME": "example-secret",
+		"RA_SECRET_EXAMPLE_SECRET_VAR":  "EXAMPLE_TOKEN",
+		"RA_SECRET_MY_EXTRA_NAME":       "ex",
+		"RA_SECRET_MY_EXTRA_VAR":        "MY_EXTRA",
+		"STATIC_KEY":                    "abc",
 	}
 	for k, v := range must {
 		if m[k] != v {
@@ -109,7 +110,7 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 		}
 	}
 	parts := strings.Split(m["RA_SECRETS"], "|")
-	wantSet := map[string]bool{"claude_oauth": true, "my_extra": true}
+	wantSet := map[string]bool{"example_secret": true, "my_extra": true}
 	for _, p := range parts {
 		if !wantSet[p] {
 			t.Errorf("unexpected RA_SECRETS entry: %q", p)
