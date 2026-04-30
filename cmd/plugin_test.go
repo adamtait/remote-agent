@@ -121,53 +121,6 @@ func TestChooseInstallLevel_Interactive_Project(t *testing.T) {
 	}
 }
 
-// ── chooseSecretLevel tests ───────────────────────────────────────────────────
-
-func TestChooseSecretLevel_DefaultsToPluginLevel(t *testing.T) {
-	cases := []struct {
-		pluginLevel string
-		input       string // "\n" = accept default
-		want        string
-	}{
-		{"user", "\n", "user"},
-		{"project", "\n", "project"},
-	}
-	for _, tc := range cases {
-		r := bufio.NewReader(strings.NewReader(tc.input))
-		var out bytes.Buffer
-		got, err := chooseSecretLevel(r, &out, tc.pluginLevel)
-		if err != nil {
-			t.Fatalf("pluginLevel=%q: unexpected error: %v", tc.pluginLevel, err)
-		}
-		if got != tc.want {
-			t.Errorf("pluginLevel=%q: got %q, want %q", tc.pluginLevel, got, tc.want)
-		}
-	}
-}
-
-func TestChooseSecretLevel_CanOverride(t *testing.T) {
-	// Plugin at user level, user picks "2" → project-level secrets.
-	r := bufio.NewReader(strings.NewReader("2\n"))
-	var out bytes.Buffer
-	got, err := chooseSecretLevel(r, &out, "user")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "project" {
-		t.Errorf("got %q, want project", got)
-	}
-
-	// Plugin at project level, user picks "1" → user-level secrets.
-	r = bufio.NewReader(strings.NewReader("1\n"))
-	got, err = chooseSecretLevel(r, &out, "project")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "user" {
-		t.Errorf("got %q, want user", got)
-	}
-}
-
 // ── resolveSecretNames tests ──────────────────────────────────────────────────
 
 func makePluginWithSecret(t *testing.T, name, secretName, defaultSecretName string) *plugins.FilePlugin {
