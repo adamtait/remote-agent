@@ -1,0 +1,8 @@
+name: atelier
+version: "1.0.0"
+description: "Installs the Atelier VS Code extension (kanban board for Claude Code tasks). Pair with the claude plugin for full functionality."
+config:
+  - name: enabled
+    type: bool
+    description: "Install the Atelier VS Code extension on the workstation?"
+    default: false
