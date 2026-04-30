@@ -7,9 +7,29 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adamtait/remote-agent/internal/config"
 )
+
+func TestElapsedHuman(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{12 * time.Second, "12s"},
+		// Sub-second remainder is truncated, not rounded.
+		{4*time.Minute + 11*time.Second + 900*time.Millisecond, "4m11s"},
+		{4*time.Minute + 12*time.Second, "4m12s"},
+		{1*time.Hour + 3*time.Minute + 7*time.Second, "1h3m7s"},
+	}
+	for _, tc := range cases {
+		if got := elapsedHuman(tc.d); got != tc.want {
+			t.Errorf("elapsedHuman(%s) = %q, want %q", tc.d, got, tc.want)
+		}
+	}
+}
 
 func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
 	got := dockerBuildArgs("example.com/img:tag")

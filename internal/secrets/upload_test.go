@@ -29,6 +29,7 @@ func (f *fakeRunner) RunWithStdin(stdin io.Reader, args ...string) error {
 	return nil
 }
 func (f *fakeRunner) Output(args ...string) ([]byte, error) { return nil, nil }
+func (f *fakeRunner) RunSoft(args ...string) error          { return f.Run(args...) }
 func (f *fakeRunner) RunCapture(args ...string) (string, error) {
 	return "", f.Run(args...)
 }
