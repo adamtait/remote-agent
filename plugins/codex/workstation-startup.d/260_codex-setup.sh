@@ -49,6 +49,17 @@ case "${RA_PLUGIN_CODEX_AUTH_PROVIDER:-}" in
                 chown "${USER_NAME}:${USER_NAME}" "${AUTH_FILE}"
                 chmod 0600 "${AUTH_FILE}"
                 log "wrote ${AUTH_FILE}"
+                # base64 may decode garbage successfully; verify the result parses
+                # as JSON when a parser is available. Skip silently if not — the
+                # decode succeeded and codex itself will surface bad JSON later.
+                if command -v python3 >/dev/null 2>&1; then
+                    python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \
+                        "${AUTH_FILE}" 2>/dev/null \
+                        || log "warning: ${AUTH_FILE} is not valid JSON; auth may fail"
+                elif command -v jq >/dev/null 2>&1; then
+                    jq empty "${AUTH_FILE}" 2>/dev/null \
+                        || log "warning: ${AUTH_FILE} is not valid JSON; auth may fail"
+                fi
             else
                 rm -f "${AUTH_FILE}"
                 log "failed to base64-decode CODEX_AUTH_JSON_B64; auth may fail"
