@@ -107,6 +107,47 @@ func TestClient_Describe_ParsesFields(t *testing.T) {
 	}
 }
 
+func TestClient_ListAll_ParsesFullResourceName(t *testing.T) {
+	fake := &fakeRunner{
+		outputs: map[string][]byte{
+			"workstations list --project proj --region us-central1 --format value(name,state)": []byte(
+				"projects/proj/locations/us-central1/workstationClusters/cl/workstationConfigs/cfg-a/workstations/ws-1\tSTATE_RUNNING\n" +
+					"projects/proj/locations/us-central1/workstationClusters/cl/workstationConfigs/cfg-b/workstations/ws-2\tSTATE_STOPPED\n",
+			),
+		},
+	}
+	client := gcloud.NewClient(fake)
+	list, err := client.ListAll("proj", "us-central1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 workstations, got %d", len(list))
+	}
+	if list[0].ProjectName != "proj" || list[0].ConfigName != "cfg-a" || list[0].Name != "ws-1" || list[0].State != "STATE_RUNNING" {
+		t.Errorf("first entry: got %+v", list[0])
+	}
+	if list[1].ProjectName != "proj" || list[1].ConfigName != "cfg-b" || list[1].Name != "ws-2" || list[1].State != "STATE_STOPPED" {
+		t.Errorf("second entry: got %+v", list[1])
+	}
+}
+
+func TestClient_ListAll_EmptyOutput(t *testing.T) {
+	fake := &fakeRunner{
+		outputs: map[string][]byte{
+			"workstations list --project proj --region us-central1 --format value(name,state)": []byte(""),
+		},
+	}
+	client := gcloud.NewClient(fake)
+	list, err := client.ListAll("proj", "us-central1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Errorf("expected 0 workstations, got %d", len(list))
+	}
+}
+
 func TestClient_Stop_CallsCorrectArgs(t *testing.T) {
 	fake := &fakeRunner{}
 	client := gcloud.NewClient(fake)
