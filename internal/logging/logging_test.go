@@ -197,7 +197,7 @@ func TestTeeHandler_WithGroup_PropagatesBoth(t *testing.T) {
 
 func TestStep_DoneFuncNilError(t *testing.T) {
 	var buf bytes.Buffer
-	done := Step("test-step", 1, "doing something", &buf)
+	done := Step("test-step", 1, 0, "doing something", &buf)
 
 	if !strings.Contains(buf.String(), "doing something") {
 		t.Errorf("Step did not write message to out; got: %q", buf.String())
@@ -209,7 +209,7 @@ func TestStep_DoneFuncNilError(t *testing.T) {
 
 func TestStep_DoneFuncWithError(t *testing.T) {
 	var buf bytes.Buffer
-	done := Step("err-step", 2, "failing step", &buf)
+	done := Step("err-step", 2, 0, "failing step", &buf)
 
 	// Must not panic.
 	done(errors.New("something went wrong"))
@@ -217,10 +217,26 @@ func TestStep_DoneFuncWithError(t *testing.T) {
 
 func TestStep_ColorCode(t *testing.T) {
 	var buf bytes.Buffer
-	Step("color-step", 3, "colorful", &buf)
+	Step("color-step", 3, 0, "colorful", &buf)
 	// The ANSI blue marker must appear in the output.
 	if !strings.Contains(buf.String(), "\033[1;34m==>\033[0m") {
 		t.Errorf("expected ANSI color code in output; got: %q", buf.String())
+	}
+}
+
+func TestStep_RendersTotalCounter(t *testing.T) {
+	var buf bytes.Buffer
+	Step("counter-step", 5, 10, "something", &buf)
+	if !strings.Contains(buf.String(), "[5/10] something") {
+		t.Errorf("expected '[5/10] something' in output; got: %q", buf.String())
+	}
+}
+
+func TestStep_OmitsCounterWhenTotalZero(t *testing.T) {
+	var buf bytes.Buffer
+	Step("plain-step", 1, 0, "something", &buf)
+	if strings.Contains(buf.String(), "[1/0]") || strings.Contains(buf.String(), "[1/") {
+		t.Errorf("expected no counter prefix when total=0; got: %q", buf.String())
 	}
 }
 
@@ -273,6 +289,66 @@ func TestOpenLogFile_CloseFnIdempotent(t *testing.T) {
 }
 
 // --- Init (integration smoke test) ---
+
+func TestLogPath_NoFile(t *testing.T) {
+	t.Cleanup(func() {
+		discard := slog.New(slog.NewTextHandler(io.Discard, nil))
+		pkgLogger.Store(discard)
+		prevCleanup.Store((func())(nil))
+		pkgLogPath.Store(nil)
+	})
+	cleanup, err := Init(Config{NoFile: true, Command: "test"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer cleanup()
+	if got := LogPath(); got != "" {
+		t.Errorf("LogPath() with NoFile=true = %q, want empty", got)
+	}
+}
+
+func TestLogPath_WithFile(t *testing.T) {
+	t.Cleanup(func() {
+		discard := slog.New(slog.NewTextHandler(io.Discard, nil))
+		pkgLogger.Store(discard)
+		prevCleanup.Store((func())(nil))
+		pkgLogPath.Store(nil)
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.log")
+	cleanup, err := Init(Config{File: path, Command: "test"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer cleanup()
+	if got := LogPath(); got != path {
+		t.Errorf("LogPath() = %q, want %q", got, path)
+	}
+}
+
+func TestTerminalHandler_DropsBelowWarn(t *testing.T) {
+	cases := []struct {
+		level slog.Level
+		want  bool // true = should appear in terminal output
+	}{
+		{slog.LevelDebug, false},
+		{slog.LevelInfo, false},
+		{slog.LevelWarn, true},
+		{slog.LevelError, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.level.String(), func(t *testing.T) {
+			buf := new(bytes.Buffer)
+			h := newTerminalHandler(buf)
+			logger := slog.New(h)
+			logger.Log(context.Background(), tc.level, "step_start", "step", "test")
+			gotMsg := buf.Len() > 0
+			if gotMsg != tc.want {
+				t.Errorf("level=%s: wrote=%v, want=%v (output=%q)", tc.level, gotMsg, tc.want, buf.String())
+			}
+		})
+	}
+}
 
 func TestInit_SmokeSetsLogger(t *testing.T) {
 	t.Cleanup(func() {

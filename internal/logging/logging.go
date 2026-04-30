@@ -18,13 +18,17 @@ var buildVersion = "dev"
 
 // Config configures the logging system for one CLI invocation.
 type Config struct {
-	Level     slog.Level // terminal display threshold; default Info
-	File      string     // explicit log file path; "" = auto-generate
-	Format    string     // "json" (default) or "text"
-	NoFile    bool       // true = disable file output entirely
-	SessionID string     // auto-generated if blank
-	Command   string     // cobra command name e.g. "create"
-	Project   string     // gcloud project id (may be "" before config loads)
+	// Level is retained for back-compat but no longer drives the terminal
+	// display threshold — the terminal handler is fixed at Warn so step
+	// lifecycle Info logs do not interleave with human-readable "==>"
+	// output. Debug-level records always reach the file log.
+	Level     slog.Level
+	File      string // explicit log file path; "" = auto-generate
+	Format    string // "json" (default) or "text"
+	NoFile    bool   // true = disable file output entirely
+	SessionID string // auto-generated if blank
+	Command   string // cobra command name e.g. "create"
+	Project   string // gcloud project id (may be "" before config loads)
 }
 
 // pkgLogger is the package-level logger, goroutine-safe via atomic.Pointer.
@@ -33,6 +37,10 @@ var pkgLogger atomic.Pointer[slog.Logger]
 // prevCleanup stores the cleanup func from the previous Init call so that
 // calling Init a second time closes the old log file before opening a new one.
 var prevCleanup atomic.Value
+
+// pkgLogPath stores the active session's log file path, set during Init and
+// readable via LogPath. Empty when NoFile is true or before Init has run.
+var pkgLogPath atomic.Pointer[string]
 
 func init() {
 	// Initialize with a discard logger so L() is always safe to call.
@@ -46,6 +54,33 @@ func L() *slog.Logger {
 	return pkgLogger.Load()
 }
 
+// LogPath returns the absolute path of the active session's log file, or
+// "" if Init has not run, was called with NoFile, or used a discard
+// logger. Safe to call from any goroutine.
+func LogPath() string {
+	if p := pkgLogPath.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// newTerminalHandler builds the human-facing slog handler that writes to w.
+// Fixed at Warn: step_start / step_ok / session_start / gcloud failed all log
+// at Info or below and would otherwise interleave with the human-readable
+// "==>" lines. The file handler captures everything at Debug.
+func newTerminalHandler(w io.Writer) slog.Handler {
+	return slog.NewTextHandler(w, &slog.HandlerOptions{
+		Level: slog.LevelWarn,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Remove time key at the top level (redundant on a live terminal).
+			if len(groups) == 0 && a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+}
+
 // Init configures the package-level logger from cfg. It is idempotent:
 // calling it again closes the previous log file and resets state. Returns
 // a cleanup func that logs session_end and closes the log file.
@@ -54,23 +89,15 @@ func Init(cfg Config) (cleanup func(), err error) {
 	if fn, ok := prevCleanup.Load().(func()); ok && fn != nil {
 		fn()
 	}
+	// Reset path so callers don't see a stale value when re-initializing
+	// in NoFile mode (e.g. tests).
+	pkgLogPath.Store(nil)
 
 	if cfg.SessionID == "" {
 		cfg.SessionID = NewSessionID()
 	}
 
-	// Build terminal handler — TextHandler on stderr, removes top-level time.
-	terminalOpts := &slog.HandlerOptions{
-		Level: cfg.Level,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Remove time key at the top level (redundant on a live terminal).
-			if len(groups) == 0 && a.Key == slog.TimeKey {
-				return slog.Attr{}
-			}
-			return a
-		},
-	}
-	termHandler := slog.NewTextHandler(os.Stderr, terminalOpts)
+	termHandler := newTerminalHandler(os.Stderr)
 
 	// Build file handler.
 	var (
@@ -101,6 +128,8 @@ func Init(cfg Config) (cleanup func(), err error) {
 				return nil, err
 			}
 		}
+		path := f.Name()
+		pkgLogPath.Store(&path)
 
 		fileReplaceAttr := func(groups []string, a slog.Attr) slog.Attr {
 			// Convert time.Duration values to float64 seconds and rename key with _s suffix.
@@ -157,12 +186,19 @@ func Init(cfg Config) (cleanup func(), err error) {
 
 // Step prints the colored "==>" step marker to out, logs step_start at
 // Info, and returns a done func the caller invokes after the step
-// completes (logs step_ok or step_failed with duration).
-func Step(name string, num int, msg string, out io.Writer) func(err error) {
-	StepPrintf(out, msg)
+// completes (logs step_ok or step_failed with duration). When total > 0
+// the marker is rendered as "==> [num/total] msg" so the user can see
+// overall pipeline progress.
+func Step(name string, num, total int, msg string, out io.Writer) func(err error) {
+	if total > 0 {
+		StepPrintf(out, fmt.Sprintf("[%d/%d] %s", num, total, msg))
+	} else {
+		StepPrintf(out, msg)
+	}
 	L().LogAttrs(context.Background(), slog.LevelInfo, "step_start",
 		slog.String("step", name),
 		slog.Int("step_num", num),
+		slog.Int("step_total", total),
 	)
 	start := time.Now()
 	return func(err error) {
@@ -171,6 +207,7 @@ func Step(name string, num int, msg string, out io.Writer) func(err error) {
 			L().LogAttrs(context.Background(), slog.LevelInfo, "step_failed",
 				slog.String("step", name),
 				slog.Int("step_num", num),
+				slog.Int("step_total", total),
 				slog.Float64("duration_s", dur.Seconds()),
 				slog.String("error", err.Error()),
 			)
@@ -178,6 +215,7 @@ func Step(name string, num int, msg string, out io.Writer) func(err error) {
 			L().LogAttrs(context.Background(), slog.LevelInfo, "step_ok",
 				slog.String("step", name),
 				slog.Int("step_num", num),
+				slog.Int("step_total", total),
 				slog.Float64("duration_s", dur.Seconds()),
 			)
 		}

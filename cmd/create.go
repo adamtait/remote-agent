@@ -22,6 +22,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// totalCreateSteps is the count of numbered pipeline phases in runCreate,
+// rendered in the "==> [N/M] ..." progress prefix. Update if you add or
+// remove a Step() call.
+const totalCreateSteps = 10
+
 // Bindings on a freshly-created service account can briefly fail with
 // "Service account ... does not exist" while IAM propagates. Up to
 // saBindingAttempts × saBindingDelay = 30s of backoff covers the typical
@@ -90,6 +95,7 @@ func init() {
 }
 
 func runCreate(cmd *cobra.Command, args []string) (retErr error) {
+	startedAt := time.Now()
 	ws := &cfg.Gcloud.Workstation
 
 	requestedName, _ := cmd.Flags().GetString("name")
@@ -209,7 +215,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	// Step 1 — Enable APIs
-	done := logging.Step("enable_apis", 1, "Enabling required GCP APIs...", cmd.OutOrStdout())
+	done := logging.Step("enable_apis", 1, totalCreateSteps, "Enabling required GCP APIs...", cmd.OutOrStdout())
 	if err := r.Run("services", "enable",
 		"workstations.googleapis.com",
 		"artifactregistry.googleapis.com",
@@ -228,7 +234,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	// OAuth token refresh, and commands like `gcloud workstations ssh` fail
 	// with SERVICE_DISABLED if that policy is on and the API is off. Try
 	// best-effort; surface a warning but don't block the rest of setup.
-	if err := r.Run("services", "enable", "reauth.googleapis.com",
+	if err := r.RunSoft("services", "enable", "reauth.googleapis.com",
 		"--project", cfg.Gcloud.Project, "--quiet"); err != nil {
 		logging.WarnPrintf(cmd.OutOrStdout(), "could not enable reauth.googleapis.com (%v).\n"+
 			"      This is only required if your org enforces a session/reauth policy.\n"+
@@ -237,7 +243,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	// Step 2 — Artifact Registry repo
-	done = logging.Step("ensure_ar_repo", 2, fmt.Sprintf("Ensuring Artifact Registry repo '%s'...", ws.RepoName), cmd.OutOrStdout())
+	done = logging.Step("ensure_ar_repo", 2, totalCreateSteps, fmt.Sprintf("Ensuring Artifact Registry repo '%s'...", ws.RepoName), cmd.OutOrStdout())
 	if !r.Check("artifacts", "repositories", "describe", ws.RepoName, "--location", ws.Region, "--project", cfg.Gcloud.Project) {
 		if err := r.Run("artifacts", "repositories", "create", ws.RepoName,
 			"--repository-format=docker",
@@ -251,7 +257,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	done(nil)
 
 	// Step 3 — Build and push image
-	done = logging.Step("build_image", 3, fmt.Sprintf("Building image %s...", imageURI), cmd.OutOrStdout())
+	done = logging.Step("build_image", 3, totalCreateSteps, fmt.Sprintf("Building image %s...", imageURI), cmd.OutOrStdout())
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -286,7 +292,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Step 4 — Create any secrets whose values we collected during pre-flight.
 	// Existing secrets were skipped already; this loop only writes new ones.
-	done = logging.Step("ensure_secrets", 4, fmt.Sprintf("Creating %d new GCP secret(s)...", len(pendingSecrets)), cmd.OutOrStdout())
+	done = logging.Step("ensure_secrets", 4, totalCreateSteps, fmt.Sprintf("Creating %d new GCP secret(s)...", len(pendingSecrets)), cmd.OutOrStdout())
 	for _, ps := range pendingSecrets {
 		if err := secrets.CreateFromValue(r, cfg.Gcloud.Project, ps.gcpName, ps.value); err != nil {
 			done(err)
@@ -296,7 +302,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	done(nil)
 
 	// Step 5 — Service account and IAM
-	done = logging.Step("ensure_service_acct", 5, fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail), cmd.OutOrStdout())
+	done = logging.Step("ensure_service_acct", 5, totalCreateSteps, fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail), cmd.OutOrStdout())
 	if !r.Check("iam", "service-accounts", "describe", serviceAccountEmail, "--project", cfg.Gcloud.Project) {
 		if err := r.Run("iam", "service-accounts", "create", ws.ServiceAccountName,
 			"--display-name=Claude Workstation SA",
@@ -333,7 +339,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	done(nil)
 
 	// Bind Artifact Registry repo
-	done = logging.Step("bind_ar_iam", 6, fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName), cmd.OutOrStdout())
+	done = logging.Step("bind_ar_iam", 6, totalCreateSteps, fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName), cmd.OutOrStdout())
 	if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
 		"artifacts", "repositories", "add-iam-policy-binding", ws.RepoName,
 		"--location", ws.Region,
@@ -347,7 +353,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	done(nil)
 
 	// Bind project-level roles
-	done = logging.Step("bind_project_iam", 7, "Granting logWriter and metricWriter on project...", cmd.OutOrStdout())
+	done = logging.Step("bind_project_iam", 7, totalCreateSteps, "Granting logWriter and metricWriter on project...", cmd.OutOrStdout())
 	for _, role := range []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"} {
 		if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
 			"projects", "add-iam-policy-binding", cfg.Gcloud.Project,
@@ -361,7 +367,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	done(nil)
 
 	// Step 8 — Workstations cluster
-	done = logging.Step("ensure_cluster", 8, fmt.Sprintf("Ensuring workstations cluster '%s'...", ws.ClusterName), cmd.OutOrStdout())
+	done = logging.Step("ensure_cluster", 8, totalCreateSteps, fmt.Sprintf("Ensuring workstations cluster '%s'...", ws.ClusterName), cmd.OutOrStdout())
 	if !r.Check("workstations", "clusters", "describe", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project) {
 		logging.WarnPrintf(cmd.OutOrStdout(), "Creating cluster — this takes ~20 minutes on first run.")
 		if err := r.Run("workstations", "clusters", "create", ws.ClusterName,
@@ -374,7 +380,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	done(nil)
 
 	// Step 9 — Workstations config
-	done = logging.Step("ensure_config", 9, fmt.Sprintf("Ensuring workstations config '%s'...", ws.ConfigName), cmd.OutOrStdout())
+	done = logging.Step("ensure_config", 9, totalCreateSteps, fmt.Sprintf("Ensuring workstations config '%s'...", ws.ConfigName), cmd.OutOrStdout())
 	containerEnv := buildContainerEnv(cfg)
 
 	configExists := r.Check("workstations", "configs", "describe", ws.ConfigName,
@@ -426,7 +432,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	done(nil)
 
 	// Step 10 — Resolve a unique workstation name and create it.
-	done = logging.Step("create_workstation", 10, "Resolving workstation name and creating...", cmd.OutOrStdout())
+	done = logging.Step("create_workstation", 10, totalCreateSteps, "Resolving workstation name and creating...", cmd.OutOrStdout())
 	existing, err := client.List(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName)
 	if err != nil {
 		done(err)
@@ -506,7 +512,31 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 		workstationName,
 	)
 
+	fmt.Fprintf(cmd.OutOrStdout(), "Total time: %s\n", elapsedHuman(time.Since(startedAt)))
+	if p := logging.LogPath(); p != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Log: %s\n", p)
+	}
+
 	return nil
+}
+
+// elapsedHuman formats a duration as human-friendly "MmSSs" or "Ss" with
+// sub-second resolution dropped. Examples: 4m12s, 12s, 1h3m.
+func elapsedHuman(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := int(d / time.Hour)
+	d -= time.Duration(h) * time.Hour
+	m := int(d / time.Minute)
+	d -= time.Duration(m) * time.Minute
+	s := int(d / time.Second)
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh%dm%ds", h, m, s)
+	case m > 0:
+		return fmt.Sprintf("%dm%ds", m, s)
+	default:
+		return fmt.Sprintf("%ds", s)
+	}
 }
 
 // dockerRunner runs docker commands with stdout/stderr forwarded to the provided writers.

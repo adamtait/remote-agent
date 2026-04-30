@@ -129,6 +129,41 @@ func (r LoggingRunner) RunWithStdin(stdin io.Reader, args ...string) error {
 	return err
 }
 
+// RunSoft executes gcloud like Run, but on failure logs at Debug instead
+// of Error. Use for known-optional calls where a normal Error log line
+// would mislead the user — the caller is expected to surface its own
+// WARN message describing what was tried and why it didn't matter.
+func (r LoggingRunner) RunSoft(args ...string) error {
+	start := time.Now()
+	l := r.logger.With(
+		slog.String("op", "gcloud.RunSoft"),
+		slog.String("subcmd", gcloudSubcmd(args)),
+		slog.Any("args", sanitizeArgs(args)),
+	)
+	l.Debug("gcloud starting")
+
+	var stderrBuf bytes.Buffer
+	cmd := exec.Command("gcloud", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	cmd.Stdin = os.Stdin
+	err := cmd.Run()
+
+	stderrStr := strings.TrimSpace(stderrBuf.String())
+	dur := time.Since(start)
+	attrs := []any{slog.Float64("duration_s", dur.Seconds())}
+	if stderrStr != "" {
+		attrs = append(attrs, slog.String("stderr", stderrStr))
+	}
+	if err != nil {
+		attrs = append(attrs, slog.String("error", err.Error()))
+		l.Debug("gcloud soft-fail", attrs...)
+	} else {
+		l.Debug("gcloud ok", attrs...)
+	}
+	return err
+}
+
 // RunCapture executes gcloud like Run, but additionally returns the
 // captured stderr to the caller so it can inspect the error message
 // (e.g. for retry-on-specific-error logic). Stdout/stderr still stream

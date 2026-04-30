@@ -14,6 +14,12 @@ type Runner interface {
 	// RunWithStdin executes gcloud with args, piping stdin into the process.
 	// stdout/stderr stream to the terminal.
 	RunWithStdin(stdin io.Reader, args ...string) error
+	// RunSoft executes gcloud like Run, but on failure logs at Debug
+	// instead of Error. Use for known-optional calls (e.g. enabling an
+	// API the org may not have access to) where the runner's own log
+	// line would otherwise mislead the user into thinking something is
+	// wrong. The caller is expected to surface a WARN/INFO of its own.
+	RunSoft(args ...string) error
 	// RunCapture executes gcloud like Run, additionally returning the
 	// captured stderr so callers can inspect it (e.g. retry on a specific
 	// transient error message).
@@ -40,6 +46,14 @@ func (r RealRunner) RunWithStdin(stdin io.Reader, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = stdin
+	return cmd.Run()
+}
+
+func (r RealRunner) RunSoft(args ...string) error {
+	cmd := exec.Command("gcloud", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
 	return cmd.Run()
 }
 
