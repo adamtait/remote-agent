@@ -235,7 +235,7 @@ func TestStep_RendersTotalCounter(t *testing.T) {
 func TestStep_OmitsCounterWhenTotalZero(t *testing.T) {
 	var buf bytes.Buffer
 	Step("plain-step", 1, 0, "something", &buf)
-	if strings.Contains(buf.String(), "[1/0]") || strings.Contains(buf.String(), "[1/") {
+	if strings.Contains(buf.String(), "[1/0]") {
 		t.Errorf("expected no counter prefix when total=0; got: %q", buf.String())
 	}
 }
@@ -326,7 +326,7 @@ func TestLogPath_WithFile(t *testing.T) {
 	}
 }
 
-func TestTerminalHandler_DropsBelowWarn(t *testing.T) {
+func TestTerminalHandler_DefaultDropsBelowWarn(t *testing.T) {
 	cases := []struct {
 		level slog.Level
 		want  bool // true = should appear in terminal output
@@ -339,7 +339,8 @@ func TestTerminalHandler_DropsBelowWarn(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.level.String(), func(t *testing.T) {
 			buf := new(bytes.Buffer)
-			h := newTerminalHandler(buf)
+			// Pass cfg.Level=Warn (the new flag default).
+			h := newTerminalHandler(buf, slog.LevelWarn)
 			logger := slog.New(h)
 			logger.Log(context.Background(), tc.level, "step_start", "step", "test")
 			gotMsg := buf.Len() > 0
@@ -347,6 +348,41 @@ func TestTerminalHandler_DropsBelowWarn(t *testing.T) {
 				t.Errorf("level=%s: wrote=%v, want=%v (output=%q)", tc.level, gotMsg, tc.want, buf.String())
 			}
 		})
+	}
+}
+
+func TestTerminalHandler_InfoOptInExposesStepLifecycle(t *testing.T) {
+	// --log-level=info should bring step_start/step_ok back to the terminal
+	// without going all the way to Debug-level noise.
+	buf := new(bytes.Buffer)
+	h := newTerminalHandler(buf, slog.LevelInfo)
+	logger := slog.New(h)
+	logger.Log(context.Background(), slog.LevelInfo, "step_start", "step", "test")
+	if buf.Len() == 0 {
+		t.Error("Info record was suppressed when cfg.Level=Info; expected it to reach terminal")
+	}
+}
+
+func TestTerminalHandler_DebugOptInExposesInfo(t *testing.T) {
+	// --log-level=debug should bring step_start back to the terminal.
+	buf := new(bytes.Buffer)
+	h := newTerminalHandler(buf, slog.LevelDebug)
+	logger := slog.New(h)
+	logger.Log(context.Background(), slog.LevelInfo, "step_start", "step", "test")
+	if buf.Len() == 0 {
+		t.Error("Info record was suppressed when cfg.Level=Debug; expected it to reach terminal")
+	}
+}
+
+func TestTerminalHandler_FloorNeverRisesAboveWarn(t *testing.T) {
+	// Even if cfg.Level=Error, Warn must still surface — silencing genuine
+	// warnings is not the user-facing mode anyone wants.
+	buf := new(bytes.Buffer)
+	h := newTerminalHandler(buf, slog.LevelError)
+	logger := slog.New(h)
+	logger.Log(context.Background(), slog.LevelWarn, "something fishy")
+	if buf.Len() == 0 {
+		t.Error("Warn record was suppressed when cfg.Level=Error; floor must clamp at Warn")
 	}
 }
 

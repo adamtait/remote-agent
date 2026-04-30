@@ -3,9 +3,20 @@ package gcloud
 import (
 	"context"
 	"log/slog"
+	"os/exec"
 	"sync"
 	"testing"
 )
+
+// requireGcloud skips the test if the gcloud binary is not on PATH. The
+// integration tests below shell out to gcloud, so on minimal CI runners
+// (or dev machines without the SDK) we'd otherwise fail spuriously.
+func requireGcloud(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("gcloud"); err != nil {
+		t.Skip("gcloud not on PATH; skipping integration test")
+	}
+}
 
 // levelRecorder is a slog.Handler that records the level of every record
 // it sees, so tests can assert which severity was used.
@@ -36,6 +47,7 @@ func (l *levelRecorder) hasLevel(want slog.Level) bool {
 }
 
 func TestLoggingRunner_RunSoft_DowngradesFailureLog(t *testing.T) {
+	requireGcloud(t)
 	rec := &levelRecorder{}
 	r := NewLoggingRunner(slog.New(rec))
 	// "--this-flag-does-not-exist" reliably makes gcloud return a non-zero
@@ -47,6 +59,7 @@ func TestLoggingRunner_RunSoft_DowngradesFailureLog(t *testing.T) {
 }
 
 func TestLoggingRunner_Run_LogsErrorOnFailure(t *testing.T) {
+	requireGcloud(t)
 	rec := &levelRecorder{}
 	r := NewLoggingRunner(slog.New(rec))
 	_ = r.Run("--this-flag-does-not-exist")

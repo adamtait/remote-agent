@@ -19,6 +19,8 @@ func TestElapsedHuman(t *testing.T) {
 	}{
 		{0, "0s"},
 		{12 * time.Second, "12s"},
+		// Sub-second remainder is truncated, not rounded.
+		{4*time.Minute + 11*time.Second + 900*time.Millisecond, "4m11s"},
 		{4*time.Minute + 12*time.Second, "4m12s"},
 		{1*time.Hour + 3*time.Minute + 7*time.Second, "1h3m7s"},
 	}

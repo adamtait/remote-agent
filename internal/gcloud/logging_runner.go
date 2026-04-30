@@ -2,6 +2,7 @@ package gcloud
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -54,78 +55,75 @@ func gcloudSubcmd(args []string) string {
 	return strings.Join(parts, " ")
 }
 
-// Run executes gcloud with args, streaming stdout to the terminal and
-// capturing stderr for logging.
-func (r LoggingRunner) Run(args ...string) error {
+// execOpts configures one execAndLog invocation. Zero-value defaults are
+// what Run uses: stdout to terminal, stdin from terminal, Error-level
+// failure log with "gcloud failed" message.
+type execOpts struct {
+	op       string    // op name attached to every slog record (e.g. "gcloud.Run")
+	stdout   io.Writer // nil → os.Stdout
+	stdin    io.Reader // nil → os.Stdin
+	failLvl  slog.Level
+	failMsg  string
+	args     []string
+}
+
+// execAndLog runs gcloud with opts.args, mirroring stderr to the terminal
+// and capturing it for the slog record. Returns the captured stderr (raw,
+// not trimmed) and the exec error. All public Runner methods are thin
+// wrappers around this helper — see them for the per-call variations.
+func (r LoggingRunner) execAndLog(opts execOpts) (string, error) {
 	start := time.Now()
 	l := r.logger.With(
-		slog.String("op", "gcloud.Run"),
-		slog.String("subcmd", gcloudSubcmd(args)),
-		slog.Any("args", sanitizeArgs(args)),
+		slog.String("op", opts.op),
+		slog.String("subcmd", gcloudSubcmd(opts.args)),
+		slog.Any("args", sanitizeArgs(opts.args)),
 	)
 	l.Debug("gcloud starting")
 
+	stdout := opts.stdout
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	stdin := opts.stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+
 	var stderrBuf bytes.Buffer
-	cmd := exec.Command("gcloud", args...)
-	cmd.Stdout = os.Stdout
+	cmd := exec.Command("gcloud", opts.args...)
+	cmd.Stdout = stdout
 	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
-	cmd.Stdin = os.Stdin
+	cmd.Stdin = stdin
 	err := cmd.Run()
 
-	dur := time.Since(start)
+	stderrStr := strings.TrimSpace(stderrBuf.String())
+	attrs := []any{slog.Float64("duration_s", time.Since(start).Seconds())}
+	if stderrStr != "" {
+		attrs = append(attrs, slog.String("stderr", stderrStr))
+	}
 	if err != nil {
-		errAttrs := []any{
-			slog.Float64("duration_s", dur.Seconds()),
-			slog.String("error", err.Error()),
+		attrs = append(attrs, slog.String("error", err.Error()))
+		failMsg := opts.failMsg
+		if failMsg == "" {
+			failMsg = "gcloud failed"
 		}
-		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
-			errAttrs = append(errAttrs, slog.String("stderr", s))
-		}
-		l.Error("gcloud failed", errAttrs...)
+		l.Log(context.Background(), opts.failLvl, failMsg, attrs...)
 	} else {
-		attrs := []any{slog.Float64("duration_s", dur.Seconds())}
-		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
-			attrs = append(attrs, slog.String("stderr", s))
-		}
 		l.Debug("gcloud ok", attrs...)
 	}
+	return stderrBuf.String(), err
+}
+
+// Run executes gcloud with args, streaming stdout to the terminal and
+// capturing stderr for logging.
+func (r LoggingRunner) Run(args ...string) error {
+	_, err := r.execAndLog(execOpts{op: "gcloud.Run", failLvl: slog.LevelError, args: args})
 	return err
 }
 
 // RunWithStdin executes gcloud with args, piping stdin in, and capturing stderr for logging.
 func (r LoggingRunner) RunWithStdin(stdin io.Reader, args ...string) error {
-	start := time.Now()
-	l := r.logger.With(
-		slog.String("op", "gcloud.RunWithStdin"),
-		slog.String("subcmd", gcloudSubcmd(args)),
-		slog.Any("args", sanitizeArgs(args)),
-	)
-	l.Debug("gcloud starting")
-
-	var stderrBuf bytes.Buffer
-	cmd := exec.Command("gcloud", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
-	cmd.Stdin = stdin
-	err := cmd.Run()
-
-	dur := time.Since(start)
-	if err != nil {
-		errAttrs := []any{
-			slog.Float64("duration_s", dur.Seconds()),
-			slog.String("error", err.Error()),
-		}
-		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
-			errAttrs = append(errAttrs, slog.String("stderr", s))
-		}
-		l.Error("gcloud failed", errAttrs...)
-	} else {
-		attrs := []any{slog.Float64("duration_s", dur.Seconds())}
-		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
-			attrs = append(attrs, slog.String("stderr", s))
-		}
-		l.Debug("gcloud ok", attrs...)
-	}
+	_, err := r.execAndLog(execOpts{op: "gcloud.RunWithStdin", stdin: stdin, failLvl: slog.LevelError, args: args})
 	return err
 }
 
@@ -134,33 +132,12 @@ func (r LoggingRunner) RunWithStdin(stdin io.Reader, args ...string) error {
 // would mislead the user — the caller is expected to surface its own
 // WARN message describing what was tried and why it didn't matter.
 func (r LoggingRunner) RunSoft(args ...string) error {
-	start := time.Now()
-	l := r.logger.With(
-		slog.String("op", "gcloud.RunSoft"),
-		slog.String("subcmd", gcloudSubcmd(args)),
-		slog.Any("args", sanitizeArgs(args)),
-	)
-	l.Debug("gcloud starting")
-
-	var stderrBuf bytes.Buffer
-	cmd := exec.Command("gcloud", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
-	cmd.Stdin = os.Stdin
-	err := cmd.Run()
-
-	stderrStr := strings.TrimSpace(stderrBuf.String())
-	dur := time.Since(start)
-	attrs := []any{slog.Float64("duration_s", dur.Seconds())}
-	if stderrStr != "" {
-		attrs = append(attrs, slog.String("stderr", stderrStr))
-	}
-	if err != nil {
-		attrs = append(attrs, slog.String("error", err.Error()))
-		l.Debug("gcloud soft-fail", attrs...)
-	} else {
-		l.Debug("gcloud ok", attrs...)
-	}
+	_, err := r.execAndLog(execOpts{
+		op:      "gcloud.RunSoft",
+		failLvl: slog.LevelDebug,
+		failMsg: "gcloud soft-fail",
+		args:    args,
+	})
 	return err
 }
 
@@ -169,76 +146,21 @@ func (r LoggingRunner) RunSoft(args ...string) error {
 // (e.g. for retry-on-specific-error logic). Stdout/stderr still stream
 // to the terminal as in Run.
 func (r LoggingRunner) RunCapture(args ...string) (string, error) {
-	start := time.Now()
-	l := r.logger.With(
-		slog.String("op", "gcloud.RunCapture"),
-		slog.String("subcmd", gcloudSubcmd(args)),
-		slog.Any("args", sanitizeArgs(args)),
-	)
-	l.Debug("gcloud starting")
-
-	var stderrBuf bytes.Buffer
-	cmd := exec.Command("gcloud", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
-	cmd.Stdin = os.Stdin
-	err := cmd.Run()
-
-	stderrStr := strings.TrimSpace(stderrBuf.String())
-	dur := time.Since(start)
-	if err != nil {
-		errAttrs := []any{
-			slog.Float64("duration_s", dur.Seconds()),
-			slog.String("error", err.Error()),
-		}
-		if stderrStr != "" {
-			errAttrs = append(errAttrs, slog.String("stderr", stderrStr))
-		}
-		l.Error("gcloud failed", errAttrs...)
-	} else {
-		attrs := []any{slog.Float64("duration_s", dur.Seconds())}
-		if stderrStr != "" {
-			attrs = append(attrs, slog.String("stderr", stderrStr))
-		}
-		l.Debug("gcloud ok", attrs...)
-	}
-	return stderrBuf.String(), err
+	return r.execAndLog(execOpts{op: "gcloud.RunCapture", failLvl: slog.LevelError, args: args})
 }
 
 // Output executes gcloud with args and returns stdout bytes. Stderr streams
 // to the terminal and is also captured for logging.
 func (r LoggingRunner) Output(args ...string) ([]byte, error) {
-	start := time.Now()
-	l := r.logger.With(
-		slog.String("op", "gcloud.Output"),
-		slog.String("subcmd", gcloudSubcmd(args)),
-		slog.Any("args", sanitizeArgs(args)),
-	)
-	l.Debug("gcloud starting")
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd := exec.Command("gcloud", args...)
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
-	err := cmd.Run()
-
-	dur := time.Since(start)
-	if err != nil {
-		errAttrs := []any{
-			slog.Float64("duration_s", dur.Seconds()),
-			slog.String("error", err.Error()),
-		}
-		if s := strings.TrimSpace(stderrBuf.String()); s != "" {
-			errAttrs = append(errAttrs, slog.String("stderr", s))
-		}
-		l.Error("gcloud failed", errAttrs...)
+	var stdoutBuf bytes.Buffer
+	if _, err := r.execAndLog(execOpts{
+		op:      "gcloud.Output",
+		stdout:  &stdoutBuf,
+		failLvl: slog.LevelError,
+		args:    args,
+	}); err != nil {
 		return nil, err
 	}
-	attrs := []any{slog.Float64("duration_s", dur.Seconds())}
-	if s := strings.TrimSpace(stderrBuf.String()); s != "" {
-		attrs = append(attrs, slog.String("stderr", s))
-	}
-	l.Debug("gcloud ok", attrs...)
 	return stdoutBuf.Bytes(), nil
 }
 

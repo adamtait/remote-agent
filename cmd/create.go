@@ -521,9 +521,10 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 }
 
 // elapsedHuman formats a duration as human-friendly "MmSSs" or "Ss" with
-// sub-second resolution dropped. Examples: 4m12s, 12s, 1h3m.
+// sub-second resolution truncated (not rounded — 4m11.9s reads as 4m11s,
+// matching what most stopwatches show). Examples: 4m12s, 12s, 1h3m7s.
 func elapsedHuman(d time.Duration) string {
-	d = d.Round(time.Second)
+	d = d.Truncate(time.Second)
 	h := int(d / time.Hour)
 	d -= time.Duration(h) * time.Hour
 	m := int(d / time.Minute)

@@ -38,7 +38,7 @@ func init() {
 	}
 	reg = plugins.NewRegistry(loaded)
 
-	rootCmd.PersistentFlags().String("log-level", "info", "Log verbosity: debug, info, warn, error")
+	rootCmd.PersistentFlags().String("log-level", "warn", "Terminal log verbosity floor: debug, info, warn, error (file log always at debug)")
 	rootCmd.PersistentFlags().String("log-file", "", "Log file path (default: auto in ~/.local/share/ra/logs/)")
 	rootCmd.PersistentFlags().String("log-format", "json", "Log file format: json or text")
 	rootCmd.PersistentFlags().Bool("no-log-file", false, "Disable file logging")

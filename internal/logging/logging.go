@@ -18,10 +18,11 @@ var buildVersion = "dev"
 
 // Config configures the logging system for one CLI invocation.
 type Config struct {
-	// Level is retained for back-compat but no longer drives the terminal
-	// display threshold — the terminal handler is fixed at Warn so step
+	// Level is the floor for terminal display. Default is Warn so step
 	// lifecycle Info logs do not interleave with human-readable "==>"
-	// output. Debug-level records always reach the file log.
+	// output; pass Info or Debug (e.g. via --log-level) to opt into the
+	// noisy view for debugging. The file handler always captures at
+	// Debug regardless of this setting.
 	Level     slog.Level
 	File      string // explicit log file path; "" = auto-generate
 	Format    string // "json" (default) or "text"
@@ -65,12 +66,19 @@ func LogPath() string {
 }
 
 // newTerminalHandler builds the human-facing slog handler that writes to w.
-// Fixed at Warn: step_start / step_ok / session_start / gcloud failed all log
-// at Info or below and would otherwise interleave with the human-readable
-// "==>" lines. The file handler captures everything at Debug.
-func newTerminalHandler(w io.Writer) slog.Handler {
+// The level floor defaults to Warn so step_start / step_ok / session_start /
+// gcloud failed (all Info or below) do not interleave with the
+// human-readable "==>" lines. Callers can lower the floor via cfg.Level
+// (e.g. --log-level=debug) to opt into the noisy view; the floor never
+// rises above Warn since that would hide genuine WARN/ERROR records.
+// The file handler captures everything at Debug regardless.
+func newTerminalHandler(w io.Writer, level slog.Level) slog.Handler {
+	floor := slog.LevelWarn
+	if level < floor {
+		floor = level
+	}
 	return slog.NewTextHandler(w, &slog.HandlerOptions{
-		Level: slog.LevelWarn,
+		Level: floor,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			// Remove time key at the top level (redundant on a live terminal).
 			if len(groups) == 0 && a.Key == slog.TimeKey {
@@ -97,7 +105,7 @@ func Init(cfg Config) (cleanup func(), err error) {
 		cfg.SessionID = NewSessionID()
 	}
 
-	termHandler := newTerminalHandler(os.Stderr)
+	termHandler := newTerminalHandler(os.Stderr, cfg.Level)
 
 	// Build file handler.
 	var (
