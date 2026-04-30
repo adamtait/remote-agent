@@ -211,6 +211,7 @@ var pluginInstallCmd = &cobra.Command{
 			enableCmd.Stdout = cmd.OutOrStdout()
 			enableCmd.Stderr = cmd.ErrOrStderr()
 			if err := enableCmd.Run(); err != nil {
+				_ = os.RemoveAll(dest)
 				return fmt.Errorf("enabling Secret Manager API: %w", err)
 			}
 		}
