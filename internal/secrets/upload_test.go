@@ -29,6 +29,9 @@ func (f *fakeRunner) RunWithStdin(stdin io.Reader, args ...string) error {
 	return nil
 }
 func (f *fakeRunner) Output(args ...string) ([]byte, error) { return nil, nil }
+func (f *fakeRunner) RunCapture(args ...string) (string, error) {
+	return "", f.Run(args...)
+}
 
 // Compile-time check that fakeRunner implements gcloud.Runner.
 var _ gcloud.Runner = (*fakeRunner)(nil)
@@ -41,5 +44,29 @@ func TestEnsureSecret_AlreadyExists(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "already exists") {
 		t.Errorf("stderr = %q, want already-exists message", stderr.String())
+	}
+}
+
+func TestExists(t *testing.T) {
+	r := &fakeRunner{exists: true}
+	if !Exists(r, "p", "my-secret") {
+		t.Error("Exists returned false when fake reports exists=true")
+	}
+	r.exists = false
+	if Exists(r, "p", "my-secret") {
+		t.Error("Exists returned true when fake reports exists=false")
+	}
+}
+
+func TestCreateFromValue(t *testing.T) {
+	r := &fakeRunner{}
+	if err := CreateFromValue(r, "p", "my-secret", []byte("hunter2")); err != nil {
+		t.Fatal(err)
+	}
+	if r.createdName != "my-secret" {
+		t.Errorf("createdName = %q, want my-secret", r.createdName)
+	}
+	if r.createdValue != "hunter2" {
+		t.Errorf("createdValue = %q, want hunter2", r.createdValue)
 	}
 }
