@@ -35,6 +35,10 @@ func (f *fakeRunner) Output(args ...string) ([]byte, error) {
 	return nil, nil
 }
 
+func (f *fakeRunner) RunCapture(args ...string) (string, error) {
+	return "", f.Run(args...)
+}
+
 func (f *fakeRunner) Check(args ...string) bool {
 	f.calls = append(f.calls, args)
 	if v, ok := f.checks[f.key(args)]; ok {

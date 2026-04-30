@@ -14,6 +14,10 @@ type Runner interface {
 	// RunWithStdin executes gcloud with args, piping stdin into the process.
 	// stdout/stderr stream to the terminal.
 	RunWithStdin(stdin io.Reader, args ...string) error
+	// RunCapture executes gcloud like Run, additionally returning the
+	// captured stderr so callers can inspect it (e.g. retry on a specific
+	// transient error message).
+	RunCapture(args ...string) (stderr string, err error)
 	// Output executes gcloud with args and returns stdout bytes. Stderr streams to terminal.
 	Output(args ...string) ([]byte, error)
 	// Check executes gcloud with args, discarding all output. Returns true if exit code is 0.
@@ -37,6 +41,16 @@ func (r RealRunner) RunWithStdin(stdin io.Reader, args ...string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = stdin
 	return cmd.Run()
+}
+
+func (r RealRunner) RunCapture(args ...string) (string, error) {
+	var stderrBuf bytes.Buffer
+	cmd := exec.Command("gcloud", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	cmd.Stdin = os.Stdin
+	err := cmd.Run()
+	return stderrBuf.String(), err
 }
 
 func (r RealRunner) Output(args ...string) ([]byte, error) {

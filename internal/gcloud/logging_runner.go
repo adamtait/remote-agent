@@ -129,6 +129,47 @@ func (r LoggingRunner) RunWithStdin(stdin io.Reader, args ...string) error {
 	return err
 }
 
+// RunCapture executes gcloud like Run, but additionally returns the
+// captured stderr to the caller so it can inspect the error message
+// (e.g. for retry-on-specific-error logic). Stdout/stderr still stream
+// to the terminal as in Run.
+func (r LoggingRunner) RunCapture(args ...string) (string, error) {
+	start := time.Now()
+	l := r.logger.With(
+		slog.String("op", "gcloud.RunCapture"),
+		slog.String("subcmd", gcloudSubcmd(args)),
+		slog.Any("args", sanitizeArgs(args)),
+	)
+	l.Debug("gcloud starting")
+
+	var stderrBuf bytes.Buffer
+	cmd := exec.Command("gcloud", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	cmd.Stdin = os.Stdin
+	err := cmd.Run()
+
+	stderrStr := strings.TrimSpace(stderrBuf.String())
+	dur := time.Since(start)
+	if err != nil {
+		errAttrs := []any{
+			slog.Float64("duration_s", dur.Seconds()),
+			slog.String("error", err.Error()),
+		}
+		if stderrStr != "" {
+			errAttrs = append(errAttrs, slog.String("stderr", stderrStr))
+		}
+		l.Error("gcloud failed", errAttrs...)
+	} else {
+		attrs := []any{slog.Float64("duration_s", dur.Seconds())}
+		if stderrStr != "" {
+			attrs = append(attrs, slog.String("stderr", stderrStr))
+		}
+		l.Debug("gcloud ok", attrs...)
+	}
+	return stderrBuf.String(), err
+}
+
 // Output executes gcloud with args and returns stdout bytes. Stderr streams
 // to the terminal and is also captured for logging.
 func (r LoggingRunner) Output(args ...string) ([]byte, error) {

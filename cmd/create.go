@@ -14,11 +14,21 @@ import (
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/configwrite"
+	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/naming"
 	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/adamtait/remote-agent/internal/secrets"
 	"github.com/spf13/cobra"
+)
+
+// Bindings on a freshly-created service account can briefly fail with
+// "Service account ... does not exist" while IAM propagates. Up to
+// saBindingAttempts × saBindingDelay = 30s of backoff covers the typical
+// window.
+const (
+	saBindingAttempts = 6
+	saBindingDelay    = 5 * time.Second
 )
 
 func logicalNameToEnvToken(logical string) string {
@@ -79,8 +89,10 @@ func init() {
 	createCmd.Flags().String("name", "", "Workstation name (auto-suffixed on collision); auto-generated memorable name if unset")
 }
 
-func runCreate(cmd *cobra.Command, args []string) error {
+func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	ws := &cfg.Gcloud.Workstation
+
+	requestedName, _ := cmd.Flags().GetString("name")
 
 	for field, val := range map[string]string{
 		"git_user_name":  cfg.Git.UserName,
@@ -139,6 +151,62 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		ws.Region, cfg.Gcloud.Project, ws.RepoName, ws.ImageName, ws.ImageTag)
 	serviceAccountEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com",
 		ws.ServiceAccountName, cfg.Gcloud.Project)
+
+	// Stable order for secret iteration — used by pre-flight, step 4, and step 5.
+	secretLogicalOrder := make([]string, 0, len(cfg.Secrets))
+	for k := range cfg.Secrets {
+		secretLogicalOrder = append(secretLogicalOrder, k)
+	}
+	sort.Strings(secretLogicalOrder)
+
+	// Pipeline-failure resume hint. Registered after validation/config
+	// setup so flag-validation errors (e.g. bad auto_sleep_hours) do not
+	// get the misleading "earlier steps are idempotent" suffix.
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		hint := "re-run `ra create"
+		if requestedName != "" {
+			hint += fmt.Sprintf(" --name %q", requestedName)
+		}
+		hint += "` to resume — earlier steps are idempotent."
+		fmt.Fprintf(cmd.OutOrStderr(), "\n%s\n", hint)
+	}()
+
+	// Pre-flight — collect values for any missing secrets up front so the
+	// pipeline runs unattended once it starts. (Inline prompts mid-pipeline
+	// force the user to babysit a 30s+ image build before they're asked.)
+	type pendingSecret struct {
+		gcpName string
+		value   []byte
+	}
+	var pendingSecrets []pendingSecret
+	// Register the zeroing defer before the prompt loop so values from
+	// successful prompts are still zeroed if a later prompt errors.
+	defer func() {
+		for i := range pendingSecrets {
+			for j := range pendingSecrets[i].value {
+				pendingSecrets[i].value[j] = 0
+			}
+		}
+	}()
+	for _, logical := range secretLogicalOrder {
+		s := cfg.Secrets[logical]
+		if secrets.Exists(r, cfg.Gcloud.Project, s.SecretName) {
+			fmt.Fprintf(os.Stderr, "Secret %q already exists (use 'gcloud secrets versions add' to rotate)\n", s.SecretName)
+			continue
+		}
+		prompt := fmt.Sprintf("Enter value for secret %q (env var %s)", s.SecretName, s.EnvVar)
+		value, err := secrets.PromptValue(prompt, os.Stderr, os.Stdin)
+		if err != nil {
+			return fmt.Errorf("prompting for secret %s: %w", s.SecretName, err)
+		}
+		pendingSecrets = append(pendingSecrets, pendingSecret{
+			gcpName: s.SecretName,
+			value:   value,
+		})
+	}
 
 	// Step 1 — Enable APIs
 	done := logging.Step("enable_apis", 1, "Enabling required GCP APIs...", cmd.OutOrStdout())
@@ -216,19 +284,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 	done(nil)
 
-	// Step 4 — Secrets: ensure every configured secret exists in GCP.
-	done = logging.Step("ensure_secrets", 4, fmt.Sprintf("Ensuring %d GCP secret(s)...", len(cfg.Secrets)), cmd.OutOrStdout())
-	secretLogicalOrder := make([]string, 0, len(cfg.Secrets))
-	for k := range cfg.Secrets {
-		secretLogicalOrder = append(secretLogicalOrder, k)
-	}
-	sort.Strings(secretLogicalOrder)
-	for _, logical := range secretLogicalOrder {
-		s := cfg.Secrets[logical]
-		prompt := fmt.Sprintf("Enter value for secret %q (env var %s)", s.SecretName, s.EnvVar)
-		if err := secrets.EnsureSecret(r, cfg.Gcloud.Project, s.SecretName, prompt, os.Stderr, os.Stdin); err != nil {
+	// Step 4 — Create any secrets whose values we collected during pre-flight.
+	// Existing secrets were skipped already; this loop only writes new ones.
+	done = logging.Step("ensure_secrets", 4, fmt.Sprintf("Creating %d new GCP secret(s)...", len(pendingSecrets)), cmd.OutOrStdout())
+	for _, ps := range pendingSecrets {
+		if err := secrets.CreateFromValue(r, cfg.Gcloud.Project, ps.gcpName, ps.value); err != nil {
 			done(err)
-			return fmt.Errorf("ensuring secret %s: %w", s.SecretName, err)
+			return fmt.Errorf("creating secret %s: %w", ps.gcpName, err)
 		}
 	}
 	done(nil)
@@ -254,8 +316,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			seen[s.SecretName] = true
 		}
 	}
+	// IAM bindings on a freshly-created service account can race
+	// gcloud's eventual-consistency window and fail with "Service
+	// account ... does not exist". RetryOnSANotFound waits it out.
 	for _, secret := range secretNames {
-		if err := r.Run("secrets", "add-iam-policy-binding", secret,
+		if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
+			"secrets", "add-iam-policy-binding", secret,
 			"--member=serviceAccount:"+serviceAccountEmail,
 			"--role=roles/secretmanager.secretAccessor",
 			"--project", cfg.Gcloud.Project,
@@ -268,7 +334,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	// Bind Artifact Registry repo
 	done = logging.Step("bind_ar_iam", 6, fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName), cmd.OutOrStdout())
-	if err := r.Run("artifacts", "repositories", "add-iam-policy-binding", ws.RepoName,
+	if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
+		"artifacts", "repositories", "add-iam-policy-binding", ws.RepoName,
 		"--location", ws.Region,
 		"--member=serviceAccount:"+serviceAccountEmail,
 		"--role=roles/artifactregistry.reader",
@@ -282,7 +349,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	// Bind project-level roles
 	done = logging.Step("bind_project_iam", 7, "Granting logWriter and metricWriter on project...", cmd.OutOrStdout())
 	for _, role := range []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"} {
-		if err := r.Run("projects", "add-iam-policy-binding", cfg.Gcloud.Project,
+		if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
+			"projects", "add-iam-policy-binding", cfg.Gcloud.Project,
 			"--member=serviceAccount:"+serviceAccountEmail,
 			"--role="+role,
 			"--condition=None"); err != nil {

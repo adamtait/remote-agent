@@ -40,6 +40,9 @@ func (f *testRunner) Output(args ...string) ([]byte, error) {
 	}
 	return nil, nil
 }
+func (f *testRunner) RunCapture(args ...string) (string, error) {
+	return "", f.Run(args...)
+}
 
 func TestResolveWorkstationName_ExplicitName(t *testing.T) {
 	cfg := &config.Config{Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{Region: "r", ClusterName: "cl", ConfigName: "cfg"}}, WorkstationName: "p-user"}
