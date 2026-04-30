@@ -193,22 +193,29 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("prompting plugin config: %w", err)
 		}
 
-		// ── 5.5 / 5.6. choose secret level + resolve GCP names ────────────
+		// ── 5.5. resolve GCP secret names (level follows plugin install level) ─
 		secretLevel := level
 		secretNames := map[string]string{}
 		if len(allRelevantSecretDefs(p, res)) > 0 {
-			secretLevel, err = chooseSecretLevel(r, cmd.OutOrStdout(), level)
-			if err != nil {
-				return err
-			}
 			secretNames = resolveSecretNames(r, cmd.OutOrStdout(), p, res, secretLevel, wd)
 		}
 
-		// ── 6. require GCP project; upload secrets before touching config ─
+		// ── 6. require GCP project; enable API; upload secrets ────────────
 		if cfg == nil || cfg.Gcloud.Project == "" {
 			return fmt.Errorf("ra config not loaded — run 'ra setup' first")
 		}
+		if len(allRelevantSecretDefs(p, res)) > 0 {
+			enableCmd := exec.Command("gcloud", "services", "enable",
+				"secretmanager.googleapis.com",
+				"--project", cfg.Gcloud.Project, "--quiet")
+			enableCmd.Stdout = cmd.OutOrStdout()
+			enableCmd.Stderr = cmd.ErrOrStderr()
+			if err := enableCmd.Run(); err != nil {
+				return fmt.Errorf("enabling Secret Manager API: %w", err)
+			}
+		}
 		if err := uploadPluginSecrets(p, res, cfg.Gcloud.Project, secretNames); err != nil {
+			_ = os.RemoveAll(dest)
 			return fmt.Errorf("uploading secrets: %w", err)
 		}
 
@@ -605,31 +612,6 @@ func gcpSecretName(s plugins.SecretDef) string {
 	return s.Name
 }
 
-// chooseSecretLevel asks where to write the secret entries (user or project
-// config). Defaults to the same level as the plugin install.
-func chooseSecretLevel(r *bufio.Reader, out io.Writer, pluginLevel string) (string, error) {
-	defaultIdx := 1
-	if pluginLevel == "project" {
-		defaultIdx = 2
-	}
-	fmt.Fprintln(out, "Store secret entry in:")
-	fmt.Fprintln(out, "  1) user (~/.config/ra/config.yaml)")
-	fmt.Fprintln(out, "  2) project (.ra/config.yaml)")
-	fmt.Fprintf(out, "choice [1-2] [%d]: ", defaultIdx)
-	line, err := r.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
-	}
-	var idx int
-	if _, e := fmt.Sscan(strings.TrimSpace(line), &idx); e != nil || idx < 1 || idx > 2 {
-		idx = defaultIdx
-	}
-	if idx == 2 {
-		return "project", nil
-	}
-	return "user", nil
-}
-
 // resolveSecretNames returns the GCP secret name for each logical secret.
 // User-level secrets get a username suffix; project-level get the project
 // dirname. A prompt is always shown so the user can override the proposed name.
@@ -699,6 +681,7 @@ func uploadSecretValue(projectID, gcpSecretName, value string) error {
 		createCmd := exec.Command("gcloud", "secrets", "create", gcpSecretName,
 			"--replication-policy=automatic",
 			"--project", projectID)
+		createCmd.Stdin = os.Stdin
 		createCmd.Stdout = os.Stdout
 		createCmd.Stderr = os.Stderr
 		if err := createCmd.Run(); err != nil {
