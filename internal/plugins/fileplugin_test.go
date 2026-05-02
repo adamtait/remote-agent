@@ -2,8 +2,11 @@ package plugins
 
 import (
 	"bufio"
+	"encoding/base64"
 	"io"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -341,5 +344,129 @@ func TestFilePlugin_Prompt_Enabled_OAuth(t *testing.T) {
 	sec := p.RenderSecretsBlock(res)
 	if sec != "" {
 		t.Errorf("RenderSecretsBlock: expected empty (no secrets), got %q", sec)
+	}
+}
+
+func TestFilePlugin_Prompt_SecretValueCommand_FileBase64(t *testing.T) {
+	tmp := t.TempDir()
+	authPath := filepath.Join(tmp, "auth.json")
+	scriptPath := filepath.Join(tmp, "write-auth.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nprintf '{\"account\":\"ok\"}' > \"$1\"\n"), 0755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	raw := `
+name: codex
+version: "1.0.0"
+description: "Codex"
+config:
+  - name: enabled
+    type: bool
+    description: "Enable?"
+    default: false
+auth_providers:
+  - name: oauth
+    description: "OAuth"
+    secrets:
+      - name: codex_auth_json
+        env_var: CODEX_AUTH_JSON_B64
+        default_secret_name: codex-auth-json
+        value_command:
+          command: ` + scriptPath + `
+          args: ["` + authPath + `"]
+          output: file_base64
+          path: ` + authPath + `
+          validate: json
+          interactive: true
+`
+	p, err := LoadPlugin(fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}})
+	if err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+
+	res, err := p.Prompt(bufio.NewReader(strings.NewReader("1\n")), io.Discard, io.Discard, nil)
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+
+	got := res.SecretValues["codex_auth_json"]
+	want := base64.StdEncoding.EncodeToString([]byte(`{"account":"ok"}`))
+	if got != want {
+		t.Errorf("secret value = %q, want %q", got, want)
+	}
+}
+
+func TestFilePlugin_Prompt_ConfigValueCommand_Stdout(t *testing.T) {
+	tmp := t.TempDir()
+	scriptPath := filepath.Join(tmp, "print-mode.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nprintf generated-mode\n"), 0755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	raw := `
+name: generated
+version: "1.0.0"
+description: "Generated config"
+config:
+  - name: enabled
+    type: bool
+    description: "Enable?"
+    default: false
+  - name: mode
+    type: string
+    description: "Mode"
+    value_command:
+      command: ` + scriptPath + `
+      output: stdout
+`
+	p, err := LoadPlugin(fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}})
+	if err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+
+	res, err := p.Prompt(bufio.NewReader(strings.NewReader("")), io.Discard, io.Discard, nil)
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+
+	if got := res.Config["mode"]; got != "generated-mode" {
+		t.Errorf("Config[mode] = %v, want generated-mode", got)
+	}
+}
+
+func TestCodexPluginOAuthSecretUsesValueCommand(t *testing.T) {
+	p, err := LoadPlugin(os.DirFS(filepath.Join("..", "..", "plugins", "codex")))
+	if err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	var secret *SecretDef
+	for _, provider := range p.Schema().AuthProviders {
+		if provider.Name != "oauth" {
+			continue
+		}
+		for i := range provider.Secrets {
+			if provider.Secrets[i].Name == "codex_auth_json" {
+				secret = &provider.Secrets[i]
+				break
+			}
+		}
+	}
+	if secret == nil {
+		t.Fatal("codex oauth secret codex_auth_json not found")
+	}
+	if secret.ValueCommand == nil {
+		t.Fatal("codex oauth secret missing value_command")
+	}
+	if secret.ValueCommand.Command != "codex" {
+		t.Errorf("command = %q, want codex", secret.ValueCommand.Command)
+	}
+	if len(secret.ValueCommand.Args) != 1 || secret.ValueCommand.Args[0] != "login" {
+		t.Errorf("args = %+v, want [login]", secret.ValueCommand.Args)
+	}
+	if secret.ValueCommand.Output != "file_base64" || secret.ValueCommand.Path != "~/.codex/auth.json" {
+		t.Errorf("unexpected value command file settings: %+v", secret.ValueCommand)
+	}
+	if secret.ValueCommand.Validate != "json" || !secret.ValueCommand.Interactive {
+		t.Errorf("unexpected value command validation/interactive: %+v", secret.ValueCommand)
 	}
 }
