@@ -58,10 +58,48 @@ func TestIsLocalPath(t *testing.T) {
 	}
 }
 
-func TestResolvePluginSource_CodexAlias(t *testing.T) {
-	got := resolvePluginSource("codex")
-	if got != filepath.Join("plugins", "codex") {
-		t.Errorf("resolvePluginSource(codex) = %q, want %q", got, filepath.Join("plugins", "codex"))
+func TestResolvePluginSource_LocalPluginDir(t *testing.T) {
+	tmp := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+	if err := os.MkdirAll(filepath.Join(tmp, "plugins", "custom"), 0755); err != nil {
+		t.Fatalf("mkdir plugin: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	got := resolvePluginSource("custom")
+	if got != filepath.Join("plugins", "custom") {
+		t.Errorf("resolvePluginSource(custom) = %q, want %q", got, filepath.Join("plugins", "custom"))
+	}
+}
+
+func TestResolvePluginSource_UnknownBareNameUnchanged(t *testing.T) {
+	tmp := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	got := resolvePluginSource("custom")
+	if got != "custom" {
+		t.Errorf("resolvePluginSource(custom) = %q, want custom", got)
 	}
 }
 

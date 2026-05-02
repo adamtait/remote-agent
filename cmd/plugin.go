@@ -509,12 +509,11 @@ func isLocalPath(source string) bool {
 }
 
 func resolvePluginSource(source string) string {
-	switch source {
-	case "aws", "babashka", "claude", "codex", "github":
-		return filepath.Join("plugins", source)
-	default:
-		return source
+	localPlugin := filepath.Join("plugins", source)
+	if fi, err := os.Stat(localPlugin); err == nil && fi.IsDir() {
+		return localPlugin
 	}
+	return source
 }
 
 func preparePluginDestination(destBase, name string, force bool) (string, error) {
