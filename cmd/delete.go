@@ -21,7 +21,7 @@ var deleteCmd = &cobra.Command{
 		if len(args) == 1 {
 			name = args[0]
 		}
-		resolved, err := resolveWorkstationName(cfg, client, name)
+		ref, err := resolveWorkstationRef(cfg, client, name, readLocationOverrides(cmd))
 		if err != nil {
 			return err
 		}
@@ -30,7 +30,7 @@ var deleteCmd = &cobra.Command{
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
 				return fmt.Errorf("stdin is not a terminal; use --force to delete non-interactively")
 			}
-			fmt.Fprintf(os.Stderr, "Delete workstation %q? [y/N]: ", resolved)
+			fmt.Fprintf(os.Stderr, "Delete workstation %q (%s/%s/%s)? [y/N]: ", ref.Name, ref.Project, ref.Cluster, ref.Config)
 			scanner := bufio.NewScanner(os.Stdin)
 			if !scanner.Scan() {
 				return fmt.Errorf("no input received")
@@ -41,12 +41,12 @@ var deleteCmd = &cobra.Command{
 			}
 		}
 
-		ws := cfg.Gcloud.Workstation
-		return client.Delete(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
+		return client.Delete(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
 	},
 }
 
 func init() {
 	deleteCmd.Flags().BoolVar(&deleteForce, "force", false, "Skip confirmation prompt")
+	addLocationOverrideFlags(deleteCmd)
 	rootCmd.AddCommand(deleteCmd)
 }

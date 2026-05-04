@@ -13,15 +13,15 @@ var stopCmd = &cobra.Command{
 		if len(args) == 1 {
 			name = args[0]
 		}
-		resolved, err := resolveWorkstationName(cfg, client, name)
+		ref, err := resolveWorkstationRef(cfg, client, name, readLocationOverrides(cmd))
 		if err != nil {
 			return err
 		}
-		ws := cfg.Gcloud.Workstation
-		return client.Stop(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
+		return client.Stop(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
 	},
 }
 
 func init() {
+	addLocationOverrideFlags(stopCmd)
 	rootCmd.AddCommand(stopCmd)
 }

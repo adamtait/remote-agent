@@ -269,7 +269,17 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 		done(err)
 		return fmt.Errorf("determining working directory: %w", err)
 	}
-	_, buildCleanup, err := scaffold.AssembleBuildContext(scaffold.BuildContextOptions{
+	buildBaseName := requestedName
+	if buildBaseName == "" {
+		buildBaseName = cfg.WorkstationName
+	}
+	buildDir, err := makeBuildDir(home, buildBaseName)
+	if err != nil {
+		done(err)
+		return err
+	}
+	buildPath, buildCleanup, err := scaffold.AssembleBuildContext(scaffold.BuildContextOptions{
+		Dest:    buildDir,
 		Cwd:     cwd,
 		Home:    home,
 		Plugins: reg.All(),
@@ -284,7 +294,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 		done(err)
 		return fmt.Errorf("configuring docker auth: %w", err)
 	}
-	if err := (dockerRunner{stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr()}).Run(dockerBuildArgs(imageURI)...); err != nil {
+	if err := (dockerRunner{stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr()}).Run(dockerBuildArgs(imageURI, buildPath)...); err != nil {
 		done(err)
 		return fmt.Errorf("building and pushing image: %w", err)
 	}
@@ -566,13 +576,34 @@ func (d dockerRunner) Run(args ...string) error {
 // tests can assert on the exact flags. The Dockerfile is harness-agnostic at
 // build time — plugin-specific install steps are gated at runtime by their
 // own `RA_PLUGIN_<NAME>_ENABLED` env vars emitted by each plugin.
-func dockerBuildArgs(imageURI string) []string {
+func dockerBuildArgs(imageURI, buildContext string) []string {
 	return []string{
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", imageURI,
-		"-f", ".ra/.build/Dockerfile",
+		"-f", filepath.Join(buildContext, "Dockerfile"),
 		"--push",
-		".ra/.build",
+		buildContext,
 	}
+}
+
+// makeBuildDir creates a unique build context directory under
+// ~/.cache/ra/build/. The base name is sanitized to its filepath.Base so
+// callers cannot escape the cache root with `..` or absolute paths.
+// MkdirTemp gives each invocation its own dir so concurrent `ra create`
+// runs cannot clobber each other.
+func makeBuildDir(home, base string) (string, error) {
+	clean := filepath.Base(base)
+	if clean == "" || clean == "." || clean == "/" || clean == ".." {
+		clean = "ra"
+	}
+	parent := filepath.Join(home, ".cache", "ra", "build")
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return "", fmt.Errorf("creating build cache dir: %w", err)
+	}
+	dir, err := os.MkdirTemp(parent, clean+"-")
+	if err != nil {
+		return "", fmt.Errorf("creating build dir: %w", err)
+	}
+	return dir, nil
 }

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -31,15 +32,15 @@ func TestElapsedHuman(t *testing.T) {
 	}
 }
 
-func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
-	got := dockerBuildArgs("example.com/img:tag")
+func TestBuildArgs_UsesDashFAndExplicitBuildContext(t *testing.T) {
+	got := dockerBuildArgs("example.com/img:tag", "/tmp/ra-build/myws")
 	want := []string{
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", "example.com/img:tag",
-		"-f", ".ra/.build/Dockerfile",
+		"-f", "/tmp/ra-build/myws/Dockerfile",
 		"--push",
-		".ra/.build",
+		"/tmp/ra-build/myws",
 	}
 	if !equalStringSlices(got, want) {
 		t.Errorf("args mismatch.\n got=%v\nwant=%v", got, want)
@@ -51,7 +52,7 @@ func TestBuildArgs_NoLegacyPluginBuildArgs(t *testing.T) {
 	// buildContainerEnv) and is read at runtime by each plugin's startup
 	// script. No plugin-specific build args should leak into buildx.
 	// RA_CLAUDE_ENABLED is the historical example we guard against.
-	got := dockerBuildArgs("example.com/img:tag")
+	got := dockerBuildArgs("example.com/img:tag", "/tmp/ra-build/myws")
 	for _, a := range got {
 		if strings.Contains(a, "RA_CLAUDE_ENABLED") {
 			t.Errorf("dockerBuildArgs should not pass RA_CLAUDE_ENABLED at build time; got %v", got)
@@ -75,6 +76,41 @@ func equalStringSlices(a, b []string) bool {
 // This compile-time check catches breaks if we later extract an interface.
 var _ io.Writer = (*bytes.Buffer)(nil)
 var _ error = errors.New("sentinel")
+
+func TestMakeBuildDir_ConcurrentSafeAndContained(t *testing.T) {
+	home := t.TempDir()
+	a, err := makeBuildDir(home, "myws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := makeBuildDir(home, "myws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Errorf("expected unique dirs for concurrent calls, both = %q", a)
+	}
+	root := filepath.Join(home, ".cache", "ra", "build")
+	for _, d := range []string{a, b} {
+		if !strings.HasPrefix(d, root+string(filepath.Separator)) {
+			t.Errorf("dir %q escaped cache root %q", d, root)
+		}
+	}
+}
+
+func TestMakeBuildDir_RejectsPathTraversal(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".cache", "ra", "build")
+	for _, evil := range []string{"../etc", "/etc/passwd", "..", ".", ""} {
+		got, err := makeBuildDir(home, evil)
+		if err != nil {
+			t.Fatalf("input %q: unexpected error %v", evil, err)
+		}
+		if !strings.HasPrefix(got, root+string(filepath.Separator)) {
+			t.Errorf("input %q produced %q which escapes %q", evil, got, root)
+		}
+	}
+}
 
 
 func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {

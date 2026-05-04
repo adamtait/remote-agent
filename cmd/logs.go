@@ -17,16 +17,17 @@ Use --tail=N to print the N most recent entries and exit.`,
 		if len(args) == 1 {
 			name = args[0]
 		}
-		resolved, err := resolveWorkstationName(cfg, client, name)
+		ref, err := resolveWorkstationRef(cfg, client, name, readLocationOverrides(cmd))
 		if err != nil {
 			return err
 		}
 		follow := !cmd.Flags().Changed("tail")
-		return client.Logs(cfg.Gcloud.Project, resolved, follow, logsTail)
+		return client.Logs(ref.Project, ref.Name, follow, logsTail)
 	},
 }
 
 func init() {
 	logsCmd.Flags().IntVar(&logsTail, "tail", 0, "Print last N log entries and exit (disables streaming)")
+	addLocationOverrideFlags(logsCmd)
 	rootCmd.AddCommand(logsCmd)
 }

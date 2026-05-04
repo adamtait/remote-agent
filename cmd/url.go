@@ -15,17 +15,16 @@ var urlCmd = &cobra.Command{
 		if len(args) == 1 {
 			name = args[0]
 		}
-		resolved, err := resolveWorkstationName(cfg, client, name)
+		ref, err := resolveWorkstationRef(cfg, client, name, readLocationOverrides(cmd))
 		if err != nil {
 			return err
 		}
-		ws := cfg.Gcloud.Workstation
-		info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
+		info, err := client.Describe(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
 		if err != nil {
 			return err
 		}
 		if info.Host == "" {
-			return fmt.Errorf("workstation %q has no host (is it running?)", resolved)
+			return fmt.Errorf("workstation %q has no host (is it running?)", ref.Name)
 		}
 		fmt.Printf("https://80-%s\n", info.Host)
 		return nil
@@ -33,5 +32,6 @@ var urlCmd = &cobra.Command{
 }
 
 func init() {
+	addLocationOverrideFlags(urlCmd)
 	rootCmd.AddCommand(urlCmd)
 }
