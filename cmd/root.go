@@ -64,7 +64,7 @@ var rootCmd = &cobra.Command{
 		}
 		projectCfg, err := config.LoadProjectConfig(projectCfgPath)
 		if err != nil {
-			return fmt.Errorf("loading %s: %w", projectCfgPath, err)
+			return fmt.Errorf("loading project config: %w", err)
 		}
 		userCfgPath, err := config.UserConfigPath()
 		if err != nil {

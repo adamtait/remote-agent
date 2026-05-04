@@ -156,6 +156,29 @@ func TestClient_ListAll_EmptyOutput(t *testing.T) {
 	}
 }
 
+func TestClient_ListAll_CapturesHostAndCreateTime(t *testing.T) {
+	fake := &fakeRunner{
+		outputs: map[string][]byte{
+			"workstations list --project proj --region us-central1 --format json": []byte(`[
+  {"name": "projects/proj/locations/us-central1/workstationClusters/cl/workstationConfigs/cfg/workstations/ws", "state": "STATE_RUNNING", "host": "abc.workstations.dev", "createTime": "2024-01-15T10:00:00Z"}
+]`),
+		},
+	}
+	list, err := gcloud.NewClient(fake).ListAll("proj", "us-central1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 workstation, got %d", len(list))
+	}
+	if list[0].Host != "abc.workstations.dev" {
+		t.Errorf("Host: got %q, want abc.workstations.dev", list[0].Host)
+	}
+	if list[0].CreateTime != "2024-01-15T10:00:00Z" {
+		t.Errorf("CreateTime: got %q, want 2024-01-15T10:00:00Z", list[0].CreateTime)
+	}
+}
+
 func TestClient_ListAll_InvalidJSON(t *testing.T) {
 	fake := &fakeRunner{
 		outputs: map[string][]byte{

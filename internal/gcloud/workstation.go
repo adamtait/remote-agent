@@ -96,15 +96,22 @@ func (c *Client) ListAll(project, region string) ([]WorkstationInfo, error) {
 		return nil, nil
 	}
 	var raw []struct {
-		Name  string `json:"name"`
-		State string `json:"state"`
+		Name       string `json:"name"`
+		State      string `json:"state"`
+		Host       string `json:"host"`
+		CreateTime string `json:"createTime"`
 	}
 	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
 		return nil, fmt.Errorf("parsing workstations list JSON: %w", err)
 	}
 	result := make([]WorkstationInfo, 0, len(raw))
 	for _, r := range raw {
-		info := WorkstationInfo{State: r.State, Name: r.Name}
+		info := WorkstationInfo{
+			Name:       r.Name,
+			State:      r.State,
+			Host:       r.Host,
+			CreateTime: r.CreateTime,
+		}
 		// full resource name: projects/P/locations/R/workstationClusters/C/workstationConfigs/F/workstations/N
 		if segments := strings.Split(r.Name, "/"); len(segments) == 10 {
 			info.ProjectName = segments[1]

@@ -79,9 +79,6 @@ func resolveWorkstationRef(cfg *config.Config, client *gcloud.Client, name strin
 		if override.Config != "" && override.Config != parsed.Config {
 			return gcloud.WorkstationRef{}, fmt.Errorf("--config %q conflicts with URI config %q", override.Config, parsed.Config)
 		}
-		if parsed.Region == "" {
-			parsed.Region = ws.Region
-		}
 		return parsed, nil
 	}
 
@@ -139,11 +136,11 @@ func resolveWorkstationRef(cfg *config.Config, client *gcloud.Client, name strin
 		ref.Config = m.ConfigName
 		return ref, nil
 	default:
-		var locs []string
+		locs := make([]string, 0, len(matches))
 		for _, m := range matches {
 			locs = append(locs, fmt.Sprintf("%s/%s", m.ClusterName, m.ConfigName))
 		}
-		return gcloud.WorkstationRef{}, fmt.Errorf("workstation %q is ambiguous; matches %v — pass --cluster and --config to disambiguate", name, locs)
+		return gcloud.WorkstationRef{}, fmt.Errorf("workstation %q is ambiguous; matches %s — pass --cluster and --config to disambiguate", name, strings.Join(locs, ", "))
 	}
 }
 

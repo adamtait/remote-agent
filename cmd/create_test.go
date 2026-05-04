@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +76,41 @@ func equalStringSlices(a, b []string) bool {
 // This compile-time check catches breaks if we later extract an interface.
 var _ io.Writer = (*bytes.Buffer)(nil)
 var _ error = errors.New("sentinel")
+
+func TestMakeBuildDir_ConcurrentSafeAndContained(t *testing.T) {
+	home := t.TempDir()
+	a, err := makeBuildDir(home, "myws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := makeBuildDir(home, "myws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Errorf("expected unique dirs for concurrent calls, both = %q", a)
+	}
+	root := filepath.Join(home, ".cache", "ra", "build")
+	for _, d := range []string{a, b} {
+		if !strings.HasPrefix(d, root+string(filepath.Separator)) {
+			t.Errorf("dir %q escaped cache root %q", d, root)
+		}
+	}
+}
+
+func TestMakeBuildDir_RejectsPathTraversal(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".cache", "ra", "build")
+	for _, evil := range []string{"../etc", "/etc/passwd", "..", ".", ""} {
+		got, err := makeBuildDir(home, evil)
+		if err != nil {
+			t.Fatalf("input %q: unexpected error %v", evil, err)
+		}
+		if !strings.HasPrefix(got, root+string(filepath.Separator)) {
+			t.Errorf("input %q produced %q which escapes %q", evil, got, root)
+		}
+	}
+}
 
 
 func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {

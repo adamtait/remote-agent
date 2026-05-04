@@ -26,7 +26,7 @@ func UserConfigPath() (string, error) {
 func LoadUserConfig(path string) (*UserConfig, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("no %s found; run 'ra setup' to create one", path)
+		return nil, fmt.Errorf("user config %s does not exist; run 'ra setup' to create one", path)
 	}
 	if err != nil {
 		return nil, err

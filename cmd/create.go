@@ -273,7 +273,11 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	if buildBaseName == "" {
 		buildBaseName = cfg.WorkstationName
 	}
-	buildDir := filepath.Join(home, ".cache", "ra", "build", buildBaseName)
+	buildDir, err := makeBuildDir(home, buildBaseName)
+	if err != nil {
+		done(err)
+		return err
+	}
 	buildPath, buildCleanup, err := scaffold.AssembleBuildContext(scaffold.BuildContextOptions{
 		Dest:    buildDir,
 		Cwd:     cwd,
@@ -581,4 +585,25 @@ func dockerBuildArgs(imageURI, buildContext string) []string {
 		"--push",
 		buildContext,
 	}
+}
+
+// makeBuildDir creates a unique build context directory under
+// ~/.cache/ra/build/. The base name is sanitized to its filepath.Base so
+// callers cannot escape the cache root with `..` or absolute paths.
+// MkdirTemp gives each invocation its own dir so concurrent `ra create`
+// runs cannot clobber each other.
+func makeBuildDir(home, base string) (string, error) {
+	clean := filepath.Base(base)
+	if clean == "" || clean == "." || clean == "/" || clean == ".." {
+		clean = "ra"
+	}
+	parent := filepath.Join(home, ".cache", "ra", "build")
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return "", fmt.Errorf("creating build cache dir: %w", err)
+	}
+	dir, err := os.MkdirTemp(parent, clean+"-")
+	if err != nil {
+		return "", fmt.Errorf("creating build dir: %w", err)
+	}
+	return dir, nil
 }

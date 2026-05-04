@@ -21,6 +21,9 @@ func TestLoadUserConfig_Missing_ReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "ra setup") {
 		t.Errorf("error should reference 'ra setup'; got %q", err.Error())
 	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("error should include the missing path %q; got %q", missing, err.Error())
+	}
 }
 
 func TestLoadProjectConfig_EmptyPath_ReturnsEmpty(t *testing.T) {

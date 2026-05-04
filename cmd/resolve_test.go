@@ -180,6 +180,27 @@ func TestResolveWorkstationRef_FullURI(t *testing.T) {
 	}
 }
 
+func TestResolveWorkstationRef_PartialOverrideFilters(t *testing.T) {
+	// Two workstations with the same short name in different clusters.
+	// Passing only --cluster (no --config) should narrow to one match by
+	// filtering ListAll results — not skip the search.
+	runner := &testRunner{
+		outputs: map[string][]byte{
+			"workstations list --project p --region r --format json": []byte(`[
+  {"name": "projects/p/locations/r/workstationClusters/cl-a/workstationConfigs/cfg/workstations/dup", "state": "STATE_RUNNING"},
+  {"name": "projects/p/locations/r/workstationClusters/cl-b/workstationConfigs/cfg/workstations/dup", "state": "STATE_RUNNING"}
+]`),
+		},
+	}
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "dup", wsOverride{Cluster: "cl-b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Cluster != "cl-b" || ref.Config != "cfg" {
+		t.Errorf("got %+v, want Cluster=cl-b Config=cfg", ref)
+	}
+}
+
 func TestResolveWorkstationRef_FullURIConflictingOverride(t *testing.T) {
 	uri := "projects/p/locations/r/workstationClusters/cl/workstationConfigs/cfg/workstations/x"
 	_, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(&testRunner{}), uri, wsOverride{Cluster: "different"})
