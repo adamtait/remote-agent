@@ -3,6 +3,8 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -53,6 +55,90 @@ func TestIsLocalPath(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("isLocalPath(%q) = %v, want %v", tc.source, got, tc.want)
 		}
+	}
+}
+
+func TestResolvePluginSource_LocalPluginDir(t *testing.T) {
+	tmp := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+	if err := os.MkdirAll(filepath.Join(tmp, "plugins", "custom"), 0755); err != nil {
+		t.Fatalf("mkdir plugin: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	got := resolvePluginSource("custom")
+	if got != filepath.Join("plugins", "custom") {
+		t.Errorf("resolvePluginSource(custom) = %q, want %q", got, filepath.Join("plugins", "custom"))
+	}
+}
+
+func TestResolvePluginSource_UnknownBareNameUnchanged(t *testing.T) {
+	tmp := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	got := resolvePluginSource("custom")
+	if got != "custom" {
+		t.Errorf("resolvePluginSource(custom) = %q, want custom", got)
+	}
+}
+
+func TestPreparePluginDestination_ExistingRequiresForce(t *testing.T) {
+	tmp := t.TempDir()
+	dest := filepath.Join(tmp, "codex")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		t.Fatalf("mkdir dest: %v", err)
+	}
+	marker := filepath.Join(dest, "marker")
+	if err := os.WriteFile(marker, []byte("keep"), 0644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	_, err := preparePluginDestination(tmp, "codex", false)
+	if err == nil {
+		t.Fatal("expected existing plugin to require --force")
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("existing plugin was modified without --force: %v", statErr)
+	}
+}
+
+func TestPreparePluginDestination_ForceRemovesExisting(t *testing.T) {
+	tmp := t.TempDir()
+	dest := filepath.Join(tmp, "codex")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		t.Fatalf("mkdir dest: %v", err)
+	}
+
+	got, err := preparePluginDestination(tmp, "codex", true)
+	if err != nil {
+		t.Fatalf("preparePluginDestination: %v", err)
+	}
+	if got != dest {
+		t.Errorf("dest = %q, want %q", got, dest)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatalf("forced prepare should remove destination before copy; stat err = %v", statErr)
 	}
 }
 

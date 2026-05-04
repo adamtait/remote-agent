@@ -136,6 +136,13 @@ secrets:
     env_var: MY_TOKEN
     description: "API token for my service"
     default_secret_name: my-plugin-token   # GCP Secret Manager name
+    value_command:                         # optional: local install-time capture
+      command: my-cli
+      args: ["login"]
+      output: stdout                       # stdout | file_base64
+      path: "~/.my-cli/auth.json"           # required for file_base64
+      validate: json                       # optional: json
+      interactive: true
 
 auth_providers:            # omit if no auth choice is needed
   - name: apikey
@@ -147,7 +154,7 @@ auth_providers:            # omit if no auth choice is needed
         default_secret_name: my-plugin-apikey
 ```
 
-`ra plugin install` prompts for each `config` field, the chosen `auth_provider` (if any), and secret values (hidden input). Config is written to `config.yaml`; secret values go to GCP Secret Manager.
+`ra plugin install` prompts for each `config` field, the chosen `auth_provider` (if any), and secret values (hidden input). If a field or secret declares `value_command`, `ra` runs that local command during install and uses its output instead of prompting. Config is written to `config.yaml`; secret values go to GCP Secret Manager.
 
 ### Script naming conventions
 
@@ -223,6 +230,12 @@ sudo bash /etc/workstation-startup.d/250_my-plugin-setup.sh
 ## Rotating secrets
 
 All rotations happen via Secret Manager — no need to re-run `ra create`.
+
+For plugins with command-generated credentials, re-run the plugin install command to capture and upload a new secret version:
+
+```bash
+ra plugin install codex --force
+```
 
 ```bash
 echo -n 'newvalue' | gcloud secrets versions add <secret-name> \

@@ -2,10 +2,14 @@ package plugins
 
 import (
 	"bufio"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/adamtait/remote-agent/internal/config"
@@ -169,6 +173,14 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 			pluginCfg["enabled"] = true
 			continue
 		}
+		if f.ValueCommand != nil {
+			val, e := runValueCommand(*f.ValueCommand, stderr, stdin)
+			if e != nil {
+				return nil, fmt.Errorf("collecting config field %s: %w", f.Name, e)
+			}
+			pluginCfg[f.Name] = val
+			continue
+		}
 		val, e := promptField(r, out, f)
 		if e != nil {
 			return nil, e
@@ -188,7 +200,7 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 
 	values := make(map[string]string)
 	for _, s := range p.schema.Secrets {
-		v, e := promptSecretValue(stdin, stderr, s)
+		v, e := collectSecretValue(stdin, stderr, s)
 		if e != nil {
 			return nil, e
 		}
@@ -196,7 +208,7 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 	}
 	if activeProvider != nil {
 		for _, s := range activeProvider.Secrets {
-			v, e := promptSecretValue(stdin, stderr, s)
+			v, e := collectSecretValue(stdin, stderr, s)
 			if e != nil {
 				return nil, e
 			}
@@ -209,6 +221,107 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 		AuthProvider: activeProvider,
 		SecretValues: values,
 	}, nil
+}
+
+func collectSecretValue(stdin *os.File, stderr io.Writer, s SecretDef) (string, error) {
+	if s.ValueCommand != nil {
+		return runValueCommand(*s.ValueCommand, stderr, stdin)
+	}
+	return promptSecretValue(stdin, stderr, s)
+}
+
+func runValueCommand(vc ValueCommand, stderr io.Writer, stdin *os.File) (string, error) {
+	if vc.Command == "" {
+		return "", fmt.Errorf("value_command.command is required")
+	}
+	outputMode := vc.Output
+	if outputMode == "" {
+		outputMode = "stdout"
+	}
+
+	cmd := exec.Command(vc.Command, vc.Args...)
+	if vc.Interactive {
+		if stdin != nil {
+			cmd.Stdin = stdin
+		} else {
+			cmd.Stdin = os.Stdin
+		}
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = stderr
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("running %s: %w", vc.Command, err)
+		}
+	} else {
+		var errBuf strings.Builder
+		cmd.Stderr = &errBuf
+		out, err := cmd.Output()
+		if err != nil {
+			msg := strings.TrimSpace(errBuf.String())
+			if msg != "" {
+				return "", fmt.Errorf("running %s: %w: %s", vc.Command, err, msg)
+			}
+			return "", fmt.Errorf("running %s: %w", vc.Command, err)
+		}
+		if outputMode == "stdout" {
+			value := strings.TrimSpace(string(out))
+			if value == "" {
+				return "", fmt.Errorf("value_command produced empty stdout")
+			}
+			return value, nil
+		}
+	}
+
+	switch outputMode {
+	case "stdout":
+		return "", fmt.Errorf("interactive stdout capture is not supported")
+	case "file_base64":
+		path := expandUserPath(vc.Path)
+		if path == "" {
+			return "", fmt.Errorf("value_command.path is required for file_base64 output")
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("reading %s: %w", path, err)
+		}
+		if len(data) == 0 {
+			return "", fmt.Errorf("reading %s: file is empty", path)
+		}
+		if err := validateValueCommandData(vc, data, path); err != nil {
+			return "", err
+		}
+		return base64.StdEncoding.EncodeToString(data), nil
+	default:
+		return "", fmt.Errorf("unsupported value_command.output %q", outputMode)
+	}
+}
+
+func validateValueCommandData(vc ValueCommand, data []byte, label string) error {
+	switch vc.Validate {
+	case "", "none":
+		return nil
+	case "json":
+		var tmp any
+		if err := json.Unmarshal(data, &tmp); err != nil {
+			return fmt.Errorf("%s is not valid JSON: %w", label, err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported value_command.validate %q", vc.Validate)
+	}
+}
+
+func expandUserPath(path string) string {
+	if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	}
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	return path
 }
 
 // promptSecretValue reads a plaintext secret value with hidden input.

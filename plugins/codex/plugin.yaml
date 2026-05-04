@@ -1,0 +1,31 @@
+name: codex
+version: "1.0.0"
+description: "Installs and configures the OpenAI Codex CLI on the workstation"
+config:
+  - name: enabled
+    type: bool
+    description: "Enable Codex CLI?"
+    default: false
+auth_providers:
+  - name: oauth
+    description: "ChatGPT OAuth (recommended) — runs `codex login` locally and uploads ~/.codex/auth.json"
+    secrets:
+      - name: codex_auth_json
+        env_var: CODEX_AUTH_JSON_B64
+        description: "Codex ChatGPT auth.json, captured by the value_command"
+        default_secret_name: codex-auth-json
+        value_command:
+          command: codex
+          args: ["login"]
+          output: file_base64
+          path: "~/.codex/auth.json"
+          validate: json
+          interactive: true
+          description: "Sign in to ChatGPT with Codex CLI"
+  - name: apikey
+    description: "OpenAI API key"
+    secrets:
+      - name: codex_api_key
+        env_var: OPENAI_API_KEY
+        description: "API key from platform.openai.com"
+        default_secret_name: openai-api-key
