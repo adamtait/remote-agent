@@ -6,11 +6,14 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/adamtait/remote-agent/internal/config"
+	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
 func TestElapsedHuman(t *testing.T) {
@@ -112,7 +115,6 @@ func TestMakeBuildDir_RejectsPathTraversal(t *testing.T) {
 	}
 }
 
-
 func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 	sleep := 2
 	cfg := &config.Config{
@@ -183,3 +185,150 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 	}
 }
 
+// loadTestPlugin loads a plugin from an inline YAML literal — used by the
+// pluginAuthIAMRoles tests so each case can declare exactly the schema it
+// needs without relying on a fixture directory.
+func loadTestPlugin(t *testing.T, yaml string) *plugins.FilePlugin {
+	t.Helper()
+	fsys := fstest.MapFS{
+		"plugin.yaml": &fstest.MapFile{Data: []byte(yaml)},
+	}
+	p, err := plugins.LoadPlugin(fsys)
+	if err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	return p
+}
+
+func TestPluginAuthIAMRoles_VertexEnabled(t *testing.T) {
+	p := loadTestPlugin(t, `
+name: gemini
+version: "1.0.0"
+description: "Gemini CLI"
+auth_providers:
+  - name: apikey
+    description: "API key"
+  - name: vertex
+    description: "Vertex AI"
+    iam_roles:
+      - roles/aiplatform.user
+`)
+	cfg := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"gemini": {
+				"enabled":       true,
+				"auth_provider": "vertex",
+			},
+		},
+	}
+	got := pluginAuthIAMRoles([]*plugins.FilePlugin{p}, cfg)
+	want := []string{"roles/aiplatform.user"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("pluginAuthIAMRoles = %v, want %v", got, want)
+	}
+}
+
+func TestPluginAuthIAMRoles_ApikeyProviderHasNoRoles(t *testing.T) {
+	// Picking a provider that doesn't declare iam_roles must produce no
+	// bindings — we don't want to grant Vertex access to a workstation
+	// that's only using the API-key path.
+	p := loadTestPlugin(t, `
+name: gemini
+version: "1.0.0"
+description: "Gemini CLI"
+auth_providers:
+  - name: apikey
+    description: "API key"
+  - name: vertex
+    description: "Vertex AI"
+    iam_roles:
+      - roles/aiplatform.user
+`)
+	cfg := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"gemini": {
+				"enabled":       true,
+				"auth_provider": "apikey",
+			},
+		},
+	}
+	got := pluginAuthIAMRoles([]*plugins.FilePlugin{p}, cfg)
+	if len(got) != 0 {
+		t.Errorf("pluginAuthIAMRoles should be empty for apikey provider, got %v", got)
+	}
+}
+
+func TestPluginAuthIAMRoles_DisabledPluginSkipped(t *testing.T) {
+	// Even if a plugin's selected provider declares iam_roles, a disabled
+	// plugin should not get any bindings — matches the runtime gating in
+	// workstation startup scripts (RA_PLUGIN_<NAME>_ENABLED).
+	p := loadTestPlugin(t, `
+name: gemini
+version: "1.0.0"
+description: "Gemini CLI"
+auth_providers:
+  - name: vertex
+    description: "Vertex AI"
+    iam_roles:
+      - roles/aiplatform.user
+`)
+	cfg := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"gemini": {
+				"enabled":       false,
+				"auth_provider": "vertex",
+			},
+		},
+	}
+	got := pluginAuthIAMRoles([]*plugins.FilePlugin{p}, cfg)
+	if len(got) != 0 {
+		t.Errorf("pluginAuthIAMRoles should be empty for disabled plugin, got %v", got)
+	}
+}
+
+func TestPluginAuthIAMRoles_NoConfigEntry(t *testing.T) {
+	// A plugin loaded into the registry but with no entry in cfg.Plugins
+	// should contribute no roles — without a selected auth_provider we
+	// can't know which (if any) iam_roles to apply.
+	p := loadTestPlugin(t, `
+name: gemini
+version: "1.0.0"
+description: "Gemini CLI"
+auth_providers:
+  - name: vertex
+    description: "Vertex AI"
+    iam_roles:
+      - roles/aiplatform.user
+`)
+	cfg := &config.Config{Plugins: map[string]map[string]interface{}{}}
+	got := pluginAuthIAMRoles([]*plugins.FilePlugin{p}, cfg)
+	if len(got) != 0 {
+		t.Errorf("pluginAuthIAMRoles should be empty when plugin has no config, got %v", got)
+	}
+}
+
+func TestPluginAuthIAMRoles_NilConfigSafe(t *testing.T) {
+	p := loadTestPlugin(t, `
+name: gemini
+version: "1.0.0"
+description: "Gemini CLI"
+`)
+	if got := pluginAuthIAMRoles([]*plugins.FilePlugin{p}, nil); got != nil {
+		t.Errorf("pluginAuthIAMRoles(nil cfg) should be nil, got %v", got)
+	}
+}
+
+func TestAppendUniqueRoles(t *testing.T) {
+	got := appendUniqueRoles(
+		[]string{"roles/logging.logWriter", "roles/monitoring.metricWriter"},
+		[]string{"roles/aiplatform.user", "roles/logging.logWriter", "roles/aiplatform.user"},
+	)
+	want := []string{
+		"roles/logging.logWriter",
+		"roles/monitoring.metricWriter",
+		"roles/aiplatform.user",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("appendUniqueRoles = %v, want %v", got, want)
+	}
+}

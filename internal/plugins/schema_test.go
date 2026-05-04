@@ -78,6 +78,10 @@ auth_providers:
 	if s.AuthProviders[0].Secrets[0].DefaultSecretName != "my-oauth-secret" {
 		t.Errorf("AuthProviders[0].Secrets[0].DefaultSecretName = %q", s.AuthProviders[0].Secrets[0].DefaultSecretName)
 	}
+	// IAMRoles is optional; absence should yield a nil/empty slice.
+	if len(s.AuthProviders[0].IAMRoles) != 0 {
+		t.Errorf("AuthProviders[0].IAMRoles should be empty, got %v", s.AuthProviders[0].IAMRoles)
+	}
 	cmd := s.AuthProviders[0].Secrets[0].ValueCommand
 	if cmd == nil {
 		t.Fatal("expected oauth_token value_command")
@@ -90,5 +94,43 @@ auth_providers:
 	}
 	if cmd.Validate != "json" || !cmd.Interactive {
 		t.Errorf("unexpected value_command validation/interactive: %+v", cmd)
+	}
+}
+
+// TestPluginSchemaParse_IAMRolesOnAuthProvider confirms that an
+// auth_provider with no secrets but with iam_roles parses correctly -
+// this is the shape the gemini plugin's vertex provider uses.
+func TestPluginSchemaParse_IAMRolesOnAuthProvider(t *testing.T) {
+	raw := `
+name: gemini
+version: "1.0.0"
+description: "Gemini CLI"
+auth_providers:
+  - name: vertex
+    description: "Vertex AI"
+    secrets: []
+    iam_roles:
+      - roles/aiplatform.user
+      - roles/serviceusage.serviceUsageConsumer
+`
+	var s PluginSchema
+	if err := yaml.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(s.AuthProviders) != 1 {
+		t.Fatalf("len(AuthProviders) = %d, want 1", len(s.AuthProviders))
+	}
+	got := s.AuthProviders[0].IAMRoles
+	want := []string{"roles/aiplatform.user", "roles/serviceusage.serviceUsageConsumer"}
+	if len(got) != len(want) {
+		t.Fatalf("IAMRoles len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("IAMRoles[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if len(s.AuthProviders[0].Secrets) != 0 {
+		t.Errorf("Secrets should be empty for vertex provider, got %v", s.AuthProviders[0].Secrets)
 	}
 }

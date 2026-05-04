@@ -1,0 +1,25 @@
+name: gemini
+version: "1.0.0"
+description: "Installs and configures the Gemini CLI on the workstation"
+config:
+  - name: enabled
+    type: bool
+    description: "Enable Gemini CLI?"
+    default: false
+  - name: region
+    type: string
+    description: "Vertex AI region (only used when auth_provider=vertex)"
+    default: "us-central1"
+auth_providers:
+  - name: apikey
+    description: "API key from Google AI Studio (recommended)"
+    secrets:
+      - name: gemini_apikey
+        env_var: GEMINI_API_KEY
+        description: "API key from aistudio.google.com/apikey"
+        default_secret_name: gemini-api-key
+  - name: vertex
+    description: "Vertex AI via the workstation's GCP service account (no secret required)"
+    secrets: []
+    iam_roles:
+      - roles/aiplatform.user

@@ -17,6 +17,7 @@ import (
 	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/naming"
+	"github.com/adamtait/remote-agent/internal/plugins"
 	"github.com/adamtait/remote-agent/internal/scaffold"
 	"github.com/adamtait/remote-agent/internal/secrets"
 	"github.com/spf13/cobra"
@@ -362,9 +363,14 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Bind project-level roles
-	done = logging.Step("bind_project_iam", 7, totalCreateSteps, "Granting logWriter and metricWriter on project...", cmd.OutOrStdout())
-	for _, role := range []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"} {
+	// Bind project-level roles. Includes the always-on observability roles
+	// plus any project IAM roles declared on each installed plugin's
+	// selected auth_provider (e.g. roles/aiplatform.user when a plugin
+	// authenticates via Vertex AI using this same service account).
+	projectRoles := []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"}
+	projectRoles = appendUniqueRoles(projectRoles, pluginAuthIAMRoles(reg.All(), cfg))
+	done = logging.Step("bind_project_iam", 7, totalCreateSteps, fmt.Sprintf("Granting %d project-level IAM role(s)...", len(projectRoles)), cmd.OutOrStdout())
+	for _, role := range projectRoles {
 		if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
 			"projects", "add-iam-policy-binding", cfg.Gcloud.Project,
 			"--member=serviceAccount:"+serviceAccountEmail,
@@ -585,6 +591,58 @@ func dockerBuildArgs(imageURI, buildContext string) []string {
 		"--push",
 		buildContext,
 	}
+}
+
+// pluginAuthIAMRoles returns the project-level IAM roles to grant the
+// workstation service account based on each installed plugin's selected
+// auth_provider. Skips disabled plugins and plugins with no selected
+// provider. Order follows registry order; per-provider order follows
+// plugin.yaml declaration order.
+func pluginAuthIAMRoles(regPlugins []*plugins.FilePlugin, cfg *config.Config) []string {
+	if cfg == nil || cfg.Plugins == nil {
+		return nil
+	}
+	var roles []string
+	for _, p := range regPlugins {
+		pluginCfg, ok := cfg.Plugins[p.Name()]
+		if !ok {
+			continue
+		}
+		if enabled, _ := pluginCfg["enabled"].(bool); !enabled {
+			continue
+		}
+		providerName, _ := pluginCfg["auth_provider"].(string)
+		if providerName == "" {
+			continue
+		}
+		for _, ap := range p.Schema().AuthProviders {
+			if ap.Name == providerName {
+				roles = append(roles, ap.IAMRoles...)
+				break
+			}
+		}
+	}
+	return roles
+}
+
+// appendUniqueRoles appends each entry from extra to base only if it's not
+// already present. Preserves first-occurrence order. Used so two plugins
+// requesting the same role don't issue duplicate add-iam-policy-binding
+// calls — the calls are idempotent at gcloud, but deduping keeps the log
+// readable and the step count honest.
+func appendUniqueRoles(base, extra []string) []string {
+	seen := make(map[string]bool, len(base)+len(extra))
+	for _, r := range base {
+		seen[r] = true
+	}
+	for _, r := range extra {
+		if seen[r] {
+			continue
+		}
+		seen[r] = true
+		base = append(base, r)
+	}
+	return base
 }
 
 // makeBuildDir creates a unique build context directory under

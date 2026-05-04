@@ -43,8 +43,13 @@ type ValueCommand struct {
 }
 
 // AuthProvider groups provider-specific secrets under a named auth method.
+// IAMRoles lists project-level GCP IAM roles to grant the workstation service
+// account when this provider is the selected auth_provider for the plugin —
+// e.g. roles/aiplatform.user when a plugin authenticates via Vertex AI using
+// the workstation's existing service account instead of a stored secret.
 type AuthProvider struct {
 	Name        string      `yaml:"name"`
 	Description string      `yaml:"description"`
 	Secrets     []SecretDef `yaml:"secrets"`
+	IAMRoles    []string    `yaml:"iam_roles"`
 }
