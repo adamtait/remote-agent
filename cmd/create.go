@@ -269,7 +269,13 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 		done(err)
 		return fmt.Errorf("determining working directory: %w", err)
 	}
-	_, buildCleanup, err := scaffold.AssembleBuildContext(scaffold.BuildContextOptions{
+	buildBaseName := requestedName
+	if buildBaseName == "" {
+		buildBaseName = cfg.WorkstationName
+	}
+	buildDir := filepath.Join(home, ".cache", "ra", "build", buildBaseName)
+	buildPath, buildCleanup, err := scaffold.AssembleBuildContext(scaffold.BuildContextOptions{
+		Dest:    buildDir,
 		Cwd:     cwd,
 		Home:    home,
 		Plugins: reg.All(),
@@ -284,7 +290,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 		done(err)
 		return fmt.Errorf("configuring docker auth: %w", err)
 	}
-	if err := (dockerRunner{stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr()}).Run(dockerBuildArgs(imageURI)...); err != nil {
+	if err := (dockerRunner{stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr()}).Run(dockerBuildArgs(imageURI, buildPath)...); err != nil {
 		done(err)
 		return fmt.Errorf("building and pushing image: %w", err)
 	}
@@ -566,13 +572,13 @@ func (d dockerRunner) Run(args ...string) error {
 // tests can assert on the exact flags. The Dockerfile is harness-agnostic at
 // build time — plugin-specific install steps are gated at runtime by their
 // own `RA_PLUGIN_<NAME>_ENABLED` env vars emitted by each plugin.
-func dockerBuildArgs(imageURI string) []string {
+func dockerBuildArgs(imageURI, buildContext string) []string {
 	return []string{
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", imageURI,
-		"-f", ".ra/.build/Dockerfile",
+		"-f", filepath.Join(buildContext, "Dockerfile"),
 		"--push",
-		".ra/.build",
+		buildContext,
 	}
 }

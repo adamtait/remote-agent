@@ -1,6 +1,6 @@
 // Package scaffold — buildcontext.go
-// Assemble an ephemeral .ra/.build/ docker build context from layered sources:
-// project (.ra/) > user-global (~/.config/ra/) > plugin-contributed.
+// Assemble an ephemeral docker build context at an explicit destination from
+// layered sources: project (.ra/) > user-global (~/.config/ra/) > plugin.
 package scaffold
 
 import (
@@ -16,16 +16,20 @@ import (
 
 // BuildContextOptions controls AssembleBuildContext.
 type BuildContextOptions struct {
-	Cwd     string             // project root (contains .ra/)
-	Home    string             // user home (contains .config/ra/)
+	Dest    string             // absolute output path; required
+	Cwd     string             // project root (contains .ra/) — sources only
+	Home    string             // user home (contains .config/ra/) — sources only
 	Plugins []*plugins.FilePlugin
 }
 
-// AssembleBuildContext writes a fresh <cwd>/.ra/.build/ docker build context
-// from layered sources (see package doc). Returns the build-context path,
-// a cleanup func the caller MUST invoke, and any error.
+// AssembleBuildContext writes a fresh docker build context at opts.Dest from
+// layered sources (see package doc). Returns the build-context path, a
+// cleanup func the caller MUST invoke, and any error.
 func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
-	root := filepath.Join(opts.Cwd, ".ra", ".build")
+	if opts.Dest == "" {
+		return "", func() {}, fmt.Errorf("BuildContextOptions.Dest is required")
+	}
+	root := opts.Dest
 
 	if err := os.RemoveAll(root); err != nil {
 		return "", func() {}, fmt.Errorf("clearing %s: %w", root, err)

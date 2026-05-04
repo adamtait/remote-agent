@@ -31,15 +31,15 @@ func TestElapsedHuman(t *testing.T) {
 	}
 }
 
-func TestBuildArgs_UsesDashFAndProjectRootContext(t *testing.T) {
-	got := dockerBuildArgs("example.com/img:tag")
+func TestBuildArgs_UsesDashFAndExplicitBuildContext(t *testing.T) {
+	got := dockerBuildArgs("example.com/img:tag", "/tmp/ra-build/myws")
 	want := []string{
 		"buildx", "build",
 		"--platform", "linux/amd64",
 		"-t", "example.com/img:tag",
-		"-f", ".ra/.build/Dockerfile",
+		"-f", "/tmp/ra-build/myws/Dockerfile",
 		"--push",
-		".ra/.build",
+		"/tmp/ra-build/myws",
 	}
 	if !equalStringSlices(got, want) {
 		t.Errorf("args mismatch.\n got=%v\nwant=%v", got, want)
@@ -51,7 +51,7 @@ func TestBuildArgs_NoLegacyPluginBuildArgs(t *testing.T) {
 	// buildContainerEnv) and is read at runtime by each plugin's startup
 	// script. No plugin-specific build args should leak into buildx.
 	// RA_CLAUDE_ENABLED is the historical example we guard against.
-	got := dockerBuildArgs("example.com/img:tag")
+	got := dockerBuildArgs("example.com/img:tag", "/tmp/ra-build/myws")
 	for _, a := range got {
 		if strings.Contains(a, "RA_CLAUDE_ENABLED") {
 			t.Errorf("dockerBuildArgs should not pass RA_CLAUDE_ENABLED at build time; got %v", got)

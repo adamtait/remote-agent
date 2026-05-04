@@ -19,29 +19,29 @@ var connectCmd = &cobra.Command{
 		if len(args) == 1 {
 			name = args[0]
 		}
-		return runConnect(cfg, client, name, cmd.ErrOrStderr())
+		return runConnect(cfg, client, name, readLocationOverrides(cmd), cmd.ErrOrStderr())
 	},
 }
 
-func runConnect(cfg *config.Config, client *gcloud.Client, name string, errOut io.Writer) error {
-	resolved, err := resolveWorkstationName(cfg, client, name)
+func runConnect(cfg *config.Config, client *gcloud.Client, name string, override wsOverride, errOut io.Writer) error {
+	ref, err := resolveWorkstationRef(cfg, client, name, override)
 	if err != nil {
 		return err
 	}
-	ws := cfg.Gcloud.Workstation
-	info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
+	info, err := client.Describe(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
 	}
 	if info.State != "STATE_RUNNING" && info.State != "STATE_STARTING" {
-		fmt.Fprintf(errOut, "Workstation %q is %s; starting...\n", resolved, strings.TrimPrefix(info.State, "STATE_"))
-		if err := client.Start(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved); err != nil {
+		fmt.Fprintf(errOut, "Workstation %q is %s; starting...\n", ref.Name, strings.TrimPrefix(info.State, "STATE_"))
+		if err := client.Start(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name); err != nil {
 			return fmt.Errorf("starting workstation: %w", err)
 		}
 	}
-	return client.SSH(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, resolved)
+	return client.SSH(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
 }
 
 func init() {
+	addLocationOverrideFlags(connectCmd)
 	rootCmd.AddCommand(connectCmd)
 }

@@ -3,21 +3,36 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adamtait/remote-agent/internal/config"
 )
 
-func TestLoadUserConfig_Missing_ReturnsEmpty(t *testing.T) {
-	cfg, err := config.LoadUserConfig(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+func TestLoadUserConfig_Missing_ReturnsError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist.yaml")
+	cfg, err := config.LoadUserConfig(missing)
+	if err == nil {
+		t.Fatal("expected error for missing user config, got nil")
+	}
+	if cfg != nil {
+		t.Errorf("expected nil config on error, got %+v", cfg)
+	}
+	if !strings.Contains(err.Error(), "ra setup") {
+		t.Errorf("error should reference 'ra setup'; got %q", err.Error())
+	}
+}
+
+func TestLoadProjectConfig_EmptyPath_ReturnsEmpty(t *testing.T) {
+	cfg, err := config.LoadProjectConfig("")
 	if err != nil {
-		t.Fatalf("LoadUserConfig on missing file: got %v, want nil", err)
+		t.Fatalf("LoadProjectConfig(\"\"): got %v, want nil", err)
 	}
 	if cfg == nil {
-		t.Fatal("expected non-nil empty UserConfig")
+		t.Fatal("expected non-nil empty ProjectConfig")
 	}
-	if cfg.Git.UserName != "" || len(cfg.Secrets) != 0 {
-		t.Errorf("want zero-value UserConfig, got %+v", cfg)
+	if cfg.Gcloud.Project != "" || len(cfg.Secrets) != 0 {
+		t.Errorf("expected zero-value ProjectConfig, got %+v", cfg)
 	}
 }
 

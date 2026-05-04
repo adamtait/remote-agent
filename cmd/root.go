@@ -72,14 +72,17 @@ var rootCmd = &cobra.Command{
 		}
 		userCfg, err := config.LoadUserConfig(userCfgPath)
 		if err != nil {
-			return fmt.Errorf("loading user config: %w", err)
+			return err
 		}
 		cfg, err = config.Merge(userCfg, projectCfg)
 		if err != nil {
 			return err
 		}
 		cfg.ProjectConfigPath = projectCfgPath
-		projectPluginsDir := filepath.Join(filepath.Dir(projectCfgPath), "plugins")
+		projectPluginsDir := ""
+		if projectCfgPath != "" {
+			projectPluginsDir = filepath.Join(filepath.Dir(projectCfgPath), "plugins")
+		}
 		loaded, err := plugins.LoadAll(
 			filepath.Join(home, ".config", "ra", "plugins"),
 			projectPluginsDir,

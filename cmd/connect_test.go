@@ -35,7 +35,7 @@ func TestRunConnect_Running_SkipsStart(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	for _, call := range runner.runs {
@@ -70,7 +70,7 @@ func TestRunConnect_Stopped_StartsThenSSH(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestRunConnect_Starting_SkipsStart(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	for _, call := range runner.runs {
@@ -134,7 +134,7 @@ func TestRunConnect_StartError_Propagates(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	err := runConnect(newConnectCfg(), client, "", &errOut)
+	err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

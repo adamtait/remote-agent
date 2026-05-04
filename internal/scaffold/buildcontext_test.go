@@ -8,11 +8,19 @@ import (
 	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
+// dest returns a fresh build destination path under the given temp dir.
+func dest(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "build")
+}
+
 func TestAssembleBuildContext_CreatesBuildDir(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
+	want := dest(t)
 
 	path, cleanup, err := AssembleBuildContext(BuildContextOptions{
+		Dest: want,
 		Cwd:  cwd,
 		Home: home,
 	})
@@ -21,7 +29,6 @@ func TestAssembleBuildContext_CreatesBuildDir(t *testing.T) {
 	}
 	defer cleanup()
 
-	want := filepath.Join(cwd, ".ra", ".build")
 	if path != want {
 		t.Fatalf("path = %q, want %q", path, want)
 	}
@@ -30,11 +37,14 @@ func TestAssembleBuildContext_CreatesBuildDir(t *testing.T) {
 	}
 }
 
-func TestAssembleBuildContext_DockerfileFromEmbedded(t *testing.T) {
-	cwd := t.TempDir()
-	home := t.TempDir()
+func TestAssembleBuildContext_RequiresDest(t *testing.T) {
+	if _, _, err := AssembleBuildContext(BuildContextOptions{Cwd: t.TempDir(), Home: t.TempDir()}); err == nil {
+		t.Fatal("expected error for empty Dest, got nil")
+	}
+}
 
-	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Cwd: cwd, Home: home})
+func TestAssembleBuildContext_DockerfileFromEmbedded(t *testing.T) {
+	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Dest: dest(t), Cwd: t.TempDir(), Home: t.TempDir()})
 	if err != nil {
 		t.Fatalf("AssembleBuildContext: %v", err)
 	}
@@ -60,7 +70,7 @@ func TestAssembleBuildContext_DockerfileFromUser(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Cwd: cwd, Home: home})
+	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Dest: dest(t), Cwd: cwd, Home: home})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +102,7 @@ func TestAssembleBuildContext_DockerfileFromProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Cwd: cwd, Home: home})
+	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Dest: dest(t), Cwd: cwd, Home: home})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +117,33 @@ func TestAssembleBuildContext_DockerfileFromProject(t *testing.T) {
 	}
 }
 
+func TestAssembleBuildContext_NoProjectDir(t *testing.T) {
+	// Cwd has no .ra/ — covers the "create from anywhere" case where the
+	// user runs `ra create` from a directory that is not a ra project.
+	cwd := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".config", "ra", "Dockerfile"), "USER-ONLY\n")
+
+	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Dest: dest(t), Cwd: cwd, Home: home})
+	if err != nil {
+		t.Fatalf("AssembleBuildContext: %v", err)
+	}
+	defer cleanup()
+
+	got, err := os.ReadFile(filepath.Join(path, "Dockerfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "USER-ONLY\n" {
+		t.Errorf("Dockerfile = %q, want USER-ONLY (no project source)", got)
+	}
+	for _, dir := range []string{"profile.d", "workstation-startup.d", "Dockerfile.d"} {
+		if _, err := os.Stat(filepath.Join(path, dir, ".ra-keep")); err != nil {
+			t.Errorf("%s/.ra-keep missing: %v", dir, err)
+		}
+	}
+}
+
 func TestAssembleBuildContext_MergesProfileD(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
@@ -116,7 +153,7 @@ func TestAssembleBuildContext_MergesProfileD(t *testing.T) {
 	mustWrite(t, filepath.Join(cwd, ".ra", "profile.d", "a.sh"), "PROJ-A")
 	mustWrite(t, filepath.Join(cwd, ".ra", "profile.d", "b.sh"), "PROJ-B")
 
-	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Cwd: cwd, Home: home})
+	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Dest: dest(t), Cwd: cwd, Home: home})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,10 +170,7 @@ func TestAssembleBuildContext_MergesProfileD(t *testing.T) {
 }
 
 func TestAssembleBuildContext_EmptyProfileDGetsKeep(t *testing.T) {
-	cwd := t.TempDir()
-	home := t.TempDir()
-
-	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Cwd: cwd, Home: home})
+	path, cleanup, err := AssembleBuildContext(BuildContextOptions{Dest: dest(t), Cwd: t.TempDir(), Home: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +199,7 @@ func TestAssembleBuildContext_MergesPluginDirs(t *testing.T) {
 	}
 
 	path, cleanup, err := AssembleBuildContext(BuildContextOptions{
-		Cwd: cwd, Home: home,
+		Dest: dest(t), Cwd: cwd, Home: home,
 		Plugins: []*plugins.FilePlugin{plug},
 	})
 	if err != nil {
@@ -202,7 +236,7 @@ func TestAssembleBuildContext_ProjectShadowsPlugin(t *testing.T) {
 	plug, _ := plugins.LoadPlugin(os.DirFS(pluginDir))
 
 	path, cleanup, _ := AssembleBuildContext(BuildContextOptions{
-		Cwd: cwd, Home: home, Plugins: []*plugins.FilePlugin{plug},
+		Dest: dest(t), Cwd: cwd, Home: home, Plugins: []*plugins.FilePlugin{plug},
 	})
 	defer cleanup()
 
@@ -224,7 +258,7 @@ func TestAssembleBuildContext_StagesPluginTree(t *testing.T) {
 	plug, _ := plugins.LoadPlugin(os.DirFS(pluginDir))
 
 	path, cleanup, err := AssembleBuildContext(BuildContextOptions{
-		Cwd: cwd, Home: home, Plugins: []*plugins.FilePlugin{plug},
+		Dest: dest(t), Cwd: cwd, Home: home, Plugins: []*plugins.FilePlugin{plug},
 	})
 	if err != nil {
 		t.Fatal(err)
