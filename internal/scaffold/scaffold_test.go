@@ -59,9 +59,11 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 	}
 
 	// User-dir assets exist (written to ~/.config/ra/).
-	userAsset := filepath.Join(home, ".config", "ra", "Dockerfile")
-	if _, err := os.Stat(userAsset); err != nil {
-		t.Errorf("user asset Dockerfile not materialized: %v", err)
+	for _, name := range []string{"Dockerfile"} {
+		userAsset := filepath.Join(home, ".config", "ra", name)
+		if _, err := os.Stat(userAsset); err != nil {
+			t.Errorf("user asset %s not materialized: %v", name, err)
+		}
 	}
 	// Project-local assets do NOT exist without --with-project-assets.
 	projectAsset := filepath.Join(cwd, ".ra", "Dockerfile")
@@ -191,8 +193,10 @@ func TestInteractiveScaffold_BothConfigsExist_IsNoOp(t *testing.T) {
 		t.Errorf("global config modified: %q", global)
 	}
 	// Assets still materialized in user config dir.
-	if _, err := os.Stat(filepath.Join(home, ".config", "ra", "Dockerfile")); err != nil {
-		t.Errorf("Dockerfile not materialized on re-run: %v", err)
+	for _, name := range []string{"Dockerfile"} {
+		if _, err := os.Stat(filepath.Join(home, ".config", "ra", name)); err != nil {
+			t.Errorf("%s not materialized on re-run: %v", name, err)
+		}
 	}
 }
 

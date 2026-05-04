@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
@@ -132,7 +133,7 @@ func TestAssembleBuildContext_MergesProfileD(t *testing.T) {
 	}
 }
 
-func TestAssembleBuildContext_EmptyProfileDGetsKeep(t *testing.T) {
+func TestAssembleBuildContext_IncludesCoreMergedAssets(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 
@@ -142,9 +143,12 @@ func TestAssembleBuildContext_EmptyProfileDGetsKeep(t *testing.T) {
 	}
 	defer cleanup()
 
-	for _, dir := range []string{"profile.d", "workstation-startup.d", "Dockerfile.d"} {
-		if _, err := os.Stat(filepath.Join(path, dir, ".ra-keep")); err != nil {
-			t.Errorf("%s/.ra-keep missing: %v", dir, err)
+	for _, rel := range []string{
+		"workstation-startup.d/200_remote-agent-setup.sh",
+		"profile.d/00-ra-wait.sh",
+	} {
+		if _, err := os.Stat(filepath.Join(path, rel)); err != nil {
+			t.Errorf("core asset %s missing: %v", rel, err)
 		}
 	}
 }
@@ -243,6 +247,104 @@ func TestAssembleBuildContext_StagesPluginTree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(path, "plugins", "myplug", ".ra-install.yaml")); !os.IsNotExist(err) {
 		t.Errorf(".ra-install.yaml should NOT be staged into the image, but Stat returned: %v", err)
 	}
+}
+
+func TestAssembleBuildContext_SkipsDisabledPlugin(t *testing.T) {
+	// A plugin with an "enabled" config field should contribute to the build
+	// context only when cfg.Plugins[name]["enabled"] == true.
+
+	makeGatedPlugin := func(t *testing.T, home string) *plugins.FilePlugin {
+		t.Helper()
+		pluginDir := filepath.Join(home, ".config", "ra", "plugins", "gated")
+		mustWrite(t, filepath.Join(pluginDir, "plugin.yaml"),
+			"name: gated\nversion: '0.0.1'\ndescription: x\nconfig:\n  - name: enabled\n    type: bool\n    default: false\n")
+		mustWrite(t, filepath.Join(pluginDir, "Dockerfile.d", "200_gated.sh"), "GATED-HOOK")
+		plug, err := plugins.LoadPlugin(os.DirFS(pluginDir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plug
+	}
+
+	t.Run("disabled plugin contributes nothing", func(t *testing.T) {
+		cwd, home := t.TempDir(), t.TempDir()
+		plug := makeGatedPlugin(t, home)
+
+		path, cleanup, err := AssembleBuildContext(BuildContextOptions{
+			Cwd:     cwd,
+			Home:    home,
+			Plugins: []*plugins.FilePlugin{plug},
+			Config: &config.Config{
+				Plugins: map[string]map[string]interface{}{"gated": {"enabled": false}},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+
+		if _, err := os.Stat(filepath.Join(path, "Dockerfile.d", "200_gated.sh")); !os.IsNotExist(err) {
+			t.Errorf("disabled plugin hook should not be in build context, Stat returned: %v", err)
+		}
+	})
+
+	t.Run("enabled plugin contributes hook", func(t *testing.T) {
+		cwd, home := t.TempDir(), t.TempDir()
+		plug := makeGatedPlugin(t, home)
+
+		path, cleanup, err := AssembleBuildContext(BuildContextOptions{
+			Cwd:     cwd,
+			Home:    home,
+			Plugins: []*plugins.FilePlugin{plug},
+			Config: &config.Config{
+				Plugins: map[string]map[string]interface{}{"gated": {"enabled": true}},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+
+		got, err := os.ReadFile(filepath.Join(path, "Dockerfile.d", "200_gated.sh"))
+		if err != nil {
+			t.Fatalf("enabled plugin hook missing: %v", err)
+		}
+		if string(got) != "GATED-HOOK" {
+			t.Errorf("hook content = %q, want GATED-HOOK", got)
+		}
+	})
+
+	t.Run("plugin without enabled field is always active", func(t *testing.T) {
+		cwd, home := t.TempDir(), t.TempDir()
+		pluginDir := filepath.Join(home, ".config", "ra", "plugins", "ungated")
+		mustWrite(t, filepath.Join(pluginDir, "plugin.yaml"),
+			"name: ungated\nversion: '0.0.1'\ndescription: x\n")
+		mustWrite(t, filepath.Join(pluginDir, "Dockerfile.d", "200_ungated.sh"), "UNGATED-HOOK")
+		plug, err := plugins.LoadPlugin(os.DirFS(pluginDir))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Pass nil Config — the ungated plugin should still contribute.
+		path, cleanup, err := AssembleBuildContext(BuildContextOptions{
+			Cwd:     cwd,
+			Home:    home,
+			Plugins: []*plugins.FilePlugin{plug},
+			Config:  nil,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+
+		got, err := os.ReadFile(filepath.Join(path, "Dockerfile.d", "200_ungated.sh"))
+		if err != nil {
+			t.Fatalf("ungated plugin hook missing: %v", err)
+		}
+		if string(got) != "UNGATED-HOOK" {
+			t.Errorf("hook content = %q, want UNGATED-HOOK", got)
+		}
+	})
 }
 
 // mustWrite is a test helper that writes content with parent-dir mkdir.

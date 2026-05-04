@@ -10,15 +10,17 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/plugins"
 )
 
 // BuildContextOptions controls AssembleBuildContext.
 type BuildContextOptions struct {
-	Cwd     string             // project root (contains .ra/)
-	Home    string             // user home (contains .config/ra/)
+	Cwd     string // project root (contains .ra/)
+	Home    string // user home (contains .config/ra/)
 	Plugins []*plugins.FilePlugin
+	Config  *config.Config
 }
 
 // AssembleBuildContext writes a fresh <cwd>/.ra/.build/ docker build context
@@ -36,15 +38,23 @@ func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
 
 	cleanup := func() { _ = os.RemoveAll(root) }
 
+	active := filterEnabled(opts.Plugins, opts.Config)
+	activeOpts := opts
+	activeOpts.Plugins = active
+
 	if err := writeDockerfile(opts, root); err != nil {
 		cleanup()
 		return "", func() {}, err
 	}
-	if err := mergePluginDirs(opts, root); err != nil {
+	if err := writeCoreMergedAssets(root); err != nil {
 		cleanup()
 		return "", func() {}, err
 	}
-	if err := stagePluginTrees(opts, root); err != nil {
+	if err := mergePluginDirs(activeOpts, root); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := stagePluginTrees(activeOpts, root); err != nil {
 		cleanup()
 		return "", func() {}, err
 	}
@@ -58,6 +68,43 @@ func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
 	}
 
 	return root, cleanup, nil
+}
+
+// pluginEnabled reports whether a plugin should contribute to the build
+// context. A plugin that declares an "enabled" config field contributes only
+// when the merged config resolves it to true. Plugins without an "enabled"
+// field are always active.
+func pluginEnabled(p *plugins.FilePlugin, cfg *config.Config) bool {
+	hasEnabledField := false
+	for _, f := range p.Schema().Config {
+		if f.Name == "enabled" {
+			hasEnabledField = true
+			break
+		}
+	}
+	if !hasEnabledField {
+		return true
+	}
+	if cfg == nil || cfg.Plugins == nil {
+		return false
+	}
+	pluginCfg, ok := cfg.Plugins[p.Name()]
+	if !ok {
+		return false
+	}
+	return pluginCfg["enabled"] == true
+}
+
+// filterEnabled returns the subset of plugins that should contribute to the
+// build context based on their enabled state.
+func filterEnabled(ps []*plugins.FilePlugin, cfg *config.Config) []*plugins.FilePlugin {
+	out := make([]*plugins.FilePlugin, 0, len(ps))
+	for _, p := range ps {
+		if pluginEnabled(p, cfg) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // writeDockerfile chooses project > user > embedded Dockerfile bytes and
@@ -82,6 +129,27 @@ func writeDockerfile(opts BuildContextOptions, root string) error {
 	}
 	logging.L().Debug("dockerfile source", "source", "embedded")
 	return os.WriteFile(filepath.Join(root, "Dockerfile"), embeddedDockerfile, 0644)
+}
+
+func writeCoreMergedAssets(root string) error {
+	files := []struct {
+		rel  string
+		data []byte
+		mode os.FileMode
+	}{
+		{"workstation-startup.d/200_remote-agent-setup.sh", embeddedRemoteAgentSetup, 0755},
+		{"profile.d/00-ra-wait.sh", embeddedWaitScript, 0755},
+	}
+	for _, f := range files {
+		dest := filepath.Join(root, f.rel)
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			return fmt.Errorf("creating %s: %w", filepath.Dir(dest), err)
+		}
+		if err := os.WriteFile(dest, f.data, f.mode); err != nil {
+			return fmt.Errorf("writing %s: %w", dest, err)
+		}
+	}
+	return nil
 }
 
 // mergedDirs are the three image-mirror directories that get merged from
