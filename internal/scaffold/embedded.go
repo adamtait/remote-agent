@@ -7,9 +7,6 @@ import _ "embed"
 //go:embed assets/Dockerfile
 var embeddedDockerfile []byte
 
-//go:embed assets/Dockerfile.d/120_atelier-extension.sh
-var embeddedAtelierExtensionHook []byte
-
 //go:embed assets/workstation-startup.d/200_remote-agent-setup.sh
 var embeddedRemoteAgentSetup []byte
 

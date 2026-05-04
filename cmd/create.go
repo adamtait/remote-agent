@@ -273,6 +273,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 		Cwd:     cwd,
 		Home:    home,
 		Plugins: reg.All(),
+		Config:  cfg,
 	})
 	if err != nil {
 		done(err)

@@ -58,7 +58,6 @@ func writeCoreAssets(baseDir string, force bool, stdout io.Writer) error {
 		mode os.FileMode
 	}{
 		{"Dockerfile", embeddedDockerfile, 0644},
-		{"Dockerfile.d/120_atelier-extension.sh", embeddedAtelierExtensionHook, 0755},
 		{"workstation-startup.d/200_remote-agent-setup.sh", embeddedRemoteAgentSetup, 0755},
 		{"profile.d/00-ra-wait.sh", embeddedWaitScript, 0755},
 	}

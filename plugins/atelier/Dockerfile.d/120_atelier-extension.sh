@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+command -v unzip >/dev/null 2>&1 || {
+    apt-get update
+    apt-get install -y --no-install-recommends unzip
+}
+
 ATELIER_VERSION="${ATELIER_VERSION:-0.1.2}"
 ATELIER_VSIX_URL="${ATELIER_VSIX_URL:-https://atelier.dev/atelier-${ATELIER_VERSION}.vsix}"
 ATELIER_EXTENSION_DIR="/opt/code-oss/extensions/atelier"
