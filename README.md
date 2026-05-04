@@ -34,7 +34,7 @@ auth flows) lives in the relevant plugin.
 make install                                 # installs ra to ~/.local/bin
 ra setup                                     # writes config.yaml + core assets
 ra plugin install ./plugins/github --user    # installs gh CLI + PAT credential helper,
-                                             #   prompts for repo_url and PAT
+                                             #   prompts for repo_urls and PAT
 ra plugin install ./plugins/claude --user    # install the in-tree claude plugin
 ra create                                    # provisions the workstation
 ```

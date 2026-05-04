@@ -55,7 +55,6 @@ func TestLoadUserConfig_Roundtrip(t *testing.T) {
 git:
   user_name: "Alice"
   user_email: "alice@example.com"
-  github_repo_url: https://example.com/user.git
 gcloud:
   project: user-proj
   workstation:
@@ -74,9 +73,6 @@ secrets:
   example_secret:
     secret_name: example-secret
     env_var: EXAMPLE_TOKEN
-  github_pat:
-    secret_name: github-pat
-    env_var: GH_TOKEN
 env:
   EXTRA_KEY: extra_value
 `
@@ -104,7 +100,7 @@ func TestLoadProjectConfig_Roundtrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	contents := `
 git:
-  github_repo_url: https://example.com/x.git
+  user_name: "Project Alice"
 gcloud:
   project: my-proj
   workstation:
