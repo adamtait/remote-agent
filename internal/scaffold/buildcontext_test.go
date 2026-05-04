@@ -132,7 +132,7 @@ func TestAssembleBuildContext_MergesProfileD(t *testing.T) {
 	}
 }
 
-func TestAssembleBuildContext_EmptyProfileDGetsKeep(t *testing.T) {
+func TestAssembleBuildContext_IncludesCoreMergedAssets(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 
@@ -142,9 +142,13 @@ func TestAssembleBuildContext_EmptyProfileDGetsKeep(t *testing.T) {
 	}
 	defer cleanup()
 
-	for _, dir := range []string{"profile.d", "workstation-startup.d", "Dockerfile.d"} {
-		if _, err := os.Stat(filepath.Join(path, dir, ".ra-keep")); err != nil {
-			t.Errorf("%s/.ra-keep missing: %v", dir, err)
+	for _, rel := range []string{
+		"Dockerfile.d/120_atelier-extension.sh",
+		"workstation-startup.d/200_remote-agent-setup.sh",
+		"profile.d/00-ra-wait.sh",
+	} {
+		if _, err := os.Stat(filepath.Join(path, rel)); err != nil {
+			t.Errorf("core asset %s missing: %v", rel, err)
 		}
 	}
 }

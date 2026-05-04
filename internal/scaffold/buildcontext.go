@@ -16,8 +16,8 @@ import (
 
 // BuildContextOptions controls AssembleBuildContext.
 type BuildContextOptions struct {
-	Cwd     string             // project root (contains .ra/)
-	Home    string             // user home (contains .config/ra/)
+	Cwd     string // project root (contains .ra/)
+	Home    string // user home (contains .config/ra/)
 	Plugins []*plugins.FilePlugin
 }
 
@@ -37,6 +37,10 @@ func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
 	cleanup := func() { _ = os.RemoveAll(root) }
 
 	if err := writeDockerfile(opts, root); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := writeCoreMergedAssets(root); err != nil {
 		cleanup()
 		return "", func() {}, err
 	}
@@ -82,6 +86,28 @@ func writeDockerfile(opts BuildContextOptions, root string) error {
 	}
 	logging.L().Debug("dockerfile source", "source", "embedded")
 	return os.WriteFile(filepath.Join(root, "Dockerfile"), embeddedDockerfile, 0644)
+}
+
+func writeCoreMergedAssets(root string) error {
+	files := []struct {
+		rel  string
+		data []byte
+		mode os.FileMode
+	}{
+		{"Dockerfile.d/120_atelier-extension.sh", embeddedAtelierExtensionHook, 0755},
+		{"workstation-startup.d/200_remote-agent-setup.sh", embeddedRemoteAgentSetup, 0755},
+		{"profile.d/00-ra-wait.sh", embeddedWaitScript, 0755},
+	}
+	for _, f := range files {
+		dest := filepath.Join(root, f.rel)
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			return fmt.Errorf("creating %s: %w", filepath.Dir(dest), err)
+		}
+		if err := os.WriteFile(dest, f.data, f.mode); err != nil {
+			return fmt.Errorf("writing %s: %w", dest, err)
+		}
+	}
+	return nil
 }
 
 // mergedDirs are the three image-mirror directories that get merged from

@@ -11,7 +11,7 @@ USER root
 
 # --- Core system packages ---------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates gnupg git git-lfs jq \
+        curl ca-certificates gnupg git git-lfs jq unzip \
     && git lfs install --system \
     && rm -rf /var/lib/apt/lists/*
 
