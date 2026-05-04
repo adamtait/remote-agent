@@ -55,16 +55,22 @@ func TestFindProjectConfig_StopsAtHome(t *testing.T) {
 	if err := os.MkdirAll(sub, 0755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := config.FindProjectConfig(sub, home)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	got, err := config.FindProjectConfig(sub, home)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("expected empty path when no config found, got %q", got)
 	}
 }
 
-func TestFindProjectConfig_NotFoundReturnsError(t *testing.T) {
+func TestFindProjectConfig_NotFoundReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
-	_, err := config.FindProjectConfig(dir, filepath.Dir(dir))
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	got, err := config.FindProjectConfig(dir, filepath.Dir(dir))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("expected empty path when no config found, got %q", got)
 	}
 }

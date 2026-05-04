@@ -1,10 +1,23 @@
 package gcloud
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 )
+
+// WorkstationRef fully identifies a workstation across projects/regions/configs.
+// Used by callers that need to target a workstation whose location is not
+// implied by local config (e.g. `ra delete <name>` where <name> lives in a
+// different cluster than the one in .ra/config.yaml).
+type WorkstationRef struct {
+	Project string
+	Region  string
+	Cluster string
+	Config  string
+	Name    string
+}
 
 // WorkstationInfo holds the parsed fields from a gcloud workstations describe/list call.
 type WorkstationInfo struct {
@@ -13,6 +26,7 @@ type WorkstationInfo struct {
 	Host        string
 	CreateTime  string // RFC3339; populated by List
 	ProjectName string // populated by ListAll
+	ClusterName string // populated by ListAll
 	ConfigName  string // populated by ListAll
 }
 
@@ -62,7 +76,8 @@ func (c *Client) List(project, region, cluster, cfgName string) ([]WorkstationIn
 
 // ListAll returns all workstations across all configs in the given project and region.
 // region must be non-empty; it is validated by config.Validate before any command runs.
-// Each WorkstationInfo is populated with ProjectName and ConfigName parsed from the full resource name.
+// Each WorkstationInfo is populated with ProjectName/ClusterName/ConfigName
+// parsed from the full resource URI returned by the workstations API.
 func (c *Client) ListAll(project, region string) ([]WorkstationInfo, error) {
 	if region == "" {
 		return nil, fmt.Errorf("region is required for ListAll")
@@ -71,31 +86,38 @@ func (c *Client) ListAll(project, region string) ([]WorkstationInfo, error) {
 		"workstations", "list",
 		"--project", project,
 		"--region", region,
-		"--format", "value(name,state)",
+		"--format", "json",
 	)
 	if err != nil {
 		return nil, err
 	}
-	var result []WorkstationInfo
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" || trimmed == "[]" {
+		return nil, nil
+	}
+	var raw []struct {
+		Name       string `json:"name"`
+		State      string `json:"state"`
+		Host       string `json:"host"`
+		CreateTime string `json:"createTime"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+		return nil, fmt.Errorf("parsing workstations list JSON: %w", err)
+	}
+	result := make([]WorkstationInfo, 0, len(raw))
+	for _, r := range raw {
+		info := WorkstationInfo{
+			Name:       r.Name,
+			State:      r.State,
+			Host:       r.Host,
+			CreateTime: r.CreateTime,
 		}
-		parts := strings.Split(line, "\t")
-		info := WorkstationInfo{}
-		if len(parts) > 0 {
-			// full resource name: projects/P/locations/R/workstationClusters/C/workstationConfigs/F/workstations/N
-			segments := strings.Split(parts[0], "/")
-			if len(segments) == 10 {
-				info.ProjectName = segments[1]
-				info.ConfigName = segments[7]
-				info.Name = segments[9]
-			} else {
-				info.Name = parts[0]
-			}
-		}
-		if len(parts) > 1 {
-			info.State = parts[1]
+		// full resource name: projects/P/locations/R/workstationClusters/C/workstationConfigs/F/workstations/N
+		if segments := strings.Split(r.Name, "/"); len(segments) == 10 {
+			info.ProjectName = segments[1]
+			info.ClusterName = segments[5]
+			info.ConfigName = segments[7]
+			info.Name = segments[9]
 		}
 		result = append(result, info)
 	}

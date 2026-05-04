@@ -35,6 +35,13 @@ auth_providers:
         env_var: OAUTH_TOKEN
         description: "OAuth token"
         default_secret_name: my-oauth-secret
+        value_command:
+          command: codex
+          args: ["login"]
+          output: file_base64
+          path: "~/.codex/auth.json"
+          validate: json
+          interactive: true
   - name: apikey
     description: "API key"
     secrets:
@@ -75,10 +82,23 @@ auth_providers:
 	if len(s.AuthProviders[0].IAMRoles) != 0 {
 		t.Errorf("AuthProviders[0].IAMRoles should be empty, got %v", s.AuthProviders[0].IAMRoles)
 	}
+	cmd := s.AuthProviders[0].Secrets[0].ValueCommand
+	if cmd == nil {
+		t.Fatal("expected oauth_token value_command")
+	}
+	if cmd.Command != "codex" || cmd.Output != "file_base64" || cmd.Path != "~/.codex/auth.json" {
+		t.Errorf("unexpected value_command: %+v", cmd)
+	}
+	if len(cmd.Args) != 1 || cmd.Args[0] != "login" {
+		t.Errorf("unexpected value_command args: %+v", cmd.Args)
+	}
+	if cmd.Validate != "json" || !cmd.Interactive {
+		t.Errorf("unexpected value_command validation/interactive: %+v", cmd)
+	}
 }
 
 // TestPluginSchemaParse_IAMRolesOnAuthProvider confirms that an
-// auth_provider with no secrets but with iam_roles parses correctly —
+// auth_provider with no secrets but with iam_roles parses correctly -
 // this is the shape the gemini plugin's vertex provider uses.
 func TestPluginSchemaParse_IAMRolesOnAuthProvider(t *testing.T) {
 	raw := `

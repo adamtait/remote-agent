@@ -20,14 +20,13 @@ func UserConfigPath() (string, error) {
 	return filepath.Join(home, ".config", "ra", "config.yaml"), nil
 }
 
-// LoadUserConfig reads and parses the user config file.
-// Returns an empty UserConfig (no error) if the file does not exist —
-// validation (not loading) is responsible for flagging missing required keys.
+// LoadUserConfig reads and parses the user config file. Returns an error if
+// the file is missing — user-level config is the required floor for every
+// command. The returned error tells the user how to recover.
 func LoadUserConfig(path string) (*UserConfig, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		logging.L().Debug("config not found, using empty", "path", path, "type", "user")
-		return &UserConfig{}, nil
+		return nil, fmt.Errorf("user config %s does not exist; run 'ra setup' to create one", path)
 	}
 	if err != nil {
 		return nil, err
@@ -40,8 +39,13 @@ func LoadUserConfig(path string) (*UserConfig, error) {
 	return &cfg, nil
 }
 
-// LoadProjectConfig reads and parses a .ra/config.yaml file.
+// LoadProjectConfig reads and parses a .ra/config.yaml file. An empty path
+// signals "no project config in scope" and yields an empty ProjectConfig so
+// callers can merge unconditionally.
 func LoadProjectConfig(path string) (*ProjectConfig, error) {
+	if path == "" {
+		return &ProjectConfig{}, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

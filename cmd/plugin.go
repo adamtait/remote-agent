@@ -15,7 +15,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/configwrite"
 	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/plugins"
@@ -36,58 +35,9 @@ func init() {
 var pluginCmd = &cobra.Command{
 	Use:   "plugin",
 	Short: "Manage ra plugins",
-	// Override root PersistentPreRunE: load user config always, project config
-	// optionally. Plugin subcommands (list, install --user, remove) must work
-	// outside a project directory.
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("determining home directory: %w", err)
-		}
-		wd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("determining working directory: %w", err)
-		}
-
-		userCfgPath, err := config.UserConfigPath()
-		if err != nil {
-			return fmt.Errorf("determining user config path: %w", err)
-		}
-		userCfg, err := config.LoadUserConfig(userCfgPath)
-		if err != nil {
-			return fmt.Errorf("loading user config: %w", err)
-		}
-
-		// Project config is optional — tolerate its absence.
-		var projectCfg *config.ProjectConfig
-		projectCfgPath, err := config.FindProjectConfig(wd, home)
-		if err == nil {
-			if loaded, loadErr := config.LoadProjectConfig(projectCfgPath); loadErr == nil {
-				projectCfg = loaded
-			}
-		}
-
-		cfg, err = config.Merge(userCfg, projectCfg)
-		if err != nil {
-			return err
-		}
-		if projectCfgPath != "" {
-			cfg.ProjectConfigPath = projectCfgPath
-		}
-
-		// Load plugins from both directories (each silently tolerates absence).
-		userPluginsDir := filepath.Join(home, ".config", "ra", "plugins")
-		projPluginsDir := ""
-		if projectCfgPath != "" {
-			projPluginsDir = filepath.Join(filepath.Dir(projectCfgPath), "plugins")
-		}
-		loaded, err := plugins.LoadAll(userPluginsDir, projPluginsDir)
-		if err != nil {
-			return fmt.Errorf("loading plugins: %w", err)
-		}
-		reg = plugins.NewRegistry(loaded)
-		return nil
-	},
+	// Inherits root.PersistentPreRunE: user config required, project config
+	// optional, full Validate runs. Plugin install uploads secrets to GCP, so
+	// failing fast on missing config is preferable to mid-pipeline errors.
 }
 
 var pluginInstallUser bool
@@ -108,7 +58,7 @@ var pluginInstallCmd = &cobra.Command{
 	// No PersistentPreRunE override → inherits pluginCmd.PersistentPreRunE
 	// which loads cfg (logging and runner are not initialized for plugin subcommands).
 	RunE: func(cmd *cobra.Command, args []string) error {
-		source := args[0]
+		source := resolvePluginSource(args[0])
 
 		// ── 1. acquire plugin into a temp dir ─────────────────────────────
 		tmp, err := os.MkdirTemp("", "ra-plugin-*")
@@ -170,13 +120,8 @@ var pluginInstallCmd = &cobra.Command{
 		}
 		dest := filepath.Join(destBase, p.Name())
 
-		if _, err := os.Stat(dest); err == nil && !pluginInstallForce {
-			return fmt.Errorf("plugin %q already exists at %s; use --force to overwrite", p.Name(), dest)
-		}
-		if err := os.RemoveAll(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err := os.MkdirAll(destBase, 0755); err != nil {
+		dest, err = preparePluginDestination(destBase, p.Name(), pluginInstallForce)
+		if err != nil {
 			return err
 		}
 		if err := copyDir(tmp, dest); err != nil {
@@ -511,6 +456,28 @@ func isLocalPath(source string) bool {
 		return true
 	}
 	return false
+}
+
+func resolvePluginSource(source string) string {
+	localPlugin := filepath.Join("plugins", source)
+	if fi, err := os.Stat(localPlugin); err == nil && fi.IsDir() {
+		return localPlugin
+	}
+	return source
+}
+
+func preparePluginDestination(destBase, name string, force bool) (string, error) {
+	dest := filepath.Join(destBase, name)
+	if _, err := os.Stat(dest); err == nil && !force {
+		return "", fmt.Errorf("plugin %q already exists at %s; use --force to overwrite", name, dest)
+	}
+	if err := os.RemoveAll(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if err := os.MkdirAll(destBase, 0755); err != nil {
+		return "", err
+	}
+	return dest, nil
 }
 
 // pluginCfgPath returns the path to config.yaml for the given level.

@@ -27,8 +27,8 @@ go test ./internal/config/... -run TestMerge
 ### Config Layering
 
 Two config files are merged at startup (project overrides user):
-- `~/.config/ra/config.yaml` — user-level baseline (loaded by `internal/config/global.go`)
-- `.ra/config.yaml` — project-level overrides (found by walking up from cwd in `internal/config/discover.go`)
+- `~/.config/ra/config.yaml` — **required**; user-level baseline (loaded by `internal/config/global.go`). Missing → fatal error pointing at `ra setup`.
+- `.ra/config.yaml` — optional project-level overrides (found by walking up from cwd in `internal/config/discover.go`). Absent project config is a non-error: `FindProjectConfig` returns `("", nil)` and `LoadProjectConfig("")` yields an empty struct so commands work from any directory.
 
 `internal/config/merge.go` handles merging with field-level precedence. `internal/config/validate.go` enforces required fields and checks for env var collisions.
 
@@ -50,13 +50,13 @@ User-global and project-local both mirror the workstation image's `/etc/` layout
 
 ### Build context assembly
 
-`internal/scaffold/buildcontext.go` (`AssembleBuildContext`) produces an ephemeral `.ra/.build/` directory each time `ra create` runs. It merges core ra files with all installed plugins' contributions in priority order:
+`internal/scaffold/buildcontext.go` (`AssembleBuildContext`) produces an ephemeral docker build context each time `ra create` runs at `~/.cache/ra/build/<name>/` (never under the project dir, so creating from any cwd is safe). It merges core ra files with all installed plugins' contributions in priority order:
 
 - **Single-file resolution** (`Dockerfile`): project (`.ra/Dockerfile`) → user (`~/.config/ra/Dockerfile`) → embedded.
 - **Directory merge** (`Dockerfile.d/`, `workstation-startup.d/`, `profile.d/`): plugin files first, then user-global, then project-local — same-name files shadow.
 - **Whole-plugin staging** (`plugins/<name>/`): project shadows user; the assembler skips `.ra-install.yaml` so install metadata never lands in the image.
 
-The Dockerfile is generic and references build-context-relative paths (no `.ra/` prefix). `.ra/.build/` is gitignored and removed after every build (success or failure).
+`AssembleBuildContext` requires `BuildContextOptions.Dest` (output path); `Cwd` and `Home` are sourcing-only. The Dockerfile is generic and references build-context-relative paths. The cache dir is removed after every build (success or failure).
 
 ### Subcommands → Core Packages
 

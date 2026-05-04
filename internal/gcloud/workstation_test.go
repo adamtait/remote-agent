@@ -115,13 +115,13 @@ func TestClient_Describe_ParsesFields(t *testing.T) {
 	}
 }
 
-func TestClient_ListAll_ParsesFullResourceName(t *testing.T) {
+func TestClient_ListAll_ParsesJSONResourceName(t *testing.T) {
 	fake := &fakeRunner{
 		outputs: map[string][]byte{
-			"workstations list --project proj --region us-central1 --format value(name,state)": []byte(
-				"projects/proj/locations/us-central1/workstationClusters/cl/workstationConfigs/cfg-a/workstations/ws-1\tSTATE_RUNNING\n" +
-					"projects/proj/locations/us-central1/workstationClusters/cl/workstationConfigs/cfg-b/workstations/ws-2\tSTATE_STOPPED\n",
-			),
+			"workstations list --project proj --region us-central1 --format json": []byte(`[
+  {"name": "projects/proj/locations/us-central1/workstationClusters/cl-x/workstationConfigs/cfg-a/workstations/ws-1", "state": "STATE_RUNNING"},
+  {"name": "projects/proj/locations/us-central1/workstationClusters/cl-y/workstationConfigs/cfg-b/workstations/ws-2", "state": "STATE_STOPPED"}
+]`),
 		},
 	}
 	client := gcloud.NewClient(fake)
@@ -132,10 +132,10 @@ func TestClient_ListAll_ParsesFullResourceName(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("expected 2 workstations, got %d", len(list))
 	}
-	if list[0].ProjectName != "proj" || list[0].ConfigName != "cfg-a" || list[0].Name != "ws-1" || list[0].State != "STATE_RUNNING" {
+	if list[0].ProjectName != "proj" || list[0].ClusterName != "cl-x" || list[0].ConfigName != "cfg-a" || list[0].Name != "ws-1" || list[0].State != "STATE_RUNNING" {
 		t.Errorf("first entry: got %+v", list[0])
 	}
-	if list[1].ProjectName != "proj" || list[1].ConfigName != "cfg-b" || list[1].Name != "ws-2" || list[1].State != "STATE_STOPPED" {
+	if list[1].ProjectName != "proj" || list[1].ClusterName != "cl-y" || list[1].ConfigName != "cfg-b" || list[1].Name != "ws-2" || list[1].State != "STATE_STOPPED" {
 		t.Errorf("second entry: got %+v", list[1])
 	}
 }
@@ -143,7 +143,7 @@ func TestClient_ListAll_ParsesFullResourceName(t *testing.T) {
 func TestClient_ListAll_EmptyOutput(t *testing.T) {
 	fake := &fakeRunner{
 		outputs: map[string][]byte{
-			"workstations list --project proj --region us-central1 --format value(name,state)": []byte(""),
+			"workstations list --project proj --region us-central1 --format json": []byte("[]"),
 		},
 	}
 	client := gcloud.NewClient(fake)
@@ -153,6 +153,41 @@ func TestClient_ListAll_EmptyOutput(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Errorf("expected 0 workstations, got %d", len(list))
+	}
+}
+
+func TestClient_ListAll_CapturesHostAndCreateTime(t *testing.T) {
+	fake := &fakeRunner{
+		outputs: map[string][]byte{
+			"workstations list --project proj --region us-central1 --format json": []byte(`[
+  {"name": "projects/proj/locations/us-central1/workstationClusters/cl/workstationConfigs/cfg/workstations/ws", "state": "STATE_RUNNING", "host": "abc.workstations.dev", "createTime": "2024-01-15T10:00:00Z"}
+]`),
+		},
+	}
+	list, err := gcloud.NewClient(fake).ListAll("proj", "us-central1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 workstation, got %d", len(list))
+	}
+	if list[0].Host != "abc.workstations.dev" {
+		t.Errorf("Host: got %q, want abc.workstations.dev", list[0].Host)
+	}
+	if list[0].CreateTime != "2024-01-15T10:00:00Z" {
+		t.Errorf("CreateTime: got %q, want 2024-01-15T10:00:00Z", list[0].CreateTime)
+	}
+}
+
+func TestClient_ListAll_InvalidJSON(t *testing.T) {
+	fake := &fakeRunner{
+		outputs: map[string][]byte{
+			"workstations list --project proj --region us-central1 --format json": []byte("not json"),
+		},
+	}
+	client := gcloud.NewClient(fake)
+	if _, err := client.ListAll("proj", "us-central1"); err == nil {
+		t.Fatal("expected JSON parse error, got nil")
 	}
 }
 

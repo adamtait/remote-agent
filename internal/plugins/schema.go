@@ -12,20 +12,34 @@ type PluginSchema struct {
 
 // ConfigField declares one user-facing config field.
 type ConfigField struct {
-	Name        string      `yaml:"name"`
-	Type        string      `yaml:"type"` // "bool", "string", "int", "string_list"
-	Description string      `yaml:"description"`
-	Default     any         `yaml:"default"`
-	Required    bool        `yaml:"required"`
-	Options     []string    `yaml:"options"`
+	Name         string        `yaml:"name"`
+	Type         string        `yaml:"type"` // "bool", "string", "int", "string_list"
+	Description  string        `yaml:"description"`
+	Default      any           `yaml:"default"`
+	Required     bool          `yaml:"required"`
+	Options      []string      `yaml:"options"`
+	ValueCommand *ValueCommand `yaml:"value_command"`
 }
 
 // SecretDef declares one GCP Secret Manager secret the plugin needs.
 type SecretDef struct {
-	Name              string `yaml:"name"`
-	EnvVar            string `yaml:"env_var"`
-	Description       string `yaml:"description"`
-	DefaultSecretName string `yaml:"default_secret_name"`
+	Name              string        `yaml:"name"`
+	EnvVar            string        `yaml:"env_var"`
+	Description       string        `yaml:"description"`
+	DefaultSecretName string        `yaml:"default_secret_name"`
+	ValueCommand      *ValueCommand `yaml:"value_command"`
+}
+
+// ValueCommand declares an install-time local command that produces a plugin
+// config value or secret value.
+type ValueCommand struct {
+	Command     string   `yaml:"command"`
+	Args        []string `yaml:"args"`
+	Output      string   `yaml:"output"` // "stdout" or "file_base64"
+	Path        string   `yaml:"path"`
+	Validate    string   `yaml:"validate"` // currently "json" or empty
+	Interactive bool     `yaml:"interactive"`
+	Description string   `yaml:"description"`
 }
 
 // AuthProvider groups provider-specific secrets under a named auth method.

@@ -2,7 +2,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -10,7 +9,9 @@ import (
 )
 
 // FindProjectConfig walks up from startDir looking for .ra/config.yaml,
-// stopping at stopDir or the filesystem root.
+// stopping at stopDir or the filesystem root. Returns ("", nil) when no
+// project config is found — project-level config is optional and the
+// user-level config is the floor.
 func FindProjectConfig(startDir, stopDir string) (string, error) {
 	dir := startDir
 	for {
@@ -29,5 +30,5 @@ func FindProjectConfig(startDir, stopDir string) (string, error) {
 		dir = parent
 	}
 	logging.L().Debug("no project config found")
-	return "", fmt.Errorf("no .ra/config.yaml found; create one with 'ra setup' in your project root")
+	return "", nil
 }
