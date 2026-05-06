@@ -58,7 +58,7 @@ func runListAll() error {
 	for _, p := range projects {
 		ws, err := client.ListAll(p, "-")
 		if err != nil {
-			logging.L().Debug("listing workstations failed", "project", p, "err", err)
+			logging.WarnPrintf(os.Stderr, "skipping project %q: %v", p, err)
 			continue
 		}
 		all = append(all, ws...)
