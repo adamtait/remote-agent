@@ -26,9 +26,13 @@ func init() {
 	pluginInstallCmd.Flags().BoolVar(&pluginInstallUser, "user", false, "Install into ~/.config/ra/plugins/ (user level)")
 	pluginInstallCmd.Flags().BoolVar(&pluginInstallLocal, "local", false, "Install into .ra/plugins/ (project level)")
 	pluginInstallCmd.Flags().BoolVar(&pluginInstallForce, "force", false, "Overwrite existing plugin of the same name")
+	pluginUpdateCmd.Flags().BoolVar(&pluginUpdateUser, "user", false, "Only update plugins under ~/.config/ra/plugins/")
+	pluginUpdateCmd.Flags().BoolVar(&pluginUpdateLocal, "local", false, "Only update plugins under .ra/plugins/")
+	pluginUpdateCmd.Flags().BoolVar(&pluginUpdateCheck, "check", false, "Report which plugins are stale relative to their source; do not modify anything")
 	pluginCmd.AddCommand(pluginInstallCmd)
 	pluginCmd.AddCommand(pluginListCmd)
 	pluginCmd.AddCommand(pluginRemoveCmd)
+	pluginCmd.AddCommand(pluginUpdateCmd)
 	rootCmd.AddCommand(pluginCmd)
 }
 
@@ -61,34 +65,11 @@ var pluginInstallCmd = &cobra.Command{
 		source := resolvePluginSource(args[0])
 
 		// ── 1. acquire plugin into a temp dir ─────────────────────────────
-		tmp, err := os.MkdirTemp("", "ra-plugin-*")
+		tmp, cleanup, err := acquirePluginToTemp(source)
 		if err != nil {
-			return fmt.Errorf("creating temp dir: %w", err)
+			return err
 		}
-		defer os.RemoveAll(tmp)
-
-		if isLocalPath(source) {
-			// Local filesystem — copy into tmp so the rest of the flow is uniform.
-			abs, err := filepath.Abs(source)
-			if err != nil {
-				return fmt.Errorf("resolving local path: %w", err)
-			}
-			if err := copyDir(abs, tmp); err != nil {
-				return fmt.Errorf("copying local plugin: %w", err)
-			}
-		} else {
-			// Remote git URL.
-			logging.L().Debug("git clone starting", "source", source)
-			clone := exec.Command("git", "clone", "--depth=1", source, tmp)
-			clone.Stdout = os.Stdout
-			clone.Stderr = os.Stderr
-			if err := clone.Run(); err != nil {
-				logging.L().Debug("git clone failed", "source", source, "error", err.Error())
-				return fmt.Errorf("git clone: %w", err)
-			} else {
-				logging.L().Debug("git clone ok", "source", source)
-			}
-		}
+		defer cleanup()
 
 		// ── 2. parse plugin.yaml ───────────────────────────────────────────
 		p, err := plugins.LoadPlugin(os.DirFS(tmp))
@@ -395,6 +376,266 @@ var pluginRemoveCmd = &cobra.Command{
 	},
 }
 
+// ── update ────────────────────────────────────────────────────────────────────
+
+var pluginUpdateUser bool
+var pluginUpdateLocal bool
+var pluginUpdateCheck bool
+
+// installedPlugin describes a plugin that is currently installed at one level.
+type installedPlugin struct {
+	Name    string
+	Level   string // "user" or "project"
+	Dir     string // absolute path to the installed plugin directory
+	Meta    installMeta
+	HasMeta bool // false when .ra-install.yaml is missing or unreadable
+}
+
+var pluginUpdateCmd = &cobra.Command{
+	Use:   "update [name...]",
+	Short: "Refresh installed plugins from their original source",
+	Long: `Re-fetches each plugin's content from the "source:" recorded in its
+.ra-install.yaml and overwrites the installed directory. config.yaml and
+GCP secrets are never touched — if the plugin's schema (config keys,
+secrets, auth providers) has changed in the source, re-run
+'ra plugin install --force' interactively to pick up the new prompts.
+
+With no arguments, every installed plugin is updated. With names, only
+those plugins are updated. --user / --local restrict to one level.`,
+	Args: cobra.ArbitraryArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if pluginUpdateUser && pluginUpdateLocal {
+			return fmt.Errorf("--user and --local are mutually exclusive")
+		}
+
+		targets, err := discoverInstalledPlugins(args, pluginUpdateUser, pluginUpdateLocal)
+		if err != nil {
+			return err
+		}
+		if len(targets) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "(no matching plugins installed)")
+			return nil
+		}
+
+		if pluginUpdateCheck {
+			return reportStaleness(cmd, targets)
+		}
+		return refreshAll(cmd, targets)
+	},
+}
+
+// discoverInstalledPlugins returns installedPlugin entries for every plugin
+// directory under the requested levels, optionally filtered by name.
+// Names that match nothing produce an error so typos surface immediately.
+func discoverInstalledPlugins(names []string, userOnly, localOnly bool) ([]installedPlugin, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("determining home directory: %w", err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("determining working directory: %w", err)
+	}
+
+	type levelDir struct {
+		level string
+		base  string
+	}
+	var bases []levelDir
+	if !localOnly {
+		bases = append(bases, levelDir{"user", filepath.Join(home, ".config", "ra", "plugins")})
+	}
+	if !userOnly {
+		bases = append(bases, levelDir{"project", filepath.Join(wd, ".ra", "plugins")})
+	}
+
+	wanted := map[string]bool{}
+	for _, n := range names {
+		wanted[n] = true
+	}
+	var out []installedPlugin
+	matched := map[string]bool{}
+	for _, b := range bases {
+		entries, err := os.ReadDir(b.base)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("reading %s: %w", b.base, err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if len(wanted) > 0 && !wanted[name] {
+				continue
+			}
+			dir := filepath.Join(b.base, name)
+			meta := readInstallMeta(dir)
+			has := metaPopulated(meta)
+			out = append(out, installedPlugin{
+				Name: name, Level: b.level, Dir: dir, Meta: meta, HasMeta: has,
+			})
+			matched[name] = true
+		}
+	}
+
+	for n := range wanted {
+		if !matched[n] {
+			return nil, fmt.Errorf("plugin %q is not installed at the requested level(s)", n)
+		}
+	}
+	return out, nil
+}
+
+// metaPopulated reports whether the installMeta carries useful content (i.e.
+// the .ra-install.yaml file existed and parsed). The zero value yields false.
+func metaPopulated(m installMeta) bool {
+	return m.Source != "" || m.InstalledAt != ""
+}
+
+// reportStaleness prints a one-line summary per target. For local-path
+// sources it compares mtime to installed_at; for git URLs it cannot compare
+// without the previous commit hash, so it suggests re-running update to
+// refresh.
+func reportStaleness(cmd *cobra.Command, targets []installedPlugin) error {
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "NAME\tLEVEL\tSTATUS\tDETAIL")
+	anyStale := false
+	for _, t := range targets {
+		status, detail := stalenessFor(t)
+		if status == "stale" {
+			anyStale = true
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.Name, t.Level, status, detail)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if anyStale {
+		return fmt.Errorf("one or more plugins are stale; run 'ra plugin update' to refresh")
+	}
+	return nil
+}
+
+// stalenessFor returns (status, detail) for a single installed plugin.
+// status is one of: "fresh", "stale", "unknown", "no-meta".
+func stalenessFor(t installedPlugin) (string, string) {
+	if !t.HasMeta {
+		return "no-meta", ".ra-install.yaml missing; cannot determine source"
+	}
+	if t.Meta.Source == "" {
+		return "no-meta", "source field empty in .ra-install.yaml"
+	}
+	if !isLocalPath(t.Meta.Source) {
+		return "unknown", "git URL — re-run 'ra plugin update " + t.Name + "' to refresh from remote"
+	}
+	abs, err := filepath.Abs(t.Meta.Source)
+	if err != nil {
+		return "unknown", "cannot resolve source path: " + err.Error()
+	}
+	if fi, err := os.Stat(abs); err != nil || !fi.IsDir() {
+		return "unknown", "source path " + abs + " not found from current cwd"
+	}
+	installedAt, err := time.Parse(time.RFC3339, t.Meta.InstalledAt)
+	if err != nil {
+		return "unknown", "cannot parse installed_at: " + err.Error()
+	}
+	newest, err := newestMTime(abs)
+	if err != nil {
+		return "unknown", "walking source: " + err.Error()
+	}
+	if newest.After(installedAt) {
+		return "stale", "source modified " + newest.Format(time.RFC3339) + " (installed " + t.Meta.InstalledAt + ")"
+	}
+	return "fresh", "source unchanged since install"
+}
+
+// newestMTime returns the most recent modification time of any file or
+// directory under root.
+func newestMTime(root string) (time.Time, error) {
+	var newest time.Time
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if mt := info.ModTime(); mt.After(newest) {
+			newest = mt
+		}
+		return nil
+	})
+	return newest, err
+}
+
+// refreshAll runs the actual update for each target. Failures on individual
+// plugins are reported but do not abort the others; the function returns a
+// non-nil error if any plugin failed.
+func refreshAll(cmd *cobra.Command, targets []installedPlugin) error {
+	out := cmd.OutOrStdout()
+	errOut := cmd.ErrOrStderr()
+	var failures int
+	for _, t := range targets {
+		if err := refreshOne(out, errOut, t); err != nil {
+			fmt.Fprintf(errOut, "%s (%s): %v\n", t.Name, t.Level, err)
+			failures++
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("%d plugin(s) failed to update", failures)
+	}
+	return nil
+}
+
+// refreshOne re-acquires a single plugin from its recorded source, validates
+// it, swaps the directory contents, and refreshes installed_at.
+func refreshOne(out, errOut io.Writer, t installedPlugin) error {
+	if !t.HasMeta {
+		fmt.Fprintf(errOut, "%s (%s): skipped — .ra-install.yaml missing\n", t.Name, t.Level)
+		return nil
+	}
+	if t.Meta.Source == "" {
+		fmt.Fprintf(errOut, "%s (%s): skipped — source field empty in .ra-install.yaml\n", t.Name, t.Level)
+		return nil
+	}
+
+	tmp, cleanup, err := acquirePluginToTemp(t.Meta.Source)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	p, err := plugins.LoadPlugin(os.DirFS(tmp))
+	if err != nil {
+		return fmt.Errorf("reading source plugin.yaml: %w", err)
+	}
+	if p.Name() != t.Name {
+		return fmt.Errorf("source declares plugin name %q but installed name is %q", p.Name(), t.Name)
+	}
+
+	if err := os.RemoveAll(t.Dir); err != nil {
+		return fmt.Errorf("removing old plugin directory: %w", err)
+	}
+	if err := copyDir(tmp, t.Dir); err != nil {
+		return fmt.Errorf("copying refreshed plugin: %w", err)
+	}
+
+	meta := installMeta{
+		Source:      t.Meta.Source,
+		InstalledAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	metaBytes, err := yaml.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshalling install meta: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(t.Dir, ".ra-install.yaml"), metaBytes, 0644); err != nil {
+		return fmt.Errorf("writing .ra-install.yaml: %w", err)
+	}
+
+	fmt.Fprintf(out, "Updated plugin %q at %s (level %s)\n", t.Name, t.Dir, t.Level)
+	return nil
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // chooseInstallLevel returns "user" or "project" based on flags or interactive prompt.
@@ -692,6 +933,46 @@ func readInstallMeta(pluginDir string) installMeta {
 func dirExists(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && fi.IsDir()
+}
+
+// acquirePluginToTemp resolves a plugin source (local path or git URL) into a
+// freshly-created temp directory. The returned cleanup removes the temp dir.
+// Used by both `plugin install` and `plugin update`.
+func acquirePluginToTemp(source string) (string, func(), error) {
+	tmp, err := os.MkdirTemp("", "ra-plugin-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("creating temp dir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+
+	if isLocalPath(source) {
+		abs, err := filepath.Abs(source)
+		if err != nil {
+			cleanup()
+			return "", func() {}, fmt.Errorf("resolving local path: %w", err)
+		}
+		if fi, err := os.Stat(abs); err != nil || !fi.IsDir() {
+			cleanup()
+			return "", func() {}, fmt.Errorf("source path %s does not exist or is not a directory", abs)
+		}
+		if err := copyDir(abs, tmp); err != nil {
+			cleanup()
+			return "", func() {}, fmt.Errorf("copying local plugin: %w", err)
+		}
+		return tmp, cleanup, nil
+	}
+
+	logging.L().Debug("git clone starting", "source", source)
+	clone := exec.Command("git", "clone", "--depth=1", source, tmp)
+	clone.Stdout = os.Stdout
+	clone.Stderr = os.Stderr
+	if err := clone.Run(); err != nil {
+		logging.L().Debug("git clone failed", "source", source, "error", err.Error())
+		cleanup()
+		return "", func() {}, fmt.Errorf("git clone: %w", err)
+	}
+	logging.L().Debug("git clone ok", "source", source)
+	return tmp, cleanup, nil
 }
 
 // copyDir recursively copies src directory to dst.
