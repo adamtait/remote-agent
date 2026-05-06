@@ -183,6 +183,29 @@ func TestBuildContainerEnv_IncludesSecretsAndEnv(t *testing.T) {
 			t.Errorf("container env still contains old key %q: %q", banned, got)
 		}
 	}
+
+	// RA_PROPAGATE_KEYS must list identity vars and any cfg.Env keys, so
+	// 200_remote-agent-setup.sh can re-export them into /etc/environment and
+	// /run/ra/env (login shells don't inherit PID-1 env). It MUST NOT list
+	// the RA_SECRETS bookkeeping keys (RA_SECRETS, RA_SECRET_*_NAME,
+	// RA_SECRET_*_VAR) — those are useless to login shells; the actual
+	// fetched secret values get exported under their target env var names by
+	// the secret-fetch loop.
+	propParts := strings.Split(m["RA_PROPAGATE_KEYS"], "|")
+	propSet := map[string]bool{}
+	for _, k := range propParts {
+		propSet[k] = true
+	}
+	for _, want := range []string{"GCP_PROJECT_ID", "GIT_USER_NAME", "GIT_USER_EMAIL", "STATIC_KEY"} {
+		if !propSet[want] {
+			t.Errorf("RA_PROPAGATE_KEYS missing %q: %q", want, m["RA_PROPAGATE_KEYS"])
+		}
+	}
+	for _, banned := range []string{"RA_SECRETS", "RA_SECRET_EXAMPLE_SECRET_NAME", "RA_SECRET_EXAMPLE_SECRET_VAR", "RA_SECRET_MY_EXTRA_NAME", "RA_SECRET_MY_EXTRA_VAR"} {
+		if propSet[banned] {
+			t.Errorf("RA_PROPAGATE_KEYS must not include bookkeeping key %q: %q", banned, m["RA_PROPAGATE_KEYS"])
+		}
+	}
 }
 
 // loadTestPlugin loads a plugin from an inline YAML literal — used by the

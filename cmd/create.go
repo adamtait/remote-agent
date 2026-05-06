@@ -43,13 +43,26 @@ func logicalNameToEnvToken(logical string) string {
 
 func buildContainerEnv(cfg *config.Config) string {
 	var pairs []string
+	// propagate is the explicit allowlist of keys that 200_remote-agent-setup.sh
+	// re-exports into /etc/environment and /run/ra/env so sshd login shells
+	// (which do NOT inherit PID-1 env) can see them. We exclude the RA_SECRETS
+	// bookkeeping keys because their fetched values are exported under their
+	// target_env_var names by the secret-fetch loop already.
+	var propagate []string
 	add := func(k, v string) { pairs = append(pairs, k+"="+v) }
+	addProp := func(k, v string) {
+		pairs = append(pairs, k+"="+v)
+		propagate = append(propagate, k)
+	}
 
-	add("GCP_PROJECT_ID", cfg.Gcloud.Project)
-	add("GIT_USER_NAME", cfg.Git.UserName)
-	add("GIT_USER_EMAIL", cfg.Git.UserEmail)
+	addProp("GCP_PROJECT_ID", cfg.Gcloud.Project)
+	addProp("GIT_USER_NAME", cfg.Git.UserName)
+	addProp("GIT_USER_EMAIL", cfg.Git.UserEmail)
 	for _, pair := range reg.AllContainerEnvPairs(cfg) {
 		pairs = append(pairs, pair)
+		if eq := strings.IndexByte(pair, '='); eq > 0 {
+			propagate = append(propagate, pair[:eq])
+		}
 	}
 
 	logicalNames := make([]string, 0, len(cfg.Secrets))
@@ -71,8 +84,10 @@ func buildContainerEnv(cfg *config.Config) string {
 	}
 	sort.Strings(envKeys)
 	for _, k := range envKeys {
-		add(k, cfg.Env[k])
+		addProp(k, cfg.Env[k])
 	}
+
+	add("RA_PROPAGATE_KEYS", strings.Join(propagate, "|"))
 
 	return strings.Join(pairs, ",")
 }

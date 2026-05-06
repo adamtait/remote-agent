@@ -86,6 +86,8 @@ Plugin scripts in `workstation-startup.d/` run independently from `200_remote-ag
 [ "${RA_PLUGIN_<NAME>_ENABLED:-false}" = "true" ] || exit 0
 ```
 
+Plugin scripts in `profile.d/` run inside the user's interactive login shell. They do NOT need to source `/run/ra/env` themselves — `00-ra-wait.sh` (shipped by ra core) waits for the entrypoint sentinel and sources it before any later profile.d script runs. `RA_PLUGIN_<NAME>_*` config vars are propagated from PID-1 env into `/run/ra/env` and `/etc/environment` by `200_remote-agent-setup.sh` (driven by the `RA_PROPAGATE_KEYS` allowlist that `cmd/create.go buildContainerEnv` emits), so login-shell gates on those flags Just Work.
+
 `<repo>/plugins/claude/` and `<repo>/plugins/github/` are the in-tree homes for the claude and github plugins. The github plugin (Dockerfile.d/100_github-cli.sh + workstation-startup.d/250_github-credential-helper.sh + workstation-startup.d/260_github-clone.sh) extracts what used to be hardcoded in core: gh CLI install, the PAT git credential helper, and first-boot repo clone. A workstation only does GitHub things if the user runs `ra plugin install ./plugins/github`. A subsequent changeset extracts each plugin to its own git repo.
 
 ### Zero-Secrets Design
