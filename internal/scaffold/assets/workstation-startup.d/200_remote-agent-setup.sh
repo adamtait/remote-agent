@@ -37,11 +37,15 @@ log() {
 }
 
 # _ra_export_env writes a key=value pair to both /etc/environment and
-# /run/ra/env (creating the latter lazily). Used by all secret handlers
-# so plugin scripts that source /run/ra/env see fetched values.
+# /run/ra/env (creating the latter lazily). Both files are deduped per-key
+# so repeat calls (or repeat boots) don't accumulate stale entries.
+# Keys are valid env var names ([A-Za-z_][A-Za-z0-9_]*), so the sed regex
+# is safe without escaping.
 _ra_export_env() {
     local key="$1"
     local val="$2"
+    [[ -f /etc/environment ]] || : > /etc/environment
+    sed -i "/^${key}=/d" /etc/environment
     echo "${key}=${val}" >> /etc/environment
     umask 077
     if [[ ! -f "${RA_ENV_FILE}" ]]; then
@@ -99,6 +103,34 @@ for logical in "${ra_secret_names[@]}"; do
         log "WARNING: ${secret_name} fetch returned empty."
     fi
 done
+
+# =============================================================================
+# Propagate container env to login shells.
+#
+# `--container-env=` from `gcloud workstations configs ...` lands in the
+# container's PID-1 environment, which startup-d scripts inherit but sshd's
+# login shells do not. Without this loop, RA_PLUGIN_<NAME>_ENABLED (and other
+# plugin/identity/free-form config vars) are visible to
+# /etc/workstation-startup.d/ scripts but missing from /etc/environment and
+# /run/ra/env — so /etc/profile.d/ gates like the tmux autoattach silently
+# default to disabled.
+#
+# RA_PROPAGATE_KEYS is a pipe-separated allowlist emitted by `ra create`
+# (cmd/create.go buildContainerEnv). Iterating it — rather than walking
+# `env` with a prefix denylist — keeps RA_SECRETS bookkeeping out and
+# handles values containing newlines correctly (we look up via ${!key}
+# instead of parsing line-oriented `env` output).
+# =============================================================================
+if [[ -n "${RA_PROPAGATE_KEYS:-}" ]]; then
+    IFS='|' read -r -a _ra_propagate_keys <<<"${RA_PROPAGATE_KEYS}"
+    for _key in "${_ra_propagate_keys[@]}"; do
+        [[ -z "${_key}" ]] && continue
+        _val="${!_key:-}"
+        _ra_export_env "${_key}" "${_val}"
+        log "Propagated ${_key} via /etc/environment and ${RA_ENV_FILE}."
+    done
+    unset _ra_propagate_keys _key _val
+fi
 
 
 touch "${RA_READY_SENTINEL}"
