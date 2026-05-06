@@ -50,6 +50,10 @@ func runListAll() error {
 	if err != nil {
 		return err
 	}
+	if len(projects) == 0 {
+		fmt.Println("No accessible GCP projects (check `gcloud auth list`).")
+		return nil
+	}
 	var all []gcloud.WorkstationInfo
 	for _, p := range projects {
 		ws, err := client.ListAll(p, "-")
