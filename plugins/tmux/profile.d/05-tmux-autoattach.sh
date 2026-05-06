@@ -14,6 +14,15 @@
 # this prevents nested attach when the user SSHes from a local tmux session.
 [ -z "${TMUX:-}" ] || return 0
 
+# Some terminals (Ghostty, Kitty, WezTerm) advertise a TERM whose terminfo
+# entry is not in Ubuntu's ncurses packages. tmux refuses to start with
+# "missing or unsuitable terminal: <TERM>" and, because we exec tmux below,
+# that closes the SSH session entirely. Fall back to xterm-256color when
+# the current TERM has no terminfo, so the session always starts.
+if [ -z "${TERM:-}" ] || ! infocmp -- "${TERM}" >/dev/null 2>&1; then
+    export TERM=xterm-256color
+fi
+
 SESSION_NAME="${RA_PLUGIN_TMUX_SESSION_NAME:-main}"
 START_DIRECTORY="${RA_PLUGIN_TMUX_START_DIRECTORY:-}"
 
