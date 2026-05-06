@@ -204,14 +204,25 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 			fmt.Fprintf(os.Stderr, "Secret %q already exists (use 'gcloud secrets versions add' to rotate)\n", s.SecretName)
 			continue
 		}
-		prompt := fmt.Sprintf("Enter value for secret %q (env var %s)", s.SecretName, s.EnvVar)
-		value, err := secrets.PromptValue(prompt, os.Stderr, os.Stdin)
+		// Missing in the target project — typically because the user
+		// switched gcloud.project after `ra plugin install` uploaded the
+		// secret to a different project. Look up the owning plugin so
+		// codex-style value_command flows (e.g. `codex login`) re-run
+		// instead of falling back to a plain text prompt that can't
+		// produce the right value.
+		plugin, def, ok := reg.FindSecretOwner(cfg, logical)
+		if !ok {
+			return fmt.Errorf("secret %q is referenced in config but no installed plugin owns it; "+
+				"run `ra plugin install <name>` to (re)install the plugin, or remove the orphaned entry from config.yaml",
+				logical)
+		}
+		val, err := plugins.CollectSecretValue(os.Stdin, os.Stderr, *def)
 		if err != nil {
-			return fmt.Errorf("prompting for secret %s: %w", s.SecretName, err)
+			return fmt.Errorf("collecting value for secret %s (plugin %s): %w", s.SecretName, plugin.Name(), err)
 		}
 		pendingSecrets = append(pendingSecrets, pendingSecret{
 			gcpName: s.SecretName,
-			value:   value,
+			value:   []byte(val),
 		})
 	}
 

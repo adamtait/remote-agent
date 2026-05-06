@@ -200,7 +200,7 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 
 	values := make(map[string]string)
 	for _, s := range p.schema.Secrets {
-		v, e := collectSecretValue(stdin, stderr, s)
+		v, e := CollectSecretValue(stdin, stderr, s)
 		if e != nil {
 			return nil, e
 		}
@@ -208,7 +208,7 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 	}
 	if activeProvider != nil {
 		for _, s := range activeProvider.Secrets {
-			v, e := collectSecretValue(stdin, stderr, s)
+			v, e := CollectSecretValue(stdin, stderr, s)
 			if e != nil {
 				return nil, e
 			}
@@ -223,7 +223,12 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 	}, nil
 }
 
-func collectSecretValue(stdin *os.File, stderr io.Writer, s SecretDef) (string, error) {
+// CollectSecretValue collects one secret's plaintext value, dispatching
+// to the schema's value_command (interactive CLI capture, e.g. `codex
+// login`) when defined, or to a hidden text prompt otherwise. Used by
+// `ra plugin install` and by `ra create` pre-flight when a referenced
+// secret is missing from the target gcloud project.
+func CollectSecretValue(stdin *os.File, stderr io.Writer, s SecretDef) (string, error) {
 	if s.ValueCommand != nil {
 		return runValueCommand(*s.ValueCommand, stderr, stdin)
 	}
