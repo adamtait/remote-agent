@@ -26,6 +26,7 @@ type WorkstationInfo struct {
 	Host        string
 	CreateTime  string // RFC3339; populated by List
 	ProjectName string // populated by ListAll
+	Region      string // populated by ListAll
 	ClusterName string // populated by ListAll
 	ConfigName  string // populated by ListAll
 }
@@ -75,8 +76,8 @@ func (c *Client) List(project, region, cluster, cfgName string) ([]WorkstationIn
 }
 
 // ListAll returns all workstations across all configs in the given project and region.
-// region must be non-empty; it is validated by config.Validate before any command runs.
-// Each WorkstationInfo is populated with ProjectName/ClusterName/ConfigName
+// Pass "-" as region to aggregate across all regions (gcloud's wildcard convention).
+// Each WorkstationInfo is populated with ProjectName/Region/ClusterName/ConfigName
 // parsed from the full resource URI returned by the workstations API.
 func (c *Client) ListAll(project, region string) ([]WorkstationInfo, error) {
 	if region == "" {
@@ -115,11 +116,32 @@ func (c *Client) ListAll(project, region string) ([]WorkstationInfo, error) {
 		// full resource name: projects/P/locations/R/workstationClusters/C/workstationConfigs/F/workstations/N
 		if segments := strings.Split(r.Name, "/"); len(segments) == 10 {
 			info.ProjectName = segments[1]
+			info.Region = segments[3]
 			info.ClusterName = segments[5]
 			info.ConfigName = segments[7]
 			info.Name = segments[9]
 		}
 		result = append(result, info)
+	}
+	return result, nil
+}
+
+// ListProjects returns the IDs of all GCP projects the caller can access.
+func (c *Client) ListProjects() ([]string, error) {
+	out, err := c.runner.Output(
+		"projects", "list",
+		"--format", "value(projectId)",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var result []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		result = append(result, line)
 	}
 	return result, nil
 }
