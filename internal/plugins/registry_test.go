@@ -1,6 +1,8 @@
 package plugins
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 
@@ -49,5 +51,182 @@ func TestRegistry_ContainerEnvPairs(t *testing.T) {
 	// alpha has no config fields, so no pairs
 	if len(pairs) != 0 {
 		t.Errorf("expected 0 pairs, got %v", pairs)
+	}
+}
+
+// writePluginYAML drops a plugin.yaml file with arbitrary contents under
+// dir/<name>/plugin.yaml. Used by FindSecretOwner tests to exercise the
+// real LoadAll → Registry path.
+func writePluginYAML(t *testing.T, dir, name, body string) {
+	t.Helper()
+	d := filepath.Join(dir, name)
+	if err := os.MkdirAll(d, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "plugin.yaml"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func loadRegistryFromDir(t *testing.T, userDir, projDir string) *Registry {
+	t.Helper()
+	ps, err := LoadAll(userDir, projDir)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	return NewRegistry(ps)
+}
+
+func TestFindSecretOwner_PluginLevel(t *testing.T) {
+	dir := t.TempDir()
+	writePluginYAML(t, dir, "github", `name: github
+version: "1.0.0"
+description: "d"
+secrets:
+  - name: github_pat
+    env_var: GH_TOKEN
+    description: "PAT"
+    default_secret_name: github-pat
+`)
+	reg := loadRegistryFromDir(t, dir, "")
+
+	p, def, ok := reg.FindSecretOwner(&config.Config{}, "github_pat")
+	if !ok {
+		t.Fatal("expected to find github_pat")
+	}
+	if p.Name() != "github" {
+		t.Errorf("expected plugin github, got %q", p.Name())
+	}
+	if def.EnvVar != "GH_TOKEN" {
+		t.Errorf("expected EnvVar=GH_TOKEN, got %q", def.EnvVar)
+	}
+}
+
+func TestFindSecretOwner_AuthProviderScoped(t *testing.T) {
+	dir := t.TempDir()
+	writePluginYAML(t, dir, "claude", `name: claude
+version: "1.0.0"
+description: "d"
+auth_providers:
+  - name: api_key
+    description: "API key"
+    secrets:
+      - name: claude_api_key
+        env_var: ANTHROPIC_API_KEY
+        default_secret_name: claude-api-key
+  - name: vertex
+    description: "Vertex"
+    iam_roles:
+      - roles/aiplatform.user
+`)
+	reg := loadRegistryFromDir(t, dir, "")
+
+	cfg := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"claude": {"auth_provider": "api_key"},
+		},
+	}
+	p, def, ok := reg.FindSecretOwner(cfg, "claude_api_key")
+	if !ok {
+		t.Fatal("expected to find claude_api_key under active auth_provider api_key")
+	}
+	if p.Name() != "claude" || def.EnvVar != "ANTHROPIC_API_KEY" {
+		t.Errorf("got plugin=%q env=%q", p.Name(), def.EnvVar)
+	}
+}
+
+func TestFindSecretOwner_AuthProviderInactive(t *testing.T) {
+	// Same plugin, but the active auth_provider is "vertex" which has no
+	// secrets — claude_api_key must not be returned.
+	dir := t.TempDir()
+	writePluginYAML(t, dir, "claude", `name: claude
+version: "1.0.0"
+description: "d"
+auth_providers:
+  - name: api_key
+    description: "API key"
+    secrets:
+      - name: claude_api_key
+        env_var: ANTHROPIC_API_KEY
+        default_secret_name: claude-api-key
+  - name: vertex
+    description: "Vertex"
+    iam_roles:
+      - roles/aiplatform.user
+`)
+	reg := loadRegistryFromDir(t, dir, "")
+
+	cfg := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"claude": {"auth_provider": "vertex"},
+		},
+	}
+	if _, _, ok := reg.FindSecretOwner(cfg, "claude_api_key"); ok {
+		t.Fatal("expected claude_api_key to be unreachable when active provider is vertex")
+	}
+}
+
+func TestFindSecretOwner_Orphan(t *testing.T) {
+	dir := t.TempDir()
+	writePluginYAML(t, dir, "github", `name: github
+version: "1.0.0"
+description: "d"
+secrets:
+  - name: github_pat
+    env_var: GH_TOKEN
+    default_secret_name: github-pat
+`)
+	reg := loadRegistryFromDir(t, dir, "")
+
+	if _, _, ok := reg.FindSecretOwner(&config.Config{}, "ghost_secret"); ok {
+		t.Fatal("expected ok=false for orphan logical name")
+	}
+}
+
+func TestFindSecretOwner_NilRegistry(t *testing.T) {
+	var reg *Registry
+	if _, _, ok := reg.FindSecretOwner(&config.Config{}, "anything"); ok {
+		t.Fatal("nil registry must return ok=false")
+	}
+}
+
+func TestFindSecretOwner_ValueCommandPreserved(t *testing.T) {
+	// The codex case: the returned SecretDef must carry the value_command
+	// so callers can dispatch through CollectSecretValue.
+	dir := t.TempDir()
+	writePluginYAML(t, dir, "codex", `name: codex
+version: "1.0.0"
+description: "d"
+auth_providers:
+  - name: oauth
+    description: "OAuth"
+    secrets:
+      - name: codex_auth_json
+        env_var: CODEX_AUTH_JSON_B64
+        default_secret_name: codex-auth-json
+        value_command:
+          command: codex
+          args: ["login"]
+          output: file_base64
+          path: "~/.codex/auth.json"
+          validate: json
+          interactive: true
+`)
+	reg := loadRegistryFromDir(t, dir, "")
+
+	cfg := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"codex": {"auth_provider": "oauth"},
+		},
+	}
+	_, def, ok := reg.FindSecretOwner(cfg, "codex_auth_json")
+	if !ok {
+		t.Fatal("expected to find codex_auth_json")
+	}
+	if def.ValueCommand == nil {
+		t.Fatal("expected ValueCommand to be preserved")
+	}
+	if def.ValueCommand.Command != "codex" || def.ValueCommand.Output != "file_base64" {
+		t.Errorf("unexpected value_command: %+v", def.ValueCommand)
 	}
 }
