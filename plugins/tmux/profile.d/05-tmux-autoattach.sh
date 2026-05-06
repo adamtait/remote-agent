@@ -30,11 +30,20 @@ START_DIRECTORY="${RA_PLUGIN_TMUX_START_DIRECTORY:-}"
 # crash) or the user logs in before 250_tmux-start.sh has finished, this
 # recreates it rather than erroring. -c is honored only on creation; it is
 # ignored when attaching to an existing session, so passing it is safe.
+tmux_args=( new-session -A -s "${SESSION_NAME}" )
 if [ -n "${START_DIRECTORY}" ]; then
     START_DIRECTORY="${START_DIRECTORY/#\~/${HOME}}"
     if [ -d "${START_DIRECTORY}" ]; then
-        exec tmux new-session -A -s "${SESSION_NAME}" -c "${START_DIRECTORY}"
+        tmux_args+=( -c "${START_DIRECTORY}" )
     fi
 fi
 
-exec tmux new-session -A -s "${SESSION_NAME}"
+# Run tmux without exec so a startup failure (unknown TERM that slipped past
+# the fallback above, broken /etc/tmux.conf, corrupt socket, …) cannot leave
+# the user without a shell. exec'ing a failing tmux closes the SSH session
+# entirely; the explicit bash -l fallback keeps the connection usable.
+if ! tmux "${tmux_args[@]}"; then
+    echo "tmux plugin: failed to attach session; dropping into login shell." >&2
+    exec bash -l
+fi
+exit 0
