@@ -100,6 +100,30 @@ for logical in "${ra_secret_names[@]}"; do
     fi
 done
 
+# =============================================================================
+# Propagate container env to login shells.
+#
+# `--container-env=` from `gcloud workstations configs ...` lands in the
+# container's PID-1 environment, which startup-d scripts inherit but sshd's
+# login shells do not. Without this loop, RA_PLUGIN_<NAME>_ENABLED (and other
+# plugin config vars) are visible to /etc/workstation-startup.d/ scripts but
+# missing from /etc/environment and /run/ra/env — so /etc/profile.d/ gates
+# like the tmux autoattach silently default to disabled.
+#
+# We only propagate the documented contract keys (see header): plugin vars
+# and the identity triple. Secrets are NOT in this prefix set and were already
+# written by the dispatch loop above.
+# =============================================================================
+while IFS='=' read -r _prop_key _prop_val; do
+    case "${_prop_key}" in
+        RA_PLUGIN_*|GCP_PROJECT_ID|GIT_USER_NAME|GIT_USER_EMAIL)
+            _ra_export_env "${_prop_key}" "${_prop_val}"
+            log "Propagated ${_prop_key} via /etc/environment and ${RA_ENV_FILE}."
+            ;;
+    esac
+done < <(env)
+unset _prop_key _prop_val
+
 
 touch "${RA_READY_SENTINEL}"
 chmod 0644 "${RA_READY_SENTINEL}"
