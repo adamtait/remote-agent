@@ -132,11 +132,71 @@ func TestClient_ListAll_ParsesJSONResourceName(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("expected 2 workstations, got %d", len(list))
 	}
-	if list[0].ProjectName != "proj" || list[0].ClusterName != "cl-x" || list[0].ConfigName != "cfg-a" || list[0].Name != "ws-1" || list[0].State != "STATE_RUNNING" {
+	if list[0].ProjectName != "proj" || list[0].Region != "us-central1" || list[0].ClusterName != "cl-x" || list[0].ConfigName != "cfg-a" || list[0].Name != "ws-1" || list[0].State != "STATE_RUNNING" {
 		t.Errorf("first entry: got %+v", list[0])
 	}
-	if list[1].ProjectName != "proj" || list[1].ClusterName != "cl-y" || list[1].ConfigName != "cfg-b" || list[1].Name != "ws-2" || list[1].State != "STATE_STOPPED" {
+	if list[1].ProjectName != "proj" || list[1].Region != "us-central1" || list[1].ClusterName != "cl-y" || list[1].ConfigName != "cfg-b" || list[1].Name != "ws-2" || list[1].State != "STATE_STOPPED" {
 		t.Errorf("second entry: got %+v", list[1])
+	}
+}
+
+func TestClient_ListAll_RegionWildcardForwarded(t *testing.T) {
+	fake := &fakeRunner{
+		outputs: map[string][]byte{
+			"workstations list --project proj --region - --format json": []byte(`[
+  {"name": "projects/proj/locations/us-central1/workstationClusters/cl/workstationConfigs/cfg/workstations/ws-a", "state": "STATE_RUNNING"},
+  {"name": "projects/proj/locations/europe-west4/workstationClusters/cl/workstationConfigs/cfg/workstations/ws-b", "state": "STATE_STOPPED"}
+]`),
+		},
+	}
+	list, err := gcloud.NewClient(fake).ListAll("proj", "-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 workstations, got %d", len(list))
+	}
+	if list[0].Region != "us-central1" {
+		t.Errorf("first region: got %q, want us-central1", list[0].Region)
+	}
+	if list[1].Region != "europe-west4" {
+		t.Errorf("second region: got %q, want europe-west4", list[1].Region)
+	}
+}
+
+func TestClient_ListProjects_Parses(t *testing.T) {
+	fake := &fakeRunner{
+		outputs: map[string][]byte{
+			"projects list --format value(projectId)": []byte("proj-a\nproj-b\nproj-c\n"),
+		},
+	}
+	projects, err := gcloud.NewClient(fake).ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"proj-a", "proj-b", "proj-c"}
+	if len(projects) != len(want) {
+		t.Fatalf("expected %d projects, got %d", len(want), len(projects))
+	}
+	for i, p := range projects {
+		if p != want[i] {
+			t.Errorf("projects[%d]: got %q, want %q", i, p, want[i])
+		}
+	}
+}
+
+func TestClient_ListProjects_Empty(t *testing.T) {
+	fake := &fakeRunner{
+		outputs: map[string][]byte{
+			"projects list --format value(projectId)": []byte(""),
+		},
+	}
+	projects, err := gcloud.NewClient(fake).ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Errorf("expected 0 projects, got %d", len(projects))
 	}
 }
 
@@ -176,6 +236,9 @@ func TestClient_ListAll_CapturesHostAndCreateTime(t *testing.T) {
 	}
 	if list[0].CreateTime != "2024-01-15T10:00:00Z" {
 		t.Errorf("CreateTime: got %q, want 2024-01-15T10:00:00Z", list[0].CreateTime)
+	}
+	if list[0].Region != "us-central1" {
+		t.Errorf("Region: got %q, want us-central1", list[0].Region)
 	}
 }
 
