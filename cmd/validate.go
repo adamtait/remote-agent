@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/plugins"
@@ -57,7 +58,7 @@ that is precisely when you need to inspect the layers.`,
 		} else {
 			userPluginErrs := pluginValidate(home, "", userCfg, nil)
 			if err := config.ValidateUser(userCfg, userPluginErrs); err != nil {
-				fmt.Fprintf(out, "user config:    %s — FAIL\n%s\n", userCfgPath, indentLines(err.Error()))
+				fmt.Fprintf(out, "user config:    %s — FAIL\n%s\n", userCfgPath, formatLayerErr(err))
 				anyFailed = true
 			} else {
 				fmt.Fprintf(out, "user config:    %s — OK\n", userCfgPath)
@@ -75,7 +76,7 @@ that is precisely when you need to inspect the layers.`,
 				fmt.Fprintf(out, "project config: %s — FAIL\n  - %v\n", projectCfgPath, projectLoadErr)
 				anyFailed = true
 			} else if err := config.ValidateProject(projectCfg); err != nil {
-				fmt.Fprintf(out, "project config: %s — FAIL\n%s\n", projectCfgPath, indentLines(err.Error()))
+				fmt.Fprintf(out, "project config: %s — FAIL\n%s\n", projectCfgPath, formatLayerErr(err))
 				anyFailed = true
 			} else {
 				fmt.Fprintf(out, "project config: %s — OK\n", projectCfgPath)
@@ -98,7 +99,7 @@ that is precisely when you need to inspect the layers.`,
 				mergedCfg = merged
 				mergedPluginErrs := pluginValidate(home, projectCfgPath, nil, merged)
 				if err := config.Validate(merged, mergedPluginErrs); err != nil {
-					fmt.Fprintf(out, "merged config:  FAIL\n%s\n", indentLines(err.Error()))
+					fmt.Fprintf(out, "merged config:  FAIL\n%s\n", formatLayerErr(err))
 					anyFailed = true
 				} else {
 					fmt.Fprintf(out, "merged config:  OK\n")
@@ -116,7 +117,7 @@ that is precisely when you need to inspect the layers.`,
 		}
 
 		if anyFailed {
-			return fmt.Errorf("config validation failed")
+			return errSilent
 		}
 		return nil
 	},
@@ -151,30 +152,15 @@ func pluginValidate(home, projectCfgPath string, userCfg *config.UserConfig, mer
 	return r.ValidateAll(probe)
 }
 
-func indentLines(s string) string {
-	// validate errors already start with "config validation failed:\n  - …";
-	// indent the whole block by 2 spaces so it nests under the layer header.
-	out := ""
-	for i, line := range splitLines(s) {
-		if i > 0 {
-			out += "\n"
-		}
-		out += "  " + line
+// formatLayerErr trims the leading "X validation failed:" line from a
+// validator error and indents the remaining bullet list so it nests cleanly
+// under a "<layer>: <path> — FAIL" header without echoing the same phrase.
+func formatLayerErr(err error) string {
+	s := err.Error()
+	if i := strings.Index(s, "\n"); i != -1 {
+		s = s[i+1:]
 	}
-	return out
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	lines = append(lines, s[start:])
-	return lines
+	return "  " + strings.ReplaceAll(s, "\n", "\n  ")
 }
 
 func writeYAML(w io.Writer, v interface{}) error {

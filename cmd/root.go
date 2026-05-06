@@ -143,10 +143,20 @@ func parseLogLevel(s string) slog.Level {
 	}
 }
 
+// errSilent signals that a command failed but already printed its own
+// diagnostics; Execute should exit non-zero without re-printing anything.
+var errSilent = silentErr{}
+
+type silentErr struct{}
+
+func (silentErr) Error() string { return "" }
+
 func Execute() {
 	defer func() { logCleanup() }()
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		if _, ok := err.(silentErr); !ok {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		os.Exit(1)
 	}
 }
@@ -165,7 +175,9 @@ func ExecuteWithIO(stdin io.Reader, stdout, stderr io.Writer, args []string) int
 	rootCmd.SetErr(stderr)
 	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(stderr, err)
+		if _, ok := err.(silentErr); !ok {
+			fmt.Fprintln(stderr, err)
+		}
 		return 1
 	}
 	return 0
