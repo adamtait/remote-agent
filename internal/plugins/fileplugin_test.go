@@ -174,6 +174,45 @@ config:
 	}
 }
 
+func TestFilePlugin_ValidateConfig_StringList_PipeReserved(t *testing.T) {
+	raw := `
+name: ghtest
+version: "1.0.0"
+description: "d"
+config:
+  - name: repo_urls
+    type: string_list
+    description: "repos"
+`
+	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}}
+	p, _ := LoadPlugin(fsys)
+
+	hasPipeErr := func(errs []string) bool {
+		for _, e := range errs {
+			if strings.Contains(e, "'|'") {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !hasPipeErr(p.validateConfig(map[string]interface{}{
+		"repo_urls": []string{"https://github.com/a/b", "evil|sneaky"},
+	})) {
+		t.Fatal("expected pipe error for []string with embedded '|'")
+	}
+	if !hasPipeErr(p.validateConfig(map[string]interface{}{
+		"repo_urls": []interface{}{"ok", "evil|sneaky"},
+	})) {
+		t.Fatal("expected pipe error for []interface{} with embedded '|'")
+	}
+	if hasPipeErr(p.validateConfig(map[string]interface{}{
+		"repo_urls": []string{"https://github.com/a/b", "https://github.com/c/d"},
+	})) {
+		t.Error("unexpected pipe error for clean values")
+	}
+}
+
 func TestFilePlugin_ValidateConfig_Disabled(t *testing.T) {
 	p, _ := LoadPlugin(testPluginFS(nil))
 	errs := p.validateConfig(map[string]interface{}{"enabled": false})

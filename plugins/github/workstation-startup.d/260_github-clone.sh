@@ -71,3 +71,4 @@ for REPO_URL in "${_ra_repo_urls[@]}"; do
     sudo -u "${USER_NAME}" git clone "${REPO_URL}" "${clone_target}" \
         || echo "[github-clone] WARNING: clone of ${REPO_URL} failed; proceeding anyway."
 done
+unset _ra_repo_urls

@@ -132,6 +132,36 @@ func (p *FilePlugin) validateConfig(pluginCfg map[string]interface{}) []string {
 		}
 	}
 
+	// `|` is reserved as the list separator when string_list fields are
+	// serialized into RA_PLUGIN_<NAME>_<FIELD>; a value containing it would be
+	// silently split at boot. Surface a clear error here instead.
+	for _, f := range p.schema.Config {
+		if f.Type != "string_list" {
+			continue
+		}
+		v, ok := pluginCfg[f.Name]
+		if !ok {
+			continue
+		}
+		var items []string
+		switch typed := v.(type) {
+		case []string:
+			items = typed
+		case []interface{}:
+			items = make([]string, 0, len(typed))
+			for _, item := range typed {
+				items = append(items, fmt.Sprintf("%v", item))
+			}
+		default:
+			continue
+		}
+		for _, item := range items {
+			if strings.Contains(item, "|") {
+				errs = append(errs, fmt.Sprintf("plugin %s: config field %q value %q contains '|', which is reserved as the list separator", p.schema.Name, f.Name, item))
+			}
+		}
+	}
+
 	if len(p.schema.AuthProviders) > 0 {
 		provider, _ := pluginCfg["auth_provider"].(string)
 		if provider == "" {

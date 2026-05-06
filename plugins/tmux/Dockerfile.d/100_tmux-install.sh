@@ -3,7 +3,11 @@
 set -euo pipefail
 
 apt-get update
-apt-get install -y --no-install-recommends tmux
+# ncurses-bin provides infocmp, which 05-tmux-autoattach.sh uses to detect
+# unknown-TERM clients (Ghostty, Kitty, …) and fall back to xterm-256color
+# before exec'ing tmux. tmux itself only depends on libtinfo6, so we ask for
+# ncurses-bin explicitly to keep the fallback robust under base-image churn.
+apt-get install -y --no-install-recommends tmux ncurses-bin
 rm -rf /var/lib/apt/lists/*
 
 # Force every pane to spawn a login shell. Without this, tmux spawns
