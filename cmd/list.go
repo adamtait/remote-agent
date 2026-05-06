@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"sort"
 	"text/tabwriter"
 
 	"github.com/adamtait/remote-agent/internal/gcloud"
@@ -62,6 +63,22 @@ func runListAll() error {
 		fmt.Println("No workstations found.")
 		return nil
 	}
+	sort.Slice(all, func(i, j int) bool {
+		a, b := all[i], all[j]
+		if a.ProjectName != b.ProjectName {
+			return a.ProjectName < b.ProjectName
+		}
+		if a.Region != b.Region {
+			return a.Region < b.Region
+		}
+		if a.ClusterName != b.ClusterName {
+			return a.ClusterName < b.ClusterName
+		}
+		if a.ConfigName != b.ConfigName {
+			return a.ConfigName < b.ConfigName
+		}
+		return a.Name < b.Name
+	})
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSTATE\tPROJECT\tREGION\tCLUSTER\tCONFIG")
 	for _, ws := range all {
