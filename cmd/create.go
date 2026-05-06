@@ -93,13 +93,14 @@ func buildContainerEnv(cfg *config.Config) string {
 }
 
 var createCmd = &cobra.Command{
-	Use:   "create",
+	Use:   "create [name]",
 	Short: "Provision a Google Cloud Workstation",
 	Long: `Always provisions a new workstation. Cluster, config, image, secrets,
 and IAM setup remain idempotent; the workstation itself is freshly created on
-every run. Use --name to set the workstation name (auto-suffixed on collision);
+every run. Pass [name] to set the workstation name (auto-suffixed on collision);
 omit it for an auto-generated memorable name.
 Requires .ra/config.yaml in the project root with gcloud.project set.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runCreate,
 }
 
@@ -107,14 +108,16 @@ func init() {
 	rootCmd.AddCommand(createCmd)
 	createCmd.Flags().Int("auto-sleep", 0, "Hours idle before stopping (0=never sleep, omit=GCP default ~2h; max 24)")
 	createCmd.Flags().Int("auto-shutdown", 0, "Hours running before force-stop (omit=GCP default ~12h; 1–168)")
-	createCmd.Flags().String("name", "", "Workstation name (auto-suffixed on collision); auto-generated memorable name if unset")
 }
 
 func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	startedAt := time.Now()
 	ws := &cfg.Gcloud.Workstation
 
-	requestedName, _ := cmd.Flags().GetString("name")
+	var requestedName string
+	if len(args) == 1 {
+		requestedName = args[0]
+	}
 
 	for field, val := range map[string]string{
 		"git_user_name":  cfg.Git.UserName,
@@ -190,7 +193,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 		}
 		hint := "re-run `ra create"
 		if requestedName != "" {
-			hint += fmt.Sprintf(" --name %q", requestedName)
+			hint += " " + requestedName
 		}
 		hint += "` to resume — earlier steps are idempotent."
 		fmt.Fprintf(cmd.OutOrStderr(), "\n%s\n", hint)
@@ -486,10 +489,10 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	var workstationName string
-	if requested, _ := cmd.Flags().GetString("name"); requested != "" {
-		workstationName = naming.UniqueSuffixed(requested, taken)
-		if workstationName != requested {
-			logging.WarnPrintf(cmd.OutOrStdout(), "workstation %q exists — using %q instead", requested, workstationName)
+	if requestedName != "" {
+		workstationName = naming.UniqueSuffixed(requestedName, taken)
+		if workstationName != requestedName {
+			logging.WarnPrintf(cmd.OutOrStdout(), "workstation %q exists — using %q instead", requestedName, workstationName)
 		}
 	} else {
 		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
