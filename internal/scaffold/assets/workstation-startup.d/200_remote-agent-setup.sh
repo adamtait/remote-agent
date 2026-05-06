@@ -53,7 +53,11 @@ _ra_export_env() {
         chmod 0644 "${RA_ENV_FILE}"
     fi
     sed -i "/^${key}=/d" "${RA_ENV_FILE}"
-    printf '%s=%s\n' "${key}" "${val}" >> "${RA_ENV_FILE}"
+    # /run/ra/env is bash-sourced via `set -a; . FILE`. Single-quote-wrap (with
+    # embedded-quote escaping `'\''`) so values containing spaces or shell
+    # metacharacters can't be re-parsed as extra commands during sourcing.
+    local quoted="${val//\'/\'\\\'\'}"
+    printf "%s='%s'\n" "${key}" "${quoted}" >> "${RA_ENV_FILE}"
 }
 
 

@@ -247,7 +247,7 @@ config:
 `
 	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}}
 	p, _ := LoadPlugin(fsys)
-	want := "RA_PLUGIN_GHTEST_REPO_URLS=https://github.com/a/b https://github.com/c/d"
+	want := "RA_PLUGIN_GHTEST_REPO_URLS=https://github.com/a/b|https://github.com/c/d"
 
 	pairs := p.containerEnvPairsFrom(map[string]interface{}{
 		"repo_urls": []string{"https://github.com/a/b", "https://github.com/c/d"},

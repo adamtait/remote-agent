@@ -4,7 +4,7 @@
 # Reads from the standard ra contract:
 #   GIT_USER_NAME, GIT_USER_EMAIL  (set by core)
 #   RA_PLUGIN_GITHUB_ENABLED
-#   RA_PLUGIN_GITHUB_REPO_URLS     (space-separated list of https:// or git@github.com:... URLs)
+#   RA_PLUGIN_GITHUB_REPO_URLS     (pipe-separated list of https:// or git@github.com:... URLs)
 #
 # Guarded by FIRST_BOOT_MARKER — only runs once per workstation.
 set -euo pipefail
@@ -37,7 +37,9 @@ if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
     sudo -u "${USER_NAME}" git config --global user.email "${GIT_USER_EMAIL}"
 fi
 
-for REPO_URL in ${RA_PLUGIN_GITHUB_REPO_URLS:-}; do
+IFS='|' read -r -a _ra_repo_urls <<<"${RA_PLUGIN_GITHUB_REPO_URLS:-}"
+for REPO_URL in "${_ra_repo_urls[@]}"; do
+    [ -z "${REPO_URL}" ] && continue
     # Normalize SSH GitHub URLs to HTTPS — workstation has only HTTPS creds (PAT
     # via the credential helper) and no SSH keys / known_hosts.
     case "${REPO_URL}" in

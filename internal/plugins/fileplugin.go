@@ -78,14 +78,14 @@ func (p *FilePlugin) containerEnvPairsFrom(pluginCfg map[string]interface{}) []s
 		var val string
 		switch typed := v.(type) {
 		case []string:
-			val = strings.Join(typed, " ")
+			val = strings.Join(typed, "|")
 		case []interface{}:
 			// yaml.v3 decodes YAML sequences into []interface{} when target is any
 			parts := make([]string, 0, len(typed))
 			for _, item := range typed {
 				parts = append(parts, fmt.Sprintf("%v", item))
 			}
-			val = strings.Join(parts, " ")
+			val = strings.Join(parts, "|")
 		default:
 			val = fmt.Sprintf("%v", v)
 		}
