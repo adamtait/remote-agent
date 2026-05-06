@@ -104,4 +104,6 @@ Credentials never appear in config. Each secret has a logical name and env var n
 - Provisioning steps are idempotent (skip-if-exists) except workstation creation itself.
 - `ra` ships with no embedded plugins. Plugin defaults are an external concern.
 - Plugin config lives at `plugins.<name>.*` in YAML; auth method (when applicable) is set via `plugins.<name>.auth_provider`.
+- Scalar plugin config values are serialized as `RA_PLUGIN_<NAME>_<FIELD>=<value>`; `string_list` values are pipe-joined into the same env var, so list values may not themselves contain `|` (validated by `validateConfig`).
+- `/run/ra/env` is sourced by login shells via `set -a; . FILE`; `_ra_export_env` single-quote-wraps values when writing it so whitespace and shell metacharacters survive sourcing intact.
 - Plugin scripts in `workstation-startup.d/` run independently after `200_`; they must source `/run/ra/env` and gate on `RA_PLUGIN_<NAME>_ENABLED` themselves.

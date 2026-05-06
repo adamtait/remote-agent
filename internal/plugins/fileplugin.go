@@ -78,14 +78,14 @@ func (p *FilePlugin) containerEnvPairsFrom(pluginCfg map[string]interface{}) []s
 		var val string
 		switch typed := v.(type) {
 		case []string:
-			val = strings.Join(typed, " ")
+			val = strings.Join(typed, "|")
 		case []interface{}:
 			// yaml.v3 decodes YAML sequences into []interface{} when target is any
 			parts := make([]string, 0, len(typed))
 			for _, item := range typed {
 				parts = append(parts, fmt.Sprintf("%v", item))
 			}
-			val = strings.Join(parts, " ")
+			val = strings.Join(parts, "|")
 		default:
 			val = fmt.Sprintf("%v", v)
 		}
@@ -128,6 +128,36 @@ func (p *FilePlugin) validateConfig(pluginCfg map[string]interface{}) []string {
 				if empty {
 					errs = append(errs, fmt.Sprintf("plugin %s: required config field %q must not be empty", p.schema.Name, f.Name))
 				}
+			}
+		}
+	}
+
+	// `|` is reserved as the list separator when string_list fields are
+	// serialized into RA_PLUGIN_<NAME>_<FIELD>; a value containing it would be
+	// silently split at boot. Surface a clear error here instead.
+	for _, f := range p.schema.Config {
+		if f.Type != "string_list" {
+			continue
+		}
+		v, ok := pluginCfg[f.Name]
+		if !ok {
+			continue
+		}
+		var items []string
+		switch typed := v.(type) {
+		case []string:
+			items = typed
+		case []interface{}:
+			items = make([]string, 0, len(typed))
+			for _, item := range typed {
+				items = append(items, fmt.Sprintf("%v", item))
+			}
+		default:
+			continue
+		}
+		for _, item := range items {
+			if strings.Contains(item, "|") {
+				errs = append(errs, fmt.Sprintf("plugin %s: config field %q value %q contains '|', which is reserved as the list separator", p.schema.Name, f.Name, item))
 			}
 		}
 	}
