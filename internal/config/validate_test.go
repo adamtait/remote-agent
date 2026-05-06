@@ -132,3 +132,94 @@ func TestValidate_EnvKeyShape(t *testing.T) {
 		t.Errorf("want env key-shape error, got %v", err)
 	}
 }
+
+func TestValidateProject_EmptyIsOK(t *testing.T) {
+	if err := config.ValidateProject(&config.ProjectConfig{}); err != nil {
+		t.Errorf("empty project config should validate, got %v", err)
+	}
+}
+
+func TestValidateProject_SkipsRequiredFieldChecks(t *testing.T) {
+	// A typical project config has only overrides — no git, no project,
+	// no full workstation block. ValidateProject must not flag those.
+	p := &config.ProjectConfig{
+		Gcloud: config.GcloudConfig{
+			Workstation: config.WorkstationConfig{ConfigName: "override-name"},
+		},
+	}
+	if err := config.ValidateProject(p); err != nil {
+		t.Errorf("partial project config should validate, got %v", err)
+	}
+}
+
+func TestValidateProject_CatchesEnvVarShape(t *testing.T) {
+	p := &config.ProjectConfig{
+		Secrets: map[string]config.SecretEntry{
+			"foo": {SecretName: "foo", EnvVar: "lower-case"},
+		},
+	}
+	err := config.ValidateProject(p)
+	if err == nil || !strings.Contains(err.Error(), "env_var") {
+		t.Errorf("want env_var-shape error, got %v", err)
+	}
+}
+
+func TestValidateProject_CatchesIntraLayerCollision(t *testing.T) {
+	p := &config.ProjectConfig{
+		Secrets: map[string]config.SecretEntry{
+			"a": {SecretName: "a", EnvVar: "DUPE"},
+		},
+		Env: map[string]string{"DUPE": "x"},
+	}
+	err := config.ValidateProject(p)
+	if err == nil || !strings.Contains(err.Error(), "DUPE") {
+		t.Errorf("want collision error, got %v", err)
+	}
+}
+
+func TestValidateUser_FullValidCfg_OK(t *testing.T) {
+	sleep := 2
+	u := &config.UserConfig{
+		Git: config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
+		Gcloud: config.GcloudConfig{
+			Project: "p",
+			Workstation: config.WorkstationConfig{
+				Region: "us-central1", MachineType: "e2-standard-4", DiskSizeGB: 50,
+				ClusterName: "c", ConfigName: "cn", ServiceAccountName: "sa",
+				ImageName: "img", ImageTag: "t", RepoName: "r",
+				AutoSleepHours: &sleep, AutoShutdownHours: 12,
+			},
+		},
+	}
+	if err := config.ValidateUser(u, nil); err != nil {
+		t.Errorf("expected OK, got %v", err)
+	}
+}
+
+func TestValidateUser_CatchesMissingRequiredFields(t *testing.T) {
+	u := &config.UserConfig{} // empty — missing everything
+	err := config.ValidateUser(u, nil)
+	if err == nil || !strings.Contains(err.Error(), "gcloud.project") {
+		t.Errorf("want missing-required error, got %v", err)
+	}
+}
+
+func TestValidateUser_ForwardsPluginErrs(t *testing.T) {
+	sleep := 2
+	u := &config.UserConfig{
+		Git: config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
+		Gcloud: config.GcloudConfig{
+			Project: "p",
+			Workstation: config.WorkstationConfig{
+				Region: "us-central1", MachineType: "e2-standard-4", DiskSizeGB: 50,
+				ClusterName: "c", ConfigName: "cn", ServiceAccountName: "sa",
+				ImageName: "img", ImageTag: "t", RepoName: "r",
+				AutoSleepHours: &sleep, AutoShutdownHours: 12,
+			},
+		},
+	}
+	err := config.ValidateUser(u, []string{"plugin-x: bad config"})
+	if err == nil || !strings.Contains(err.Error(), "plugin-x") {
+		t.Errorf("want plugin error forwarded, got %v", err)
+	}
+}

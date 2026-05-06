@@ -51,14 +51,56 @@ func Validate(cfg *Config, pluginErrs []string) error {
 	}
 
 	errs = append(errs, pluginErrs...)
+	errs = append(errs, validateSecretsAndEnv(cfg.Secrets, cfg.Env)...)
 
-	// Per-secret shape + collision detection.
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.New("config validation failed:\n  - " + strings.Join(errs, "\n  - "))
+}
+
+// ValidateProject runs structural checks only — secrets/env shape and
+// collisions. Required-field checks are deliberately skipped because project
+// configs are typically partial overrides.
+func ValidateProject(p *ProjectConfig) error {
+	if p == nil {
+		return nil
+	}
+	errs := validateSecretsAndEnv(p.Secrets, p.Env)
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.New("project config validation failed:\n  - " + strings.Join(errs, "\n  - "))
+}
+
+// ValidateUser runs the full check (required fields + structural + plugins)
+// against the user-level baseline config in isolation.
+func ValidateUser(u *UserConfig, pluginErrs []string) error {
+	if u == nil {
+		return errors.New("user config is nil")
+	}
+	cfg := &Config{
+		Git:     u.Git,
+		Gcloud:  u.Gcloud,
+		Plugins: u.Plugins,
+		Secrets: u.Secrets,
+		Env:     u.Env,
+	}
+	return Validate(cfg, pluginErrs)
+}
+
+// validateSecretsAndEnv runs the structural checks shared by all layers:
+// secret shape, env-var shape, reserved-prefix bans, and intra-layer
+// collisions between secrets, env entries, and ra-reserved env vars.
+func validateSecretsAndEnv(secrets map[string]SecretEntry, env map[string]string) []string {
+	var errs []string
+
 	usedEnvVars := map[string]string{}
 	for _, r := range reservedEnvVars {
 		usedEnvVars[r] = "(ra-reserved)"
 	}
 
-	for name, s := range cfg.Secrets {
+	for name, s := range secrets {
 		if s.SecretName == "" {
 			errs = append(errs, fmt.Sprintf("secrets.%s.secret_name is required", name))
 		}
@@ -77,7 +119,7 @@ func Validate(cfg *Config, pluginErrs []string) error {
 		}
 	}
 
-	for key := range cfg.Env {
+	for key := range env {
 		if !envVarPattern.MatchString(key) {
 			errs = append(errs, fmt.Sprintf("env.%s name must match %s", key, envVarPattern))
 			continue
@@ -97,9 +139,5 @@ func Validate(cfg *Config, pluginErrs []string) error {
 		usedEnvVars[key] = "env." + key
 	}
 
-	if len(errs) == 0 {
-		return nil
-	}
-	return errors.New("config validation failed:\n  - " + strings.Join(errs, "\n  - "))
+	return errs
 }
-
