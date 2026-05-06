@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 	"text/tabwriter"
 
 	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/spf13/cobra"
 )
+
+const listAllMaxParallel = 8
 
 var listAll bool
 
@@ -54,15 +57,29 @@ func runListAll() error {
 		fmt.Println("No accessible GCP projects (check `gcloud auth list`).")
 		return nil
 	}
-	var all []gcloud.WorkstationInfo
+	var (
+		all []gcloud.WorkstationInfo
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, listAllMaxParallel)
+	)
 	for _, p := range projects {
-		ws, err := client.ListAll(p, "-")
-		if err != nil {
-			logging.WarnPrintf(os.Stderr, "skipping project %q: %v", p, err)
-			continue
-		}
-		all = append(all, ws...)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(p string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			ws, err := client.ListAll(p, "-")
+			if err != nil {
+				logging.WarnPrintf(os.Stderr, "skipping project %q: %v", p, err)
+				return
+			}
+			mu.Lock()
+			all = append(all, ws...)
+			mu.Unlock()
+		}(p)
 	}
+	wg.Wait()
 	if len(all) == 0 {
 		fmt.Println("No workstations found.")
 		return nil
