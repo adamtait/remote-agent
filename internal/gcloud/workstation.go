@@ -81,7 +81,7 @@ func (c *Client) List(project, region, cluster, cfgName string) ([]WorkstationIn
 // parsed from the full resource URI returned by the workstations API.
 func (c *Client) ListAll(project, region string) ([]WorkstationInfo, error) {
 	if region == "" {
-		return nil, fmt.Errorf("region is required for ListAll")
+		return nil, fmt.Errorf("region is required for ListAll (use \"-\" for all regions)")
 	}
 	out, err := c.runner.Output(
 		"workstations", "list",
