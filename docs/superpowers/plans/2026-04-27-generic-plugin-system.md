@@ -3210,7 +3210,7 @@ Note any unexpected behavior in the commit message of any follow-up fix.
 
 ```bash
 cd /tmp/ra-test
-~/.local/bin/ra create --name smoke-test
+~/.local/bin/ra create smoke-test
 ```
 
 Expected:
