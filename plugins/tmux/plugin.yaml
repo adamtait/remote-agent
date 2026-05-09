@@ -13,4 +13,4 @@ config:
   - name: start_directory
     type: string
     description: "Working directory for the tmux session (leave blank for home directory)"
-    default: ""
+    default: "~"

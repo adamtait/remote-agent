@@ -35,7 +35,10 @@ if [ -z "${START_DIRECTORY}" ]; then
     START_DIRECTORY="${HOME}"
 else
     START_DIRECTORY="${START_DIRECTORY/#\~/${HOME}}"
-    [ -d "${START_DIRECTORY}" ] || START_DIRECTORY="${HOME}"
+    if [ ! -d "${START_DIRECTORY}" ]; then
+        echo "tmux plugin: start_directory '${START_DIRECTORY}' does not exist; using home." >&2
+        START_DIRECTORY="${HOME}"
+    fi
 fi
 tmux_args+=( -c "${START_DIRECTORY}" )
 
