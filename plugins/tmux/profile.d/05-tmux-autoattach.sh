@@ -31,12 +31,13 @@ START_DIRECTORY="${RA_PLUGIN_TMUX_START_DIRECTORY:-}"
 # recreates it rather than erroring. -c is honored only on creation; it is
 # ignored when attaching to an existing session, so passing it is safe.
 tmux_args=( new-session -A -s "${SESSION_NAME}" )
-if [ -n "${START_DIRECTORY}" ]; then
+if [ -z "${START_DIRECTORY}" ]; then
+    START_DIRECTORY="${HOME}"
+else
     START_DIRECTORY="${START_DIRECTORY/#\~/${HOME}}"
-    if [ -d "${START_DIRECTORY}" ]; then
-        tmux_args+=( -c "${START_DIRECTORY}" )
-    fi
+    [ -d "${START_DIRECTORY}" ] || START_DIRECTORY="${HOME}"
 fi
+tmux_args+=( -c "${START_DIRECTORY}" )
 
 # Run tmux without exec so a startup failure (unknown TERM that slipped past
 # the fallback above, broken /etc/tmux.conf, corrupt socket, …) cannot leave

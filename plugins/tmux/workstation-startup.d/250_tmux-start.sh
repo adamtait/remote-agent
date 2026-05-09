@@ -35,15 +35,19 @@ fi
 
 tmux_args=( new-session -d -s "${session_name}" )
 
-if [[ -n "${start_directory}" ]]; then
-    # Expand leading ~ to the user's home directory.
+# Default to home when start_directory is unset — plugin.yaml says "leave
+# blank for home directory" but the init process CWD is / at boot, so we
+# must pass -c explicitly rather than inheriting it.
+if [[ -z "${start_directory}" ]]; then
+    start_directory="${USER_HOME}"
+else
     start_directory="${start_directory/#\~/${USER_HOME}}"
     if [[ ! -d "${start_directory}" ]]; then
         echo "[tmux-start] warning: start_directory '${start_directory}' does not exist; using home." >&2
         start_directory="${USER_HOME}"
     fi
-    tmux_args+=( -c "${start_directory}" )
 fi
+tmux_args+=( -c "${start_directory}" )
 
 # Run tmux as the workstation user — tmux sockets are per-UID; a root-owned
 # socket would be inaccessible when the user SSHes in.
