@@ -1,0 +1,8 @@
+name: uv
+version: "1.0.0"
+description: "Installs uv, an extremely fast Python package and project manager"
+config:
+  - name: enabled
+    type: bool
+    description: "Install uv on the workstation?"
+    default: false
