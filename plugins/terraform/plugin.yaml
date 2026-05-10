@@ -1,0 +1,8 @@
+name: terraform
+version: "1.0.0"
+description: "Installs Terraform, the HashiCorp infrastructure-as-code CLI"
+config:
+  - name: enabled
+    type: bool
+    description: "Install Terraform on the workstation?"
+    default: false
