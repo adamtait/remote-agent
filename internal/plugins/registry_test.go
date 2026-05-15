@@ -190,6 +190,91 @@ func TestFindSecretOwner_NilRegistry(t *testing.T) {
 	}
 }
 
+func TestPortByName(t *testing.T) {
+	dir := t.TempDir()
+	writePluginYAML(t, dir, "marimo", `name: marimo
+version: "1.0.0"
+description: "d"
+port-for-tunnel: 2718
+`)
+	writePluginYAML(t, dir, "github", `name: github
+version: "1.0.0"
+description: "d"
+`)
+	reg := loadRegistryFromDir(t, dir, "")
+
+	if port, ok := reg.PortByName("marimo", nil); !ok || port != 2718 {
+		t.Errorf("PortByName(marimo, nil) = (%d,%v), want (2718,true)", port, ok)
+	}
+	if _, ok := reg.PortByName("github", nil); ok {
+		t.Error("PortByName(github, nil) should be false (no port declared)")
+	}
+	if _, ok := reg.PortByName("nonexistent", nil); ok {
+		t.Error("PortByName(nonexistent, nil) should be false")
+	}
+
+	// User-configured value wins over schema default.
+	cfg := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"marimo": {"port-for-tunnel": 8000},
+		},
+	}
+	if port, ok := reg.PortByName("marimo", cfg); !ok || port != 8000 {
+		t.Errorf("PortByName(marimo, cfg) = (%d,%v), want (8000,true)", port, ok)
+	}
+
+	// A plugin without a schema default cannot be made tunnelable just by
+	// dropping the key into config.yaml.
+	cfg2 := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"github": {"port-for-tunnel": 8000},
+		},
+	}
+	if _, ok := reg.PortByName("github", cfg2); ok {
+		t.Error("PortByName(github, cfg2) should be false (schema has no port-for-tunnel)")
+	}
+
+	var nilReg *Registry
+	if _, ok := nilReg.PortByName("anything", nil); ok {
+		t.Error("nil registry PortByName should be false")
+	}
+}
+
+func TestTunnelablePlugins(t *testing.T) {
+	dir := t.TempDir()
+	writePluginYAML(t, dir, "marimo", `name: marimo
+version: "1.0.0"
+description: "d"
+port-for-tunnel: 2718
+`)
+	writePluginYAML(t, dir, "jupyter", `name: jupyter
+version: "1.0.0"
+description: "d"
+port-for-tunnel: 8888
+`)
+	writePluginYAML(t, dir, "github", `name: github
+version: "1.0.0"
+description: "d"
+`)
+	reg := loadRegistryFromDir(t, dir, "")
+
+	got := reg.TunnelablePlugins()
+	want := []string{"jupyter", "marimo"} // alphabetical
+	if len(got) != len(want) {
+		t.Fatalf("TunnelablePlugins() = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("TunnelablePlugins()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	var nilReg *Registry
+	if nilReg.TunnelablePlugins() != nil {
+		t.Error("nil registry TunnelablePlugins should be nil")
+	}
+}
+
 func TestFindSecretOwner_ValueCommandPreserved(t *testing.T) {
 	// The codex case: the returned SecretDef must carry the value_command
 	// so callers can dispatch through CollectSecretValue.

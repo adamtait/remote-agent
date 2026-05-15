@@ -5,6 +5,14 @@ type PluginSchema struct {
 	Name          string         `yaml:"name"`
 	Version       string         `yaml:"version"`
 	Description   string         `yaml:"description"`
+	// PortForTunnel, when set, advertises the in-workstation TCP port the
+	// plugin listens on and serves as the default rendered into the
+	// `plugins.<name>.port-for-tunnel` config key at install time. The same
+	// value is exported as RA_PLUGIN_<NAME>_PORT_FOR_TUNNEL so the plugin's
+	// startup script can bind to it, and `ra tunnel <plugin-name>` reads
+	// the configured value (falling back to this default) to pick a remote
+	// port. 0 means the plugin opts out of named tunneling.
+	PortForTunnel int            `yaml:"port-for-tunnel"`
 	Config        []ConfigField  `yaml:"config"`
 	Secrets       []SecretDef    `yaml:"secrets"`
 	AuthProviders []AuthProvider `yaml:"auth_providers"`

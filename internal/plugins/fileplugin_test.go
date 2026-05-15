@@ -101,6 +101,93 @@ func TestFilePlugin_ContainerEnvPairsFrom(t *testing.T) {
 	}
 }
 
+func TestFilePlugin_ContainerEnvPairsFrom_PortForTunnel(t *testing.T) {
+	raw := `name: marimo
+version: "1.0.0"
+description: "d"
+port-for-tunnel: 2718
+config:
+  - name: enabled
+    type: bool
+    default: false
+`
+	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}}
+	p, err := LoadPlugin(fsys)
+	if err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+
+	// Schema default (no user override).
+	pairs := p.containerEnvPairsFrom(map[string]interface{}{"enabled": true})
+	if !sliceContains(pairs, "RA_PLUGIN_MARIMO_PORT_FOR_TUNNEL=2718") {
+		t.Errorf("pairs missing schema-default PORT_FOR_TUNNEL; got %v", pairs)
+	}
+
+	// User override wins.
+	pairs = p.containerEnvPairsFrom(map[string]interface{}{
+		"enabled":         true,
+		"port-for-tunnel": 8000,
+	})
+	if !sliceContains(pairs, "RA_PLUGIN_MARIMO_PORT_FOR_TUNNEL=8000") {
+		t.Errorf("pairs missing overridden PORT_FOR_TUNNEL=8000; got %v", pairs)
+	}
+}
+
+func TestPrompt_AutoInjectsPortForTunnel(t *testing.T) {
+	raw := `name: marimo
+version: "1.0.0"
+description: "d"
+port-for-tunnel: 2718
+config:
+  - name: enabled
+    type: bool
+    default: false
+`
+	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}}
+	p, err := LoadPlugin(fsys)
+	if err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	// Empty stdin — Prompt should not block since the only config field is
+	// `enabled`, which `ra plugin install` auto-sets to true.
+	r := bufio.NewReader(strings.NewReader(""))
+	res, err := p.Prompt(r, io.Discard, io.Discard, nil)
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	got, ok := res.Config["port-for-tunnel"]
+	if !ok {
+		t.Fatalf("Prompt result missing port-for-tunnel; got %v", res.Config)
+	}
+	if got != 2718 {
+		t.Errorf("port-for-tunnel = %v, want 2718", got)
+	}
+}
+
+func TestPrompt_NoPortForTunnelInjection_WhenSchemaIsZero(t *testing.T) {
+	raw := `name: noport
+version: "1.0.0"
+description: "d"
+config:
+  - name: enabled
+    type: bool
+    default: false
+`
+	fsys := fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}}
+	p, err := LoadPlugin(fsys)
+	if err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	r := bufio.NewReader(strings.NewReader(""))
+	res, err := p.Prompt(r, io.Discard, io.Discard, nil)
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if _, ok := res.Config["port-for-tunnel"]; ok {
+		t.Errorf("port-for-tunnel must not be injected when schema has none; got %v", res.Config)
+	}
+}
+
 func TestFilePlugin_ValidateConfig_RequiredField(t *testing.T) {
 	raw := `
 name: strict

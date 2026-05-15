@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -170,4 +171,22 @@ func pickStr(override, fallback string) string {
 		return override
 	}
 	return fallback
+}
+
+// ensureRunning describes the workstation referenced by ref and, if it isn't
+// already running or starting, calls Start. Used by `ra connect` and
+// `ra tunnel` to provide the same auto-start UX.
+func ensureRunning(client *gcloud.Client, ref gcloud.WorkstationRef, errOut io.Writer) error {
+	info, err := client.Describe(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
+	if err != nil {
+		return fmt.Errorf("describing workstation: %w", err)
+	}
+	if info.State == "STATE_RUNNING" || info.State == "STATE_STARTING" {
+		return nil
+	}
+	fmt.Fprintf(errOut, "Workstation %q is %s; starting...\n", ref.Name, strings.TrimPrefix(info.State, "STATE_"))
+	if err := client.Start(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name); err != nil {
+		return fmt.Errorf("starting workstation: %w", err)
+	}
+	return nil
 }

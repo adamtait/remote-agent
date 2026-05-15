@@ -21,7 +21,7 @@ MARIMO_LOG="${USER_HOME}/.marimo.log"
 
 [ "${RA_PLUGIN_MARIMO_ENABLED:-false}" = "true" ] || exit 0
 
-port="${RA_PLUGIN_MARIMO_PORT:-2718}"
+port="${RA_PLUGIN_MARIMO_PORT_FOR_TUNNEL:-2718}"
 working_directory="${RA_PLUGIN_MARIMO_WORKING_DIRECTORY:-}"
 
 # Validate port is a positive integer in the legal TCP range. The plugin

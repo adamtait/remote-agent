@@ -1,6 +1,10 @@
 package plugins
 
-import "github.com/adamtait/remote-agent/internal/config"
+import (
+	"sort"
+
+	"github.com/adamtait/remote-agent/internal/config"
+)
 
 // Registry holds the ordered list of active plugins.
 type Registry struct {
@@ -30,6 +34,49 @@ func (r *Registry) ValidateAll(cfg *config.Config) []string {
 		errs = append(errs, p.Validate(cfg)...)
 	}
 	return errs
+}
+
+// PortByName returns the in-workstation port for the plugin with this name.
+// The user-configured value at `plugins.<name>.port-for-tunnel` wins; the
+// schema's `port-for-tunnel` default is the fallback. Returns 0,false if
+// the plugin is not installed or did not declare a `port-for-tunnel` in
+// plugin.yaml.
+func (r *Registry) PortByName(name string, cfg *config.Config) (int, bool) {
+	if r == nil {
+		return 0, false
+	}
+	for _, p := range r.plugins {
+		if p.Name() != name {
+			continue
+		}
+		schemaDefault := p.Schema().PortForTunnel
+		if schemaDefault == 0 {
+			return 0, false
+		}
+		var pluginCfg map[string]interface{}
+		if cfg != nil && cfg.Plugins != nil {
+			pluginCfg = cfg.Plugins[name]
+		}
+		return portForTunnelFromCfg(pluginCfg, schemaDefault), true
+	}
+	return 0, false
+}
+
+// TunnelablePlugins returns the names of installed plugins that declare a
+// non-zero `port-for-tunnel:` field, sorted alphabetically so error
+// messages and help output are stable across runs.
+func (r *Registry) TunnelablePlugins() []string {
+	if r == nil {
+		return nil
+	}
+	var names []string
+	for _, p := range r.plugins {
+		if p.Schema().PortForTunnel != 0 {
+			names = append(names, p.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // AllContainerEnvPairs returns env KEY=VALUE pairs from all plugins.
