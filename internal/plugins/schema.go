@@ -5,6 +5,10 @@ type PluginSchema struct {
 	Name          string         `yaml:"name"`
 	Version       string         `yaml:"version"`
 	Description   string         `yaml:"description"`
+	// Port, when set, advertises the in-workstation TCP port the plugin
+	// listens on. `ra tunnel <plugin-name>` looks this up to pick a remote
+	// port. 0 means the plugin opts out of named tunneling.
+	Port          int            `yaml:"port"`
 	Config        []ConfigField  `yaml:"config"`
 	Secrets       []SecretDef    `yaml:"secrets"`
 	AuthProviders []AuthProvider `yaml:"auth_providers"`

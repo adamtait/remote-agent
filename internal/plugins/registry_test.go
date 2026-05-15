@@ -190,6 +190,70 @@ func TestFindSecretOwner_NilRegistry(t *testing.T) {
 	}
 }
 
+func TestPortByName(t *testing.T) {
+	dir := t.TempDir()
+	writePluginYAML(t, dir, "marimo", `name: marimo
+version: "1.0.0"
+description: "d"
+port: 2718
+`)
+	writePluginYAML(t, dir, "github", `name: github
+version: "1.0.0"
+description: "d"
+`)
+	reg := loadRegistryFromDir(t, dir, "")
+
+	if port, ok := reg.PortByName("marimo"); !ok || port != 2718 {
+		t.Errorf("PortByName(marimo) = (%d,%v), want (2718,true)", port, ok)
+	}
+	if _, ok := reg.PortByName("github"); ok {
+		t.Error("PortByName(github) should be false (no port declared)")
+	}
+	if _, ok := reg.PortByName("nonexistent"); ok {
+		t.Error("PortByName(nonexistent) should be false")
+	}
+
+	var nilReg *Registry
+	if _, ok := nilReg.PortByName("anything"); ok {
+		t.Error("nil registry PortByName should be false")
+	}
+}
+
+func TestTunnelablePlugins(t *testing.T) {
+	dir := t.TempDir()
+	writePluginYAML(t, dir, "marimo", `name: marimo
+version: "1.0.0"
+description: "d"
+port: 2718
+`)
+	writePluginYAML(t, dir, "jupyter", `name: jupyter
+version: "1.0.0"
+description: "d"
+port: 8888
+`)
+	writePluginYAML(t, dir, "github", `name: github
+version: "1.0.0"
+description: "d"
+`)
+	reg := loadRegistryFromDir(t, dir, "")
+
+	got := reg.TunnelablePlugins()
+	want := map[string]bool{"marimo": true, "jupyter": true}
+	if len(got) != len(want) {
+		t.Fatalf("TunnelablePlugins() = %v, want 2 entries", got)
+	}
+	for _, n := range got {
+		if !want[n] {
+			t.Errorf("unexpected tunnelable plugin %q", n)
+		}
+	}
+
+	var nilReg *Registry
+	if nilReg.TunnelablePlugins() != nil {
+		t.Error("nil registry TunnelablePlugins should be nil")
+	}
+}
+
 func TestFindSecretOwner_ValueCommandPreserved(t *testing.T) {
 	// The codex case: the returned SecretDef must carry the value_command
 	// so callers can dispatch through CollectSecretValue.

@@ -36,6 +36,9 @@ func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
 	if s.Name == "" {
 		return nil, fmt.Errorf("plugin.yaml: name is required")
 	}
+	if s.Port < 0 || s.Port > 65535 {
+		return nil, fmt.Errorf("plugin.yaml: port %d is out of range (0-65535)", s.Port)
+	}
 	return &FilePlugin{fsys: fsys, schema: s}, nil
 }
 

@@ -220,6 +220,19 @@ func (c *Client) SSH(project, region, cluster, cfgName, name string) error {
 	)
 }
 
+// StartTCPTunnel opens a foreground TCP tunnel from localhost:localPort to
+// remotePort inside the workstation. Blocks until the underlying gcloud
+// process exits (typically on Ctrl-C).
+func (c *Client) StartTCPTunnel(project, region, cluster, cfgName, name string, localPort, remotePort int) error {
+	return c.runner.Run(
+		"workstations", "start-tcp-tunnel",
+		"--cluster", cluster, "--config", cfgName,
+		"--region", region, "--project", project,
+		"--local-host-port", fmt.Sprintf("localhost:%d", localPort),
+		name, strconv.Itoa(remotePort),
+	)
+}
+
 // Logs streams or snapshots container logs for the workstation from Cloud Logging.
 // If follow is true, streams indefinitely (until Ctrl-C). If tail > 0, limits to that many entries.
 func (c *Client) Logs(project, name string, follow bool, tail int) error {

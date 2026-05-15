@@ -269,3 +269,19 @@ func TestClient_Stop_CallsCorrectArgs(t *testing.T) {
 		t.Errorf("got %q\nwant %q", got, want)
 	}
 }
+
+func TestClient_StartTCPTunnel_CallsCorrectArgs(t *testing.T) {
+	fake := &fakeRunner{}
+	client := gcloud.NewClient(fake)
+	if err := client.StartTCPTunnel("proj", "us-central1", "cl", "cfg", "myws", 8080, 2718); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(fake.calls))
+	}
+	got := strings.Join(fake.calls[0], " ")
+	want := "workstations start-tcp-tunnel --cluster cl --config cfg --region us-central1 --project proj --local-host-port localhost:8080 myws 2718"
+	if got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}

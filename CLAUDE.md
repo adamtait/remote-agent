@@ -107,3 +107,4 @@ Credentials never appear in config. Each secret has a logical name and env var n
 - Scalar plugin config values are serialized as `RA_PLUGIN_<NAME>_<FIELD>=<value>`; `string_list` values are pipe-joined into the same env var, so list values may not themselves contain `|` (validated by `validateConfig`).
 - `/run/ra/env` is sourced by login shells via `set -a; . FILE`; `_ra_export_env` single-quote-wraps values when writing it so whitespace and shell metacharacters survive sourcing intact.
 - Plugin scripts in `workstation-startup.d/` run independently after `200_`; they must source `/run/ra/env` and gate on `RA_PLUGIN_<NAME>_ENABLED` themselves.
+- A plugin can advertise a single in-workstation TCP port via `port: <N>` in `plugin.yaml`. `ra tunnel <plugin-name>` resolves through `Registry.PortByName` and shells out to `gcloud workstations start-tcp-tunnel`. See [docs/adr/0001-ra-tunnel-and-plugin-port-field.md](docs/adr/0001-ra-tunnel-and-plugin-port-field.md).

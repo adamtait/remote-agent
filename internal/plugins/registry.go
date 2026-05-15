@@ -32,6 +32,41 @@ func (r *Registry) ValidateAll(cfg *config.Config) []string {
 	return errs
 }
 
+// PortByName returns the declared in-workstation port for the plugin with this
+// name. Returns 0,false if the plugin is not installed or did not declare a
+// `port:` field in plugin.yaml.
+func (r *Registry) PortByName(name string) (int, bool) {
+	if r == nil {
+		return 0, false
+	}
+	for _, p := range r.plugins {
+		if p.Name() != name {
+			continue
+		}
+		port := p.Schema().Port
+		if port == 0 {
+			return 0, false
+		}
+		return port, true
+	}
+	return 0, false
+}
+
+// TunnelablePlugins returns the names of installed plugins that declare a
+// non-zero `port:` field, in registry order.
+func (r *Registry) TunnelablePlugins() []string {
+	if r == nil {
+		return nil
+	}
+	var names []string
+	for _, p := range r.plugins {
+		if p.Schema().Port != 0 {
+			names = append(names, p.Name())
+		}
+	}
+	return names
+}
+
 // AllContainerEnvPairs returns env KEY=VALUE pairs from all plugins.
 func (r *Registry) AllContainerEnvPairs(cfg *config.Config) []string {
 	if r == nil {
