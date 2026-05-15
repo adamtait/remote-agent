@@ -1,6 +1,10 @@
 package plugins
 
-import "github.com/adamtait/remote-agent/internal/config"
+import (
+	"sort"
+
+	"github.com/adamtait/remote-agent/internal/config"
+)
 
 // Registry holds the ordered list of active plugins.
 type Registry struct {
@@ -53,7 +57,8 @@ func (r *Registry) PortByName(name string) (int, bool) {
 }
 
 // TunnelablePlugins returns the names of installed plugins that declare a
-// non-zero `port:` field, in registry order.
+// non-zero `port:` field, sorted alphabetically so error messages and
+// help output are stable across runs.
 func (r *Registry) TunnelablePlugins() []string {
 	if r == nil {
 		return nil
@@ -64,6 +69,7 @@ func (r *Registry) TunnelablePlugins() []string {
 			names = append(names, p.Name())
 		}
 	}
+	sort.Strings(names)
 	return names
 }
 

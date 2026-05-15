@@ -49,6 +49,11 @@ Blocks until Ctrl-C.`,
 //	"name"  → (reg.PortByName(name), same) — localOverride wins if set
 func parseTunnelTarget(arg string, localOverride int, reg *plugins.Registry) (int, int, error) {
 	if strings.Contains(arg, ":") {
+		// Reject the override before parsing so the message points at the
+		// real conflict instead of a misleading port-validation error.
+		if localOverride != 0 {
+			return 0, 0, fmt.Errorf("--local-port conflicts with explicit local:remote pair %q", arg)
+		}
 		parts := strings.SplitN(arg, ":", 2)
 		l, errL := strconv.Atoi(parts[0])
 		r, errR := strconv.Atoi(parts[1])
@@ -60,9 +65,6 @@ func parseTunnelTarget(arg string, localOverride int, reg *plugins.Registry) (in
 		}
 		if err := validatePort(r, "remote"); err != nil {
 			return 0, 0, err
-		}
-		if localOverride != 0 {
-			return 0, 0, fmt.Errorf("--local-port conflicts with explicit local:remote pair %q", arg)
 		}
 		return l, r, nil
 	}
@@ -84,10 +86,11 @@ func parseTunnelTarget(arg string, localOverride int, reg *plugins.Registry) (in
 	remote, ok := reg.PortByName(arg)
 	if !ok {
 		avail := reg.TunnelablePlugins()
+		hint := "use `ra tunnel <port>` or `ra tunnel <local>:<remote>` for ad-hoc tunneling"
 		if len(avail) == 0 {
-			return 0, 0, fmt.Errorf("no installed plugin named %q declares a tunnel port (no plugins declare a port: field)", arg)
+			return 0, 0, fmt.Errorf("no installed plugin named %q declares a tunnel port (no plugins declare a port: field); %s", arg, hint)
 		}
-		return 0, 0, fmt.Errorf("no installed plugin named %q declares a tunnel port; available: %s", arg, strings.Join(avail, ", "))
+		return 0, 0, fmt.Errorf("no installed plugin named %q declares a tunnel port; available: %s; or %s", arg, strings.Join(avail, ", "), hint)
 	}
 	local := remote
 	if localOverride != 0 {

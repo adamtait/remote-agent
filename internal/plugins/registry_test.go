@@ -238,13 +238,13 @@ description: "d"
 	reg := loadRegistryFromDir(t, dir, "")
 
 	got := reg.TunnelablePlugins()
-	want := map[string]bool{"marimo": true, "jupyter": true}
+	want := []string{"jupyter", "marimo"} // alphabetical
 	if len(got) != len(want) {
-		t.Fatalf("TunnelablePlugins() = %v, want 2 entries", got)
+		t.Fatalf("TunnelablePlugins() = %v, want %v", got, want)
 	}
-	for _, n := range got {
-		if !want[n] {
-			t.Errorf("unexpected tunnelable plugin %q", n)
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("TunnelablePlugins()[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
 

@@ -124,8 +124,25 @@ func TestParseTunnelTarget_NoTunnelablePlugins(t *testing.T) {
 
 func TestParseTunnelTarget_InvalidPair(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	if _, _, err := parseTunnelTarget("abc:def", 0, r); err == nil {
-		t.Fatal("expected error for non-numeric pair")
+	cases := []string{"abc:def", ":8080", "8080:", "8080:abc", "abc:8080"}
+	for _, c := range cases {
+		if _, _, err := parseTunnelTarget(c, 0, r); err == nil {
+			t.Errorf("expected error for %q", c)
+		}
+	}
+}
+
+func TestParseTunnelTarget_PairOverrideErrorIsClear(t *testing.T) {
+	// Regression: the --local-port conflict should be reported even when
+	// the explicit pair would otherwise fail port validation. Without the
+	// early-exit check, "0:8080" would say "local 0 is out of range".
+	r := tunnelTestRegistry(t)
+	_, _, err := parseTunnelTarget("0:8080", 7000, r)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "--local-port conflicts") {
+		t.Errorf("expected --local-port conflict message, got: %v", err)
 	}
 }
 
