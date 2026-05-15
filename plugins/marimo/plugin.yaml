@@ -1,0 +1,16 @@
+name: marimo
+version: "1.0.0"
+description: "Installs marimo (reactive Python notebook) and auto-starts the edit server at boot"
+config:
+  - name: enabled
+    type: bool
+    description: "Install marimo and auto-start the edit server?"
+    default: false
+  - name: port
+    type: int
+    description: "Port for the marimo edit server"
+    default: 2718
+  - name: working_directory
+    type: string
+    description: "Directory where marimo will look for / create notebooks (leave blank for home directory)"
+    default: ""
