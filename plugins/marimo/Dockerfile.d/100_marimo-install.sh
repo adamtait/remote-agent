@@ -26,8 +26,17 @@ if [ ! -x /usr/local/bin/uv ]; then
     tmpdir=$(mktemp -d)
     trap 'rm -rf "${tmpdir}"' EXIT
 
-    curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${uv_arch}.tar.gz" \
-        | tar -xz -C "${tmpdir}"
+    UV_ARCHIVE="uv-${uv_arch}.tar.gz"
+    UV_BASE="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}"
+
+    curl -fsSL "${UV_BASE}/${UV_ARCHIVE}"        -o "${tmpdir}/${UV_ARCHIVE}"
+    curl -fsSL "${UV_BASE}/${UV_ARCHIVE}.sha256" -o "${tmpdir}/${UV_ARCHIVE}.sha256"
+
+    # Verify the downloaded tarball against the upstream-published checksum
+    # (file format is the standard `<hash>  <filename>` accepted by `sha256sum -c`).
+    (cd "${tmpdir}" && sha256sum -c "${UV_ARCHIVE}.sha256")
+
+    tar -xz -C "${tmpdir}" -f "${tmpdir}/${UV_ARCHIVE}"
     install -m 0755 "${tmpdir}/uv-${uv_arch}/uv"  /usr/local/bin/uv
     install -m 0755 "${tmpdir}/uv-${uv_arch}/uvx" /usr/local/bin/uvx
 fi
