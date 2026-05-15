@@ -36,8 +36,8 @@ func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
 	if s.Name == "" {
 		return nil, fmt.Errorf("plugin.yaml: name is required")
 	}
-	if s.Port < 0 || s.Port > 65535 {
-		return nil, fmt.Errorf("plugin.yaml: port %d is out of range (0-65535)", s.Port)
+	if s.PortForTunnel < 0 || s.PortForTunnel > 65535 {
+		return nil, fmt.Errorf("plugin.yaml: port-for-tunnel %d is out of range (0-65535)", s.PortForTunnel)
 	}
 	return &FilePlugin{fsys: fsys, schema: s}, nil
 }
@@ -98,7 +98,31 @@ func (p *FilePlugin) containerEnvPairsFrom(pluginCfg map[string]interface{}) []s
 		provider, _ := pluginCfg["auth_provider"].(string)
 		pairs = append(pairs, prefix+"AUTH_PROVIDER="+provider)
 	}
+	if p.schema.PortForTunnel != 0 {
+		port := portForTunnelFromCfg(pluginCfg, p.schema.PortForTunnel)
+		pairs = append(pairs, fmt.Sprintf("%sPORT_FOR_TUNNEL=%d", prefix, port))
+	}
 	return pairs
+}
+
+// portForTunnelFromCfg returns the configured port-for-tunnel for a plugin,
+// falling back to the schema default. Accepts the YAML-decoded int forms
+// (int, int64, float64) since gopkg.in/yaml.v3 may pick any of them
+// depending on the literal it parsed.
+func portForTunnelFromCfg(pluginCfg map[string]interface{}, schemaDefault int) int {
+	v, ok := pluginCfg["port-for-tunnel"]
+	if !ok {
+		return schemaDefault
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	}
+	return schemaDefault
 }
 
 // validateConfig checks required fields and auth_provider against pluginCfg.
@@ -219,6 +243,17 @@ func (p *FilePlugin) Prompt(r *bufio.Reader, out io.Writer, stderr io.Writer, st
 			return nil, e
 		}
 		pluginCfg[f.Name] = val
+	}
+
+	// `ra tunnel` reads the in-workstation port from
+	// `plugins.<name>.port-for-tunnel`, so install renders the schema's
+	// default into the user-editable config block. Skip if the prompt
+	// already produced one (it never does today, but the guard keeps the
+	// contract honest if port-for-tunnel ever becomes interactive).
+	if p.schema.PortForTunnel != 0 {
+		if _, present := pluginCfg["port-for-tunnel"]; !present {
+			pluginCfg["port-for-tunnel"] = p.schema.PortForTunnel
+		}
 	}
 
 	var activeProvider *AuthProvider

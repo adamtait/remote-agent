@@ -6,6 +6,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/plugins"
 )
@@ -23,14 +24,14 @@ func mustLoadPlugin(t *testing.T, yaml string) *plugins.FilePlugin {
 func tunnelTestRegistry(t *testing.T) *plugins.Registry {
 	t.Helper()
 	return plugins.NewRegistry([]*plugins.FilePlugin{
-		mustLoadPlugin(t, "name: marimo\nversion: \"1\"\ndescription: d\nport: 2718\n"),
+		mustLoadPlugin(t, "name: marimo\nversion: \"1\"\ndescription: d\nport-for-tunnel: 2718\n"),
 		mustLoadPlugin(t, "name: github\nversion: \"1\"\ndescription: d\n"),
 	})
 }
 
 func TestParseTunnelTarget_LocalRemotePair(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	l, rp, err := parseTunnelTarget("9000:8080", 0, r)
+	l, rp, err := parseTunnelTarget("9000:8080", 0, r, nil)
 	if err != nil {
 		t.Fatalf("parseTunnelTarget: %v", err)
 	}
@@ -41,14 +42,14 @@ func TestParseTunnelTarget_LocalRemotePair(t *testing.T) {
 
 func TestParseTunnelTarget_LocalRemotePair_RejectsOverride(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	if _, _, err := parseTunnelTarget("9000:8080", 7000, r); err == nil {
+	if _, _, err := parseTunnelTarget("9000:8080", 7000, r, nil); err == nil {
 		t.Fatal("expected --local-port to conflict with explicit pair")
 	}
 }
 
 func TestParseTunnelTarget_SinglePort(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	l, rp, err := parseTunnelTarget("8080", 0, r)
+	l, rp, err := parseTunnelTarget("8080", 0, r, nil)
 	if err != nil {
 		t.Fatalf("parseTunnelTarget: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestParseTunnelTarget_SinglePort(t *testing.T) {
 
 func TestParseTunnelTarget_SinglePort_WithLocalOverride(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	l, rp, err := parseTunnelTarget("8080", 7000, r)
+	l, rp, err := parseTunnelTarget("8080", 7000, r, nil)
 	if err != nil {
 		t.Fatalf("parseTunnelTarget: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestParseTunnelTarget_SinglePort_WithLocalOverride(t *testing.T) {
 
 func TestParseTunnelTarget_NamedPlugin(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	l, rp, err := parseTunnelTarget("marimo", 0, r)
+	l, rp, err := parseTunnelTarget("marimo", 0, r, nil)
 	if err != nil {
 		t.Fatalf("parseTunnelTarget: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestParseTunnelTarget_NamedPlugin(t *testing.T) {
 
 func TestParseTunnelTarget_NamedPlugin_WithLocalOverride(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	l, rp, err := parseTunnelTarget("marimo", 8000, r)
+	l, rp, err := parseTunnelTarget("marimo", 8000, r, nil)
 	if err != nil {
 		t.Fatalf("parseTunnelTarget: %v", err)
 	}
@@ -90,9 +91,28 @@ func TestParseTunnelTarget_NamedPlugin_WithLocalOverride(t *testing.T) {
 	}
 }
 
+func TestParseTunnelTarget_NamedPlugin_ConfigOverridesSchemaDefault(t *testing.T) {
+	// When the user customizes plugins.marimo.port-for-tunnel in config.yaml,
+	// the tunnel command must read that value — otherwise the tunnel would
+	// hit a port the server isn't bound to.
+	r := tunnelTestRegistry(t)
+	cfg := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"marimo": {"port-for-tunnel": 8000},
+		},
+	}
+	l, rp, err := parseTunnelTarget("marimo", 0, r, cfg)
+	if err != nil {
+		t.Fatalf("parseTunnelTarget: %v", err)
+	}
+	if l != 8000 || rp != 8000 {
+		t.Errorf("got (%d,%d), want (8000,8000) — user-configured port", l, rp)
+	}
+}
+
 func TestParseTunnelTarget_UnknownPlugin(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	_, _, err := parseTunnelTarget("nope", 0, r)
+	_, _, err := parseTunnelTarget("nope", 0, r, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown plugin")
 	}
@@ -104,7 +124,7 @@ func TestParseTunnelTarget_UnknownPlugin(t *testing.T) {
 
 func TestParseTunnelTarget_PluginWithoutPort(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	if _, _, err := parseTunnelTarget("github", 0, r); err == nil {
+	if _, _, err := parseTunnelTarget("github", 0, r, nil); err == nil {
 		t.Fatal("expected error for plugin without port:")
 	}
 }
@@ -113,7 +133,7 @@ func TestParseTunnelTarget_NoTunnelablePlugins(t *testing.T) {
 	r := plugins.NewRegistry([]*plugins.FilePlugin{
 		mustLoadPlugin(t, "name: github\nversion: \"1\"\ndescription: d\n"),
 	})
-	_, _, err := parseTunnelTarget("nope", 0, r)
+	_, _, err := parseTunnelTarget("nope", 0, r, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -126,7 +146,7 @@ func TestParseTunnelTarget_InvalidPair(t *testing.T) {
 	r := tunnelTestRegistry(t)
 	cases := []string{"abc:def", ":8080", "8080:", "8080:abc", "abc:8080"}
 	for _, c := range cases {
-		if _, _, err := parseTunnelTarget(c, 0, r); err == nil {
+		if _, _, err := parseTunnelTarget(c, 0, r, nil); err == nil {
 			t.Errorf("expected error for %q", c)
 		}
 	}
@@ -137,7 +157,7 @@ func TestParseTunnelTarget_PairOverrideErrorIsClear(t *testing.T) {
 	// the explicit pair would otherwise fail port validation. Without the
 	// early-exit check, "0:8080" would say "local 0 is out of range".
 	r := tunnelTestRegistry(t)
-	_, _, err := parseTunnelTarget("0:8080", 7000, r)
+	_, _, err := parseTunnelTarget("0:8080", 7000, r, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -148,10 +168,10 @@ func TestParseTunnelTarget_PairOverrideErrorIsClear(t *testing.T) {
 
 func TestParseTunnelTarget_OutOfRangePort(t *testing.T) {
 	r := tunnelTestRegistry(t)
-	if _, _, err := parseTunnelTarget("70000", 0, r); err == nil {
+	if _, _, err := parseTunnelTarget("70000", 0, r, nil); err == nil {
 		t.Fatal("expected error for out-of-range port")
 	}
-	if _, _, err := parseTunnelTarget("0", 0, r); err == nil {
+	if _, _, err := parseTunnelTarget("0", 0, r, nil); err == nil {
 		t.Fatal("expected error for port 0")
 	}
 }

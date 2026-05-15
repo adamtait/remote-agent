@@ -195,7 +195,7 @@ func TestPortByName(t *testing.T) {
 	writePluginYAML(t, dir, "marimo", `name: marimo
 version: "1.0.0"
 description: "d"
-port: 2718
+port-for-tunnel: 2718
 `)
 	writePluginYAML(t, dir, "github", `name: github
 version: "1.0.0"
@@ -203,18 +203,39 @@ description: "d"
 `)
 	reg := loadRegistryFromDir(t, dir, "")
 
-	if port, ok := reg.PortByName("marimo"); !ok || port != 2718 {
-		t.Errorf("PortByName(marimo) = (%d,%v), want (2718,true)", port, ok)
+	if port, ok := reg.PortByName("marimo", nil); !ok || port != 2718 {
+		t.Errorf("PortByName(marimo, nil) = (%d,%v), want (2718,true)", port, ok)
 	}
-	if _, ok := reg.PortByName("github"); ok {
-		t.Error("PortByName(github) should be false (no port declared)")
+	if _, ok := reg.PortByName("github", nil); ok {
+		t.Error("PortByName(github, nil) should be false (no port declared)")
 	}
-	if _, ok := reg.PortByName("nonexistent"); ok {
-		t.Error("PortByName(nonexistent) should be false")
+	if _, ok := reg.PortByName("nonexistent", nil); ok {
+		t.Error("PortByName(nonexistent, nil) should be false")
+	}
+
+	// User-configured value wins over schema default.
+	cfg := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"marimo": {"port-for-tunnel": 8000},
+		},
+	}
+	if port, ok := reg.PortByName("marimo", cfg); !ok || port != 8000 {
+		t.Errorf("PortByName(marimo, cfg) = (%d,%v), want (8000,true)", port, ok)
+	}
+
+	// A plugin without a schema default cannot be made tunnelable just by
+	// dropping the key into config.yaml.
+	cfg2 := &config.Config{
+		Plugins: map[string]map[string]interface{}{
+			"github": {"port-for-tunnel": 8000},
+		},
+	}
+	if _, ok := reg.PortByName("github", cfg2); ok {
+		t.Error("PortByName(github, cfg2) should be false (schema has no port-for-tunnel)")
 	}
 
 	var nilReg *Registry
-	if _, ok := nilReg.PortByName("anything"); ok {
+	if _, ok := nilReg.PortByName("anything", nil); ok {
 		t.Error("nil registry PortByName should be false")
 	}
 }
@@ -224,12 +245,12 @@ func TestTunnelablePlugins(t *testing.T) {
 	writePluginYAML(t, dir, "marimo", `name: marimo
 version: "1.0.0"
 description: "d"
-port: 2718
+port-for-tunnel: 2718
 `)
 	writePluginYAML(t, dir, "jupyter", `name: jupyter
 version: "1.0.0"
 description: "d"
-port: 8888
+port-for-tunnel: 8888
 `)
 	writePluginYAML(t, dir, "github", `name: github
 version: "1.0.0"

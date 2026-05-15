@@ -30,7 +30,7 @@ Blocks until Ctrl-C.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		localOverride, _ := cmd.Flags().GetInt("local-port")
-		localPort, remotePort, err := parseTunnelTarget(args[0], localOverride, reg)
+		localPort, remotePort, err := parseTunnelTarget(args[0], localOverride, reg, cfg)
 		if err != nil {
 			return err
 		}
@@ -47,7 +47,7 @@ Blocks until Ctrl-C.`,
 //	"L:R"   → (L, R) — localOverride is rejected (already explicit)
 //	"P"     → (P, P) — localOverride wins if set
 //	"name"  → (reg.PortByName(name), same) — localOverride wins if set
-func parseTunnelTarget(arg string, localOverride int, reg *plugins.Registry) (int, int, error) {
+func parseTunnelTarget(arg string, localOverride int, reg *plugins.Registry, cfg *config.Config) (int, int, error) {
 	if strings.Contains(arg, ":") {
 		// Reject the override before parsing so the message points at the
 		// real conflict instead of a misleading port-validation error.
@@ -83,7 +83,7 @@ func parseTunnelTarget(arg string, localOverride int, reg *plugins.Registry) (in
 		return local, p, nil
 	}
 
-	remote, ok := reg.PortByName(arg)
+	remote, ok := reg.PortByName(arg, cfg)
 	if !ok {
 		avail := reg.TunnelablePlugins()
 		hint := "use `ra tunnel <port>` or `ra tunnel <local>:<remote>` for ad-hoc tunneling"

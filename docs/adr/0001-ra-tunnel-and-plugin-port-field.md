@@ -1,4 +1,4 @@
-# ADR 0001: `ra tunnel` and the plugin `port:` field
+# ADR 0001: `ra tunnel` and the plugin `port-for-tunnel:` field
 
 - **Status:** Accepted
 - **Date:** 2026-05-15
@@ -33,8 +33,11 @@ the common case becomes `ra tunnel <plugin>`.
 
 ## Decision
 
-Add `ra tunnel <target> [workstation]` and a single optional `port:` field
-on the plugin schema.
+Add `ra tunnel <target> [workstation]` and a single optional
+`port-for-tunnel:` field on the plugin schema. The field is also materialized
+into the user-editable `plugins.<name>.port-for-tunnel` config block at
+install time, so the same value drives both the server bind port (via env
+var) and the tunnel target.
 
 ### CLI
 
@@ -60,34 +63,60 @@ workstations start-tcp-tunnel` process exits (typically Ctrl-C).
 
 ### Plugin schema
 
-A single new optional field on `PluginSchema`:
+A single new optional field on `PluginSchema`, at the top level alongside
+`name`/`version`/`description`:
 
 ```yaml
 # plugin.yaml
 name: marimo
 version: "1.0.0"
 description: Marimo notebook UI
-port: 2718
+port-for-tunnel: 2718
 ```
 
-`port: 0` (the zero value, i.e. no `port:` line) means "this plugin opts out
-of named tunneling." `ra tunnel <name>` resolves through the registry: if
-the named plugin is installed and has `port: != 0`, it's the target;
-otherwise the command errors with a list of plugins that *do* declare a port.
+`port-for-tunnel: 0` (the zero value, i.e. no `port-for-tunnel:` line)
+means "this plugin opts out of named tunneling." `ra tunnel <name>`
+resolves through the registry: if the named plugin is installed and has
+`port-for-tunnel != 0`, it's the target; otherwise the command errors with
+a list of plugins that *do* declare a tunnel port.
+
+### Install-time rendering
+
+`ra plugin install` automatically renders `plugins.<name>.port-for-tunnel:
+<schema-default>` into `config.yaml` whenever the schema declares a non-zero
+value, so the same value:
+
+1. is exported into the workstation as
+   `RA_PLUGIN_<NAME>_PORT_FOR_TUNNEL=<value>` and read by the plugin's
+   `workstation-startup.d/` script to bind its server, AND
+2. is read by `ra tunnel <name>` as the remote port, with the schema
+   default as a fallback if the user has removed the key from
+   `config.yaml`.
+
+This single source of truth prevents the silent mismatch that would
+otherwise occur if a user customized the bind port but the tunnel still
+targeted the schema default.
 
 ### Implementation surface
 
-- `internal/plugins/schema.go` — add `Port int` to `PluginSchema`.
+- `internal/plugins/schema.go` — add `PortForTunnel int` to
+  `PluginSchema` (yaml tag `port-for-tunnel`).
 - `internal/plugins/fileplugin.go` — reject port outside `[0, 65535]` in
-  `LoadPlugin`.
-- `internal/plugins/registry.go` — add `PortByName(name) (int, bool)` and
-  `TunnelablePlugins() []string`.
+  `LoadPlugin`; `Prompt` injects `port-for-tunnel` into the rendered
+  config map when the schema declares one;
+  `containerEnvPairsFrom` emits `RA_PLUGIN_<NAME>_PORT_FOR_TUNNEL` reading
+  from the config map with the schema default as fallback.
+- `internal/plugins/registry.go` — `PortByName(name, cfg)` reads
+  `cfg.Plugins[name]["port-for-tunnel"]` with schema fallback;
+  `TunnelablePlugins() []string` returns a sorted name list.
 - `internal/gcloud/workstation.go` — `Client.StartTCPTunnel(...)` wrapping
   `gcloud workstations start-tcp-tunnel`, mirroring `SSH`.
 - `cmd/tunnel.go` — the cobra command and target-parsing logic.
 - `cmd/resolve.go` — extract the describe→maybe-start block from
   `cmd/connect.go` into a shared `ensureRunning` helper that both `connect`
   and `tunnel` call.
+- `plugins/marimo/` — first in-tree user: declares `port-for-tunnel: 2718`
+  and reads `RA_PLUGIN_MARIMO_PORT_FOR_TUNNEL` in its startup script.
 
 ## Alternatives Considered
 
@@ -99,8 +128,8 @@ named subcommands (`ra <plugin> <command>` with command types like
 freely. But the immediate need is *just* tunneling, and a single-purpose
 `ra tunnel` keeps both the user-facing surface and the plugin contract
 trivially small. If/when a second command type proves necessary, this ADR
-can be superseded by the broader framework — `port:` survives the rewrite
-because it remains a useful piece of plugin metadata.
+can be superseded by the broader framework — `port-for-tunnel:` survives
+the rewrite because it remains a useful piece of plugin metadata.
 
 ### 2. Backgrounded tunnels with `ra tunnel list/stop`
 
@@ -124,6 +153,15 @@ Rejected as a redundant configuration surface. Users who want an ad-hoc
 tunnel can already do `ra tunnel 8080` or `ra tunnel 9000:8080`. Named
 tunnels belong with the thing that *runs* the service (the plugin), not in
 a separate user file that has to be kept in sync.
+
+### 5. Naming: `port:` vs `port-for-tunnel:`
+
+An earlier draft used a top-level `port:` field. Rejected once a real
+plugin (marimo) landed that already used `port:` as a *config-field name*
+to let users customize the bind port. Two different `port:` meanings in
+the same plugin would be confusing; `port-for-tunnel:` is more verbose but
+unambiguous, and it leaves the conventional `config.port` name available
+for plugin authors who want it.
 
 ## Consequences
 
@@ -158,12 +196,23 @@ a separate user file that has to be kept in sync.
 
 1. `go build ./...` and `go test ./...` pass.
 2. `ra tunnel --help` shows the three target forms.
-3. Install a plugin with `port: 2718`; `ra tunnel <name>` shells out to
-   `gcloud workstations start-tcp-tunnel ... --local-host-port=localhost:2718
-   <ws> 2718`. (Verified via `TestClient_StartTCPTunnel_CallsCorrectArgs`
-   and `TestRunTunnel_Running_CallsStartTCPTunnel`.)
-4. `ra tunnel <unknown-name>` errors with the list of installed
+3. `ra plugin install ./plugins/marimo` writes
+   `plugins.marimo.port-for-tunnel: 2718` into `config.yaml`. (Verified
+   via `TestPrompt_AutoInjectsPortForTunnel`.)
+4. The configured port is exported as
+   `RA_PLUGIN_MARIMO_PORT_FOR_TUNNEL=<value>` into the container env, so
+   marimo's `250_marimo-start.sh` binds to it. (Verified via
+   `TestFilePlugin_ContainerEnvPairsFrom_PortForTunnel`.)
+5. `ra tunnel marimo` shells out to `gcloud workstations start-tcp-tunnel
+   ... --local-host-port=localhost:2718 <ws> 2718`. (Verified via
+   `TestClient_StartTCPTunnel_CallsCorrectArgs` and
+   `TestRunTunnel_Running_CallsStartTCPTunnel`.)
+6. If the user customizes `plugins.marimo.port-for-tunnel: 8000` in
+   `config.yaml`, `ra tunnel marimo` targets 8000 — same value the
+   server is bound to. (Verified via
+   `TestParseTunnelTarget_NamedPlugin_ConfigOverridesSchemaDefault`.)
+7. `ra tunnel <unknown-name>` errors with the list of installed
    tunnelable plugins. (Verified via
    `TestParseTunnelTarget_UnknownPlugin`.)
-5. Against a stopped workstation, `ra tunnel ...` prints `starting...` and
+8. Against a stopped workstation, `ra tunnel ...` prints `starting...` and
    then opens the tunnel. (Verified via `TestRunTunnel_Stopped_StartsFirst`.)
