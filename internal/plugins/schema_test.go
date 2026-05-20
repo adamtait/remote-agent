@@ -98,13 +98,14 @@ auth_providers:
 }
 
 // TestPluginSchemaParse_IAMRolesOnAuthProvider confirms that an
-// auth_provider with no secrets but with iam_roles parses correctly -
-// this is the shape the gemini plugin's vertex provider uses.
+// auth_provider with no secrets but with iam_roles parses correctly —
+// the shape used when a provider grants access via the workstation's
+// service account instead of a fetched secret.
 func TestPluginSchemaParse_IAMRolesOnAuthProvider(t *testing.T) {
 	raw := `
-name: gemini
+name: example
 version: "1.0.0"
-description: "Gemini CLI"
+description: "Example plugin"
 auth_providers:
   - name: vertex
     description: "Vertex AI"

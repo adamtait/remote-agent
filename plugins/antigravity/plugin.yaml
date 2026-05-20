@@ -1,0 +1,8 @@
+name: antigravity
+version: "1.0.0"
+description: "Installs the Antigravity (agy) CLI on the workstation"
+config:
+  - name: enabled
+    type: bool
+    description: "Enable Antigravity CLI?"
+    default: false
