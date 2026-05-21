@@ -55,7 +55,7 @@ func TestRenderUserConfig_ZeroValues_HasDefaults(t *testing.T) {
 	for _, want := range []string{
 		`project: my-gcp-project`,
 		`region: us-central1`,
-		`machine_type: e2-standard-4`,
+		`machine_type: e2-standard-2`,
 		`plugins: {}`,
 		`secrets: {}`,
 		`env: {}`,

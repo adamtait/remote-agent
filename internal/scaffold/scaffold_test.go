@@ -37,7 +37,7 @@ func TestInteractiveScaffold_WritesExhaustiveUserConfig(t *testing.T) {
 		`  user_email: "alice@example.com"`,
 		`  project: my-proj-123`,
 		`    region: us-central1`,
-		`    machine_type: e2-standard-4`,
+		`    machine_type: e2-standard-2`,
 		`secrets: {}`,
 		`env: {}`,
 	} {
