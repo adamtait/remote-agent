@@ -355,3 +355,106 @@ func TestAppendUniqueRoles(t *testing.T) {
 		t.Errorf("appendUniqueRoles = %v, want %v", got, want)
 	}
 }
+
+func TestClaudeSyncEnabled(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *config.Config
+		want bool
+	}{
+		{"nil-plugins", &config.Config{}, false},
+		{"plugin-missing", &config.Config{Plugins: map[string]map[string]interface{}{
+			"other": {"enabled": true},
+		}}, false},
+		{"enabled-false", &config.Config{Plugins: map[string]map[string]interface{}{
+			"claude-sync": {"enabled": false},
+		}}, false},
+		{"enabled-true", &config.Config{Plugins: map[string]map[string]interface{}{
+			"claude-sync": {"enabled": true},
+		}}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := claudeSyncEnabled(tc.cfg); got != tc.want {
+				t.Errorf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClaudeSyncBucketName_HonorsOverride(t *testing.T) {
+	cfg := &config.Config{
+		Gcloud: config.GcloudConfig{Project: "p"},
+		Git:    config.GitConfig{UserEmail: "a@x.com"},
+		Plugins: map[string]map[string]interface{}{
+			"claude-sync": {
+				"enabled":              true,
+				"bucket_name_override": "my-custom-bucket",
+			},
+		},
+	}
+	if got := claudeSyncBucketName(cfg); got != "my-custom-bucket" {
+		t.Errorf("override ignored: %q", got)
+	}
+}
+
+func TestClaudeSyncBucketName_DerivesWhenNoOverride(t *testing.T) {
+	cfg := &config.Config{
+		Gcloud: config.GcloudConfig{Project: "my-proj"},
+		Git:    config.GitConfig{UserEmail: "a@x.com"},
+		Plugins: map[string]map[string]interface{}{
+			"claude-sync": {"enabled": true},
+		},
+	}
+	got := claudeSyncBucketName(cfg)
+	if !strings.HasPrefix(got, "ra-claude-my-proj-") {
+		t.Errorf("derived name has wrong prefix: %q", got)
+	}
+	suffix := strings.TrimPrefix(got, "ra-claude-my-proj-")
+	if len(suffix) != 8 {
+		t.Errorf("derived name has wrong suffix length: %q (len=%d)", got, len(suffix))
+	}
+}
+
+func TestBuildContainerEnv_InjectsClaudeSyncBucketWhenEnabled(t *testing.T) {
+	sleep := 2
+	cfg := &config.Config{
+		Git:    config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
+		Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{
+			Region: "us-central1", MachineType: "e2-standard-4", DiskSizeGB: 50,
+			ClusterName: "c", ConfigName: "cf", ServiceAccountName: "sa",
+			ImageName: "i", ImageTag: "t", RepoName: "r",
+			AutoSleepHours: &sleep, AutoShutdownHours: 12,
+		}},
+		Plugins: map[string]map[string]interface{}{
+			"claude-sync": {"enabled": true},
+		},
+	}
+	got := buildContainerEnv(cfg)
+	if !strings.Contains(got, "RA_PLUGIN_CLAUDE_SYNC_BUCKET=ra-claude-p-") {
+		t.Errorf("expected RA_PLUGIN_CLAUDE_SYNC_BUCKET in container env; got %q", got)
+	}
+	// Must also be in RA_PROPAGATE_KEYS so 200_remote-agent-setup.sh re-exports
+	// it to /run/ra/env for the systemd loop to source.
+	parts := strings.Split(got, ",")
+	var propagate string
+	for _, p := range parts {
+		if strings.HasPrefix(p, "RA_PROPAGATE_KEYS=") {
+			propagate = strings.TrimPrefix(p, "RA_PROPAGATE_KEYS=")
+		}
+	}
+	if !strings.Contains(propagate, "RA_PLUGIN_CLAUDE_SYNC_BUCKET") {
+		t.Errorf("RA_PLUGIN_CLAUDE_SYNC_BUCKET missing from RA_PROPAGATE_KEYS=%q", propagate)
+	}
+}
+
+func TestBuildContainerEnv_OmitsClaudeSyncBucketWhenDisabled(t *testing.T) {
+	cfg := &config.Config{
+		Git:    config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
+		Gcloud: config.GcloudConfig{Project: "p"},
+	}
+	got := buildContainerEnv(cfg)
+	if strings.Contains(got, "RA_PLUGIN_CLAUDE_SYNC_BUCKET") {
+		t.Errorf("expected no RA_PLUGIN_CLAUDE_SYNC_BUCKET when plugin disabled; got %q", got)
+	}
+}

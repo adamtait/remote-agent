@@ -15,6 +15,7 @@ import (
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/configwrite"
 	"github.com/adamtait/remote-agent/internal/gcloud"
+	"github.com/adamtait/remote-agent/internal/gcs"
 	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/naming"
 	"github.com/adamtait/remote-agent/internal/plugins"
@@ -26,7 +27,7 @@ import (
 // totalCreateSteps is the count of numbered pipeline phases in runCreate,
 // rendered in the "==> [N/M] ..." progress prefix. Update if you add or
 // remove a Step() call.
-const totalCreateSteps = 10
+const totalCreateSteps = 11
 
 // Bindings on a freshly-created service account can briefly fail with
 // "Service account ... does not exist" while IAM propagates. Up to
@@ -39,6 +40,29 @@ const (
 
 func logicalNameToEnvToken(logical string) string {
 	return strings.ToUpper(logical)
+}
+
+// claudeSyncEnabled reports whether the claude-sync plugin is installed and
+// has `enabled: true` in cfg.Plugins. Used to gate bucket provisioning,
+// IAM binding, and the RA_PLUGIN_CLAUDE_SYNC_BUCKET env injection.
+func claudeSyncEnabled(cfg *config.Config) bool {
+	pc, ok := cfg.Plugins["claude-sync"]
+	if !ok {
+		return false
+	}
+	en, _ := pc["enabled"].(bool)
+	return en
+}
+
+// claudeSyncBucketName returns the GCS bucket name for the (project, user)
+// pair, honoring plugins.claude-sync.bucket_name_override if set.
+func claudeSyncBucketName(cfg *config.Config) string {
+	if pc, ok := cfg.Plugins["claude-sync"]; ok {
+		if override, _ := pc["bucket_name_override"].(string); override != "" {
+			return override
+		}
+	}
+	return gcs.BucketName(cfg.Gcloud.Project, cfg.Git.UserEmail)
 }
 
 func buildContainerEnv(cfg *config.Config) string {
@@ -58,6 +82,13 @@ func buildContainerEnv(cfg *config.Config) string {
 	addProp("GCP_PROJECT_ID", cfg.Gcloud.Project)
 	addProp("GIT_USER_NAME", cfg.Git.UserName)
 	addProp("GIT_USER_EMAIL", cfg.Git.UserEmail)
+	// claude-sync's bucket name is computed at create-time (it depends on
+	// the gcloud project + git user email) rather than stored as plugin
+	// config, so inject it here in addition to the plugin's own config
+	// fields that flow through reg.AllContainerEnvPairs below.
+	if claudeSyncEnabled(cfg) {
+		addProp("RA_PLUGIN_CLAUDE_SYNC_BUCKET", claudeSyncBucketName(cfg))
+	}
 	for _, pair := range reg.AllContainerEnvPairs(cfg) {
 		pairs = append(pairs, pair)
 		if eq := strings.IndexByte(pair, '='); eq > 0 {
@@ -286,8 +317,28 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 3 — Build and push image
-	done = logging.Step("build_image", 3, totalCreateSteps, fmt.Sprintf("Building image %s...", imageURI), cmd.OutOrStdout())
+	// Step 3 — GCS bucket for claude-sync (only if the plugin is enabled).
+	// The bucket holds per-workstation copies of ~/.claude/ so state syncs
+	// across workstations belonging to the same (project, user) pair.
+	// IAM binding is deferred to the service-account step below since the
+	// SA may not yet exist on first run.
+	claudeSyncBucket := ""
+	if claudeSyncEnabled(cfg) {
+		claudeSyncBucket = claudeSyncBucketName(cfg)
+		done = logging.Step("ensure_gcs_bucket", 3, totalCreateSteps, fmt.Sprintf("Ensuring GCS bucket '%s' for claude-sync...", claudeSyncBucket), cmd.OutOrStdout())
+		if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, claudeSyncBucket, ws.Region); err != nil {
+			done(err)
+			return fmt.Errorf("ensuring claude-sync bucket: %w", err)
+		}
+		done(nil)
+	} else {
+		// Print a placeholder so step numbering stays consistent with totalCreateSteps.
+		done = logging.Step("ensure_gcs_bucket", 3, totalCreateSteps, "claude-sync disabled — skipping GCS bucket", cmd.OutOrStdout())
+		done(nil)
+	}
+
+	// Step 4 — Build and push image
+	done = logging.Step("build_image", 4, totalCreateSteps, fmt.Sprintf("Building image %s...", imageURI), cmd.OutOrStdout())
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -330,9 +381,9 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 4 — Create any secrets whose values we collected during pre-flight.
+	// Step 5 — Create any secrets whose values we collected during pre-flight.
 	// Existing secrets were skipped already; this loop only writes new ones.
-	done = logging.Step("ensure_secrets", 4, totalCreateSteps, fmt.Sprintf("Creating %d new GCP secret(s)...", len(pendingSecrets)), cmd.OutOrStdout())
+	done = logging.Step("ensure_secrets", 5, totalCreateSteps, fmt.Sprintf("Creating %d new GCP secret(s)...", len(pendingSecrets)), cmd.OutOrStdout())
 	for _, ps := range pendingSecrets {
 		if err := secrets.CreateFromValue(r, cfg.Gcloud.Project, ps.gcpName, ps.value); err != nil {
 			done(err)
@@ -341,8 +392,8 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 5 — Service account and IAM
-	done = logging.Step("ensure_service_acct", 5, totalCreateSteps, fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail), cmd.OutOrStdout())
+	// Step 6 — Service account and IAM
+	done = logging.Step("ensure_service_acct", 6, totalCreateSteps, fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail), cmd.OutOrStdout())
 	if !r.Check("iam", "service-accounts", "describe", serviceAccountEmail, "--project", cfg.Gcloud.Project) {
 		if err := r.Run("iam", "service-accounts", "create", ws.ServiceAccountName,
 			"--display-name=ra Workstation SA",
@@ -376,10 +427,22 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("binding secret %s IAM: %w", secret, err)
 		}
 	}
+
+	// Bind claude-sync GCS bucket (only when the plugin is enabled and the
+	// bucket has been ensured above). Same RetryOnSANotFound pattern as the
+	// secret bindings to cover the IAM eventual-consistency window after a
+	// fresh service-account create.
+	if claudeSyncBucket != "" {
+		if err := gcs.GrantObjectAdmin(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
+			claudeSyncBucket, serviceAccountEmail); err != nil {
+			done(err)
+			return fmt.Errorf("binding claude-sync bucket IAM: %w", err)
+		}
+	}
 	done(nil)
 
 	// Bind Artifact Registry repo
-	done = logging.Step("bind_ar_iam", 6, totalCreateSteps, fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName), cmd.OutOrStdout())
+	done = logging.Step("bind_ar_iam", 7, totalCreateSteps, fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName), cmd.OutOrStdout())
 	if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
 		"artifacts", "repositories", "add-iam-policy-binding", ws.RepoName,
 		"--location", ws.Region,
@@ -398,7 +461,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	// authenticates via Vertex AI using this same service account).
 	projectRoles := []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"}
 	projectRoles = appendUniqueRoles(projectRoles, pluginAuthIAMRoles(reg.All(), cfg))
-	done = logging.Step("bind_project_iam", 7, totalCreateSteps, fmt.Sprintf("Granting %d project-level IAM role(s)...", len(projectRoles)), cmd.OutOrStdout())
+	done = logging.Step("bind_project_iam", 8, totalCreateSteps, fmt.Sprintf("Granting %d project-level IAM role(s)...", len(projectRoles)), cmd.OutOrStdout())
 	for _, role := range projectRoles {
 		if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
 			"projects", "add-iam-policy-binding", cfg.Gcloud.Project,
@@ -411,8 +474,8 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 8 — Workstations cluster
-	done = logging.Step("ensure_cluster", 8, totalCreateSteps, fmt.Sprintf("Ensuring workstations cluster '%s'...", ws.ClusterName), cmd.OutOrStdout())
+	// Step 9 — Workstations cluster
+	done = logging.Step("ensure_cluster", 9, totalCreateSteps, fmt.Sprintf("Ensuring workstations cluster '%s'...", ws.ClusterName), cmd.OutOrStdout())
 	if !r.Check("workstations", "clusters", "describe", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project) {
 		logging.WarnPrintf(cmd.OutOrStdout(), "Creating cluster — this takes ~20 minutes on first run.")
 		if err := r.Run("workstations", "clusters", "create", ws.ClusterName,
@@ -424,8 +487,8 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 9 — Workstations config
-	done = logging.Step("ensure_config", 9, totalCreateSteps, fmt.Sprintf("Ensuring workstations config '%s'...", ws.ConfigName), cmd.OutOrStdout())
+	// Step 10 — Workstations config
+	done = logging.Step("ensure_config", 10, totalCreateSteps, fmt.Sprintf("Ensuring workstations config '%s'...", ws.ConfigName), cmd.OutOrStdout())
 	containerEnv := buildContainerEnv(cfg)
 
 	configExists := r.Check("workstations", "configs", "describe", ws.ConfigName,
@@ -476,8 +539,8 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 10 — Resolve a unique workstation name and create it.
-	done = logging.Step("create_workstation", 10, totalCreateSteps, "Resolving workstation name and creating...", cmd.OutOrStdout())
+	// Step 11 — Resolve a unique workstation name and create it.
+	done = logging.Step("create_workstation", 11, totalCreateSteps, "Resolving workstation name and creating...", cmd.OutOrStdout())
 	existing, err := client.List(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName)
 	if err != nil {
 		done(err)
@@ -525,7 +588,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 11 — Print access info
+	// Print access info (post-pipeline; not counted in totalCreateSteps).
 	info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, workstationName)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
