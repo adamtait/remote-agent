@@ -34,8 +34,12 @@ type ProjectValues struct {
 
 // Seed defaults applied when a UserValues field is zero.
 const (
-	seedRegion             = "us-central1"
-	seedMachineType        = "e2-standard-4"
+	seedRegion = "us-central1"
+	// 2 vCPU / 8 GiB. Sufficient for editor + Claude Code + light builds.
+	// Bump per-project (e.g., e2-standard-4/8) when running heavy compilers
+	// or test suites — workstations bill per minute while running, so a
+	// smaller default keeps idle costs low.
+	seedMachineType        = "e2-standard-2"
 	seedDiskSizeGB         = 50
 	seedClusterName        = "ra-dev-cluster"
 	seedServiceAccountName = "ra-workstation-sa"

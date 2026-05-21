@@ -259,7 +259,7 @@ At every workstation boot:
 ## Cost notes
 
 - Cluster: no standby cost when no workstations are running
-- Workstation: billed per minute while running (e2-standard-4 ≈ $0.13/hr)
+- Workstation: billed per minute while running. Default `e2-standard-2` ≈ $0.07/hr; bump to `e2-standard-4` (~$0.13/hr) or larger per-project for heavier workloads.
 - Auto-stops after 2h idle by default
 - Persistent home disk: billed even when stopped (~$0.04/GB-month for pd-standard)
 
