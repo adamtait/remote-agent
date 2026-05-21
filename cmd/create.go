@@ -325,6 +325,13 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	claudeSyncBucket := ""
 	if claudeSyncEnabled(cfg) {
 		claudeSyncBucket = claudeSyncBucketName(cfg)
+		// Validate before any GCS-side call. A user-supplied
+		// bucket_name_override that violates GCS naming rules would
+		// otherwise fail mid-pipeline after AR repo creation, leaving
+		// half-provisioned state.
+		if err := gcs.ValidateBucketName(claudeSyncBucket); err != nil {
+			return fmt.Errorf("claude-sync bucket name invalid: %w", err)
+		}
 		done = logging.Step("ensure_gcs_bucket", 3, totalCreateSteps, fmt.Sprintf("Ensuring GCS bucket '%s' for claude-sync...", claudeSyncBucket), cmd.OutOrStdout())
 		if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, claudeSyncBucket, ws.Region); err != nil {
 			done(err)

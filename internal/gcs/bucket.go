@@ -7,11 +7,40 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/adamtait/remote-agent/internal/gcloud"
 )
+
+// bucketNameRe matches the GCS bucket-name subset we generate and want to
+// accept from user overrides: 3–63 chars, lowercase letters / digits /
+// hyphens, must start+end with a letter or digit, no consecutive hyphens.
+// GCS allows underscores and dots in legacy bucket names but we reject them
+// in overrides to keep the contract tight — if a user needs a dotted name
+// we can relax this later.
+var bucketNameRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$`)
+
+// ValidateBucketName returns an error if name is not a valid GCS bucket
+// name according to the subset accepted by ra. Used to fail fast on user-
+// supplied `plugins.claude-sync.bucket_name_override` before any gcloud
+// call attempts (and silently corrupts) a partial provisioning run.
+func ValidateBucketName(name string) error {
+	if name == "" {
+		return fmt.Errorf("bucket name is empty")
+	}
+	if len(name) < 3 || len(name) > 63 {
+		return fmt.Errorf("bucket name %q must be 3–63 chars (got %d)", name, len(name))
+	}
+	if strings.Contains(name, "--") {
+		return fmt.Errorf("bucket name %q must not contain consecutive hyphens", name)
+	}
+	if !bucketNameRe.MatchString(name) {
+		return fmt.Errorf("bucket name %q must be lowercase letters/digits/hyphens, starting and ending with a letter or digit", name)
+	}
+	return nil
+}
 
 // BucketName returns the deterministic bucket name for storing claude state
 // for the given (project, user) pair. The 8-hex-char suffix is the prefix of

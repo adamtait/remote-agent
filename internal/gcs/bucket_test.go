@@ -49,6 +49,51 @@ func (f *fakeRunner) Check(args ...string) bool {
 	return false
 }
 
+func TestValidateBucketName(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid lowercase", "ra-claude-my-proj-12345678", false},
+		{"valid all digits", "012345678901", false},
+		{"too short", "ab", true},
+		{"too long", strings.Repeat("a", 64), true},
+		{"uppercase rejected", "RA-Claude-Bad", true},
+		{"underscore rejected", "ra_claude_x", true},
+		{"dot rejected", "ra.claude.x", true},
+		{"starts with hyphen", "-ra-claude-x", true},
+		{"ends with hyphen", "ra-claude-x-", true},
+		{"consecutive hyphens", "ra--claude", true},
+		{"empty", "", true},
+		{"two-char valid pattern but too short", "ab", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := gcs.ValidateBucketName(tc.input)
+			if tc.wantErr && err == nil {
+				t.Errorf("expected error for %q, got nil", tc.input)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("expected no error for %q, got %v", tc.input, err)
+			}
+		})
+	}
+}
+
+func TestValidateBucketName_DerivedNamesAlwaysValid(t *testing.T) {
+	// The names we auto-derive must always pass validation; otherwise
+	// turning the plugin on alone would break ra create.
+	for _, p := range []string{"p", "my-proj", "abc-123-xyz"} {
+		for _, e := range []string{"a@x.com", "User+Tag@Sub.Domain.tld", ""} {
+			name := gcs.BucketName(p, e)
+			if err := gcs.ValidateBucketName(name); err != nil {
+				t.Errorf("BucketName(%q,%q)=%q failed validation: %v", p, e, name, err)
+			}
+		}
+	}
+}
+
 func TestBucketName_Deterministic(t *testing.T) {
 	a := gcs.BucketName("my-proj", "Adam@Example.com")
 	b := gcs.BucketName("my-proj", "  adam@example.com  ")

@@ -14,6 +14,48 @@ Format per entry:
 
 ---
 
+## 2026-05-21 — Review feedback applied (PR #126)
+
+Self-review on PR #126 surfaced 8 items. All applied in a follow-up
+commit:
+
+1. **`Restart=on-failure` ⇒ `Restart=always`** with
+   `StartLimitIntervalSec=600`/`StartLimitBurst=20` plus
+   `RestartSec=30`. The loop's env-wait timeout now `exit 1`s so
+   systemd actually retries instead of leaving the unit silently
+   inactive.
+2. **Pull stages into a tmpdir + `cp -an`** rather than rsync-ing
+   directly into `~/.claude/`. Newer local files (e.g. unsynced edits
+   from before the workstation last restarted) win over the GCS copy
+   for projects/, todos/, plans/, session-env/. history.jsonl and
+   `.claude.json` keep last-writer-wins via the manifest.
+3. **Loop + pull log to `/var/log/ra-claude-sync.log`** (tee for pull,
+   `exec >> ... 2>&1` for the loop). Stderr from gcloud calls goes to
+   the same file via `2>>"${LOG_FILE}"` so a sync regression leaves an
+   auditable trail in steady state, not just /dev/null.
+4. **`internal/gcs.ValidateBucketName`** + call site in
+   `cmd/create.go` before any GCS-side operation. Rejects user
+   overrides that violate GCS naming rules up-front, before AR repo
+   creation, so we don't half-provision a workstation. Tests cover the
+   regex + the invariant that auto-derived names always pass.
+5. **`ts="${ts:-0}"` + numeric-only guard** in the manifest-newest-
+   namespace selection loop, so a `gcloud storage cat` failure leaving
+   empty stdout doesn't error out the entire pull.
+6. **README + ADR**. `plugins/claude-sync/README.md` covers ops,
+   security warning about transcript contents in GCS, and
+   configuration. `docs/adr/0002-claude-state-sync.md` captures the
+   storage layout, per-workstation namespacing, IAM model, and
+   alternatives considered.
+7. **`Dockerfile.d/110_*.sh` trimmed**: removed the curl install
+   branch (Cloud Workstations base image guarantees curl) and removed
+   the unconditional apt-get update — `apt-get update` now only fires
+   when jq is genuinely missing.
+8. **Pull script's `sudo -u user mkdir -p`** dropped; plain `mkdir -p`
+   under the existing root context, with the final `chown -R
+   user:user` already covering ownership.
+
+---
+
 ## 2026-05-21 — Workstation ID discovered at runtime, not injected at create time
 
 **Decision:** The boot scripts compute `WS_ID` themselves (GCE metadata server with
