@@ -91,6 +91,31 @@ the bucket. That's enough to read/write the namespace tree (and the
 manifest) while staying scoped to one bucket. Same SA pattern as
 secret-accessor + artifactregistry.reader.
 
+### Provisioning hook is generic, not claude-sync-specific
+
+The bucket-provisioning step in `cmd/create.go` is **generic** — it
+walks every installed+enabled plugin's `buckets:` declaration in
+plugin.yaml and provisions/binds each one. Same shape as the existing
+`auth_providers[].iam_roles:` mechanism. Core `ra` has zero string
+literal references to `claude-sync`. The plugin's plugin.yaml is the
+sole source of truth for: bucket name template, override field name,
+IAM role, and the env var the resolved name is exposed under.
+
+```yaml
+buckets:
+  - name: state
+    name_template: "ra-claude-{project_id}-{user_email_hash}"
+    override_field: bucket_name_override
+    role: roles/storage.objectAdmin
+    env_var: RA_PLUGIN_CLAUDE_SYNC_BUCKET
+```
+
+Any future plugin that needs a GCS bucket simply adds its own
+`buckets:` block and lands in the same pipeline step without core
+changes. Cloud SQL / Pub/Sub / etc. resource needs are deferred to
+analogous future fields (`databases:`, `topics:`, ...) if and when a
+plugin requires them.
+
 ### Loop semantics
 
 The systemd unit `ra-claude-sync.service` runs as root, uses

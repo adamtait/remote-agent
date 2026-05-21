@@ -16,6 +16,27 @@ type PluginSchema struct {
 	Config        []ConfigField  `yaml:"config"`
 	Secrets       []SecretDef    `yaml:"secrets"`
 	AuthProviders []AuthProvider `yaml:"auth_providers"`
+	// Buckets declares per-plugin GCS bucket needs. When `enabled: true`
+	// for the plugin, `ra create` provisions each bucket (idempotent),
+	// binds the declared IAM role on it to the workstation service
+	// account, and exports the resolved bucket name to the container via
+	// the declared EnvVar. The mechanism in core is generic — no plugin
+	// name is hard-coded — mirroring how `iam_roles:` on auth_providers
+	// and `port-for-tunnel:` work.
+	Buckets []BucketSpec `yaml:"buckets"`
+}
+
+// BucketSpec declares one GCS bucket the plugin needs at workstation
+// create time. NameTemplate is resolved at `ra create` time against the
+// active gcloud project and git user email; OverrideField, when set and
+// non-empty in `plugins.<plugin>.<OverrideField>`, replaces the resolved
+// template before validation.
+type BucketSpec struct {
+	Name          string `yaml:"name"`           // logical handle, e.g. "state"
+	NameTemplate  string `yaml:"name_template"`  // supports {project_id}, {user_email_hash}
+	OverrideField string `yaml:"override_field"` // optional plugin-config field that, if non-empty, replaces the template
+	Role          string `yaml:"role"`           // IAM role to grant on the bucket to the workstation SA
+	EnvVar        string `yaml:"env_var"`        // env var name exposed to the workstation container
 }
 
 // ConfigField declares one user-facing config field.

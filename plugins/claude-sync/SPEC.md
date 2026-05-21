@@ -99,11 +99,39 @@ Mirrors the layout of `plugins/github/`. Files:
   done
   ```
 
-### `ra` CLI changes (small)
+### `ra` CLI changes — **mechanism only, no claude-sync-specific code**
 
-- **`cmd/create.go`** — after the Artifact Registry step, if `claude-sync` is installed, call a new `internal/gcs/EnsureBucket()` helper that idempotently creates the bucket (`gcloud storage buckets create --uniform-bucket-level-access --location=<region>`) and grants the workstation SA `roles/storage.objectAdmin` on it.
-- **`internal/gcs/bucket.go`** (new) — thin wrapper over `gcloud storage buckets create` + `gcloud storage buckets add-iam-policy-binding`. Mirrors `internal/gcloud/runner.go` style.
-- **`buildContainerEnv`** in `cmd/create.go` — when `claude-sync` is enabled, set `RA_PLUGIN_CLAUDE_SYNC_BUCKET=<name>`. Workstation ID is discovered at runtime via GCE metadata (see implementation-notes.md). Add bucket var to `RA_PROPAGATE_KEYS`.
+Separation of concerns: the **policy** ("claude-sync needs a bucket called X with role Y bound to env var Z") lives in `plugins/claude-sync/plugin.yaml`. The **mechanism** (the `gcloud storage` shell-outs and the create-time pipeline step) lives in core. Same pattern the codebase already uses for `auth_providers[].iam_roles:` (declared in plugin.yaml, walked generically in `pluginAuthIAMRoles`) and `port-for-tunnel:` (declared in plugin.yaml, served by `Registry.PortByName`). Core has **zero** plugin-specific name hard-codes.
+
+- **`internal/plugins/schema.go`** — new `BucketSpec` field on `PluginSchema`:
+  ```yaml
+  buckets:
+    - name: <logical-handle>
+      name_template: "..."        # supports {project_id}, {user_email_hash}
+      override_field: <config-field-name>  # optional; if set in plugins.<name>.*, overrides the template
+      role: roles/storage.objectAdmin       # IAM role granted on the bucket to the workstation SA
+      env_var: RA_PLUGIN_<NAME>_BUCKET      # env var the bucket name is exposed under
+  ```
+- **`internal/gcs/bucket.go`** — `EnsureBucket`, `ValidateBucketName`, `ResolveBucketName(template, project, userEmail)`, and a generic `GrantRole(r, attempts, delay, notice, bucket, sa, role)`. Generic GCP plumbing, parallel to `internal/secrets/`.
+- **`cmd/create.go`** — a single `pluginBuckets(reg.All(), cfg)` helper enumerates every enabled plugin's `BucketSpec` entries (resolved to concrete names). The provisioning step, the IAM bind, and the env injection in `buildContainerEnv` all iterate this list. No string literal "claude-sync" appears anywhere in core.
+
+### `plugins/claude-sync/plugin.yaml` carries the policy
+
+```yaml
+name: claude-sync
+buckets:
+  - name: state
+    name_template: "ra-claude-{project_id}-{user_email_hash}"
+    override_field: bucket_name_override
+    role: roles/storage.objectAdmin
+    env_var: RA_PLUGIN_CLAUDE_SYNC_BUCKET
+config:
+  - { name: enabled, type: bool, default: false }
+  - { name: interval_seconds, type: int, default: 60 }
+  - { name: bucket_name_override, type: string }
+```
+
+The runtime contract on the workstation is unchanged: `270_*.sh` and `271_*.sh` read `RA_PLUGIN_CLAUDE_SYNC_BUCKET` exactly as before. Only the *source of truth* for what env var to inject moved from Go into YAML.
 
 ### Reused existing utilities
 

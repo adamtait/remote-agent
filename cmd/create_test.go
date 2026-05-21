@@ -356,67 +356,129 @@ func TestAppendUniqueRoles(t *testing.T) {
 	}
 }
 
-func TestClaudeSyncEnabled(t *testing.T) {
-	cases := []struct {
-		name string
-		cfg  *config.Config
-		want bool
-	}{
-		{"nil-plugins", &config.Config{}, false},
-		{"plugin-missing", &config.Config{Plugins: map[string]map[string]interface{}{
-			"other": {"enabled": true},
-		}}, false},
-		{"enabled-false", &config.Config{Plugins: map[string]map[string]interface{}{
-			"claude-sync": {"enabled": false},
-		}}, false},
-		{"enabled-true", &config.Config{Plugins: map[string]map[string]interface{}{
-			"claude-sync": {"enabled": true},
-		}}, true},
+// withRegistry temporarily replaces the package-level plugin registry
+// with one containing only the plugins yamlSrc declares (each entry is
+// a full plugin.yaml string). Restores the previous registry on test
+// completion. Tests must NOT call t.Parallel() while using this.
+func withRegistry(t *testing.T, yamlSrcs ...string) {
+	t.Helper()
+	prev := reg
+	loaded := make([]*plugins.FilePlugin, 0, len(yamlSrcs))
+	for _, src := range yamlSrcs {
+		loaded = append(loaded, loadTestPlugin(t, src))
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := claudeSyncEnabled(tc.cfg); got != tc.want {
-				t.Errorf("got %v want %v", got, tc.want)
-			}
-		})
-	}
+	reg = plugins.NewRegistry(loaded)
+	t.Cleanup(func() { reg = prev })
 }
 
-func TestClaudeSyncBucketName_HonorsOverride(t *testing.T) {
+const testBucketPluginYAML = `
+name: test-bucket-plugin
+version: "1.0.0"
+description: "fixture for plugin-buckets tests"
+buckets:
+  - name: state
+    name_template: "ra-test-{project_id}-{user_email_hash}"
+    override_field: bucket_name_override
+    role: roles/storage.objectAdmin
+    env_var: RA_PLUGIN_TEST_BUCKET_PLUGIN_BUCKET
+config:
+  - name: enabled
+    type: bool
+    default: false
+  - name: bucket_name_override
+    type: string
+`
+
+func TestPluginBuckets_NoEnabledPluginsReturnsNil(t *testing.T) {
+	withRegistry(t, testBucketPluginYAML)
 	cfg := &config.Config{
 		Gcloud: config.GcloudConfig{Project: "p"},
 		Git:    config.GitConfig{UserEmail: "a@x.com"},
 		Plugins: map[string]map[string]interface{}{
-			"claude-sync": {
+			"test-bucket-plugin": {"enabled": false},
+		},
+	}
+	got, err := pluginBuckets(reg, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected no buckets, got %v", got)
+	}
+}
+
+func TestPluginBuckets_EnabledPluginEnumerated(t *testing.T) {
+	withRegistry(t, testBucketPluginYAML)
+	cfg := &config.Config{
+		Gcloud: config.GcloudConfig{Project: "my-proj"},
+		Git:    config.GitConfig{UserEmail: "adam@example.com"},
+		Plugins: map[string]map[string]interface{}{
+			"test-bucket-plugin": {"enabled": true},
+		},
+	}
+	got, err := pluginBuckets(reg, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 bucket, got %d: %v", len(got), got)
+	}
+	b := got[0]
+	if b.Plugin != "test-bucket-plugin" {
+		t.Errorf("plugin name = %q, want %q", b.Plugin, "test-bucket-plugin")
+	}
+	if !strings.HasPrefix(b.Name, "ra-test-my-proj-") {
+		t.Errorf("resolved name has wrong prefix: %q", b.Name)
+	}
+	if b.Spec.Role != "roles/storage.objectAdmin" {
+		t.Errorf("role lost in resolution: %q", b.Spec.Role)
+	}
+	if b.Spec.EnvVar != "RA_PLUGIN_TEST_BUCKET_PLUGIN_BUCKET" {
+		t.Errorf("env_var lost in resolution: %q", b.Spec.EnvVar)
+	}
+}
+
+func TestPluginBuckets_OverrideFieldHonored(t *testing.T) {
+	withRegistry(t, testBucketPluginYAML)
+	cfg := &config.Config{
+		Gcloud: config.GcloudConfig{Project: "p"},
+		Git:    config.GitConfig{UserEmail: "a@x.com"},
+		Plugins: map[string]map[string]interface{}{
+			"test-bucket-plugin": {
 				"enabled":              true,
-				"bucket_name_override": "my-custom-bucket",
+				"bucket_name_override": "my-explicit-bucket",
 			},
 		},
 	}
-	if got := claudeSyncBucketName(cfg); got != "my-custom-bucket" {
-		t.Errorf("override ignored: %q", got)
+	got, err := pluginBuckets(reg, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "my-explicit-bucket" {
+		t.Errorf("override not honored: %v", got)
 	}
 }
 
-func TestClaudeSyncBucketName_DerivesWhenNoOverride(t *testing.T) {
+func TestPluginBuckets_RejectsInvalidOverride(t *testing.T) {
+	withRegistry(t, testBucketPluginYAML)
 	cfg := &config.Config{
-		Gcloud: config.GcloudConfig{Project: "my-proj"},
+		Gcloud: config.GcloudConfig{Project: "p"},
 		Git:    config.GitConfig{UserEmail: "a@x.com"},
 		Plugins: map[string]map[string]interface{}{
-			"claude-sync": {"enabled": true},
+			"test-bucket-plugin": {
+				"enabled":              true,
+				"bucket_name_override": "Invalid_NAME",
+			},
 		},
 	}
-	got := claudeSyncBucketName(cfg)
-	if !strings.HasPrefix(got, "ra-claude-my-proj-") {
-		t.Errorf("derived name has wrong prefix: %q", got)
-	}
-	suffix := strings.TrimPrefix(got, "ra-claude-my-proj-")
-	if len(suffix) != 8 {
-		t.Errorf("derived name has wrong suffix length: %q (len=%d)", got, len(suffix))
+	_, err := pluginBuckets(reg, cfg)
+	if err == nil {
+		t.Fatal("expected validation error for invalid bucket name override")
 	}
 }
 
-func TestBuildContainerEnv_InjectsClaudeSyncBucketWhenEnabled(t *testing.T) {
+func TestBuildContainerEnv_InjectsPluginBucketsAndPropagates(t *testing.T) {
+	withRegistry(t, testBucketPluginYAML)
 	sleep := 2
 	cfg := &config.Config{
 		Git:    config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
@@ -427,15 +489,15 @@ func TestBuildContainerEnv_InjectsClaudeSyncBucketWhenEnabled(t *testing.T) {
 			AutoSleepHours: &sleep, AutoShutdownHours: 12,
 		}},
 		Plugins: map[string]map[string]interface{}{
-			"claude-sync": {"enabled": true},
+			"test-bucket-plugin": {"enabled": true},
 		},
 	}
 	got := buildContainerEnv(cfg)
-	if !strings.Contains(got, "RA_PLUGIN_CLAUDE_SYNC_BUCKET=ra-claude-p-") {
-		t.Errorf("expected RA_PLUGIN_CLAUDE_SYNC_BUCKET in container env; got %q", got)
+	if !strings.Contains(got, "RA_PLUGIN_TEST_BUCKET_PLUGIN_BUCKET=ra-test-p-") {
+		t.Errorf("expected plugin bucket env in container env; got %q", got)
 	}
-	// Must also be in RA_PROPAGATE_KEYS so 200_remote-agent-setup.sh re-exports
-	// it to /run/ra/env for the systemd loop to source.
+	// Must also be in RA_PROPAGATE_KEYS so 200_remote-agent-setup.sh
+	// re-exports it to /run/ra/env for the workstation-side scripts.
 	parts := strings.Split(got, ",")
 	var propagate string
 	for _, p := range parts {
@@ -443,18 +505,29 @@ func TestBuildContainerEnv_InjectsClaudeSyncBucketWhenEnabled(t *testing.T) {
 			propagate = strings.TrimPrefix(p, "RA_PROPAGATE_KEYS=")
 		}
 	}
-	if !strings.Contains(propagate, "RA_PLUGIN_CLAUDE_SYNC_BUCKET") {
-		t.Errorf("RA_PLUGIN_CLAUDE_SYNC_BUCKET missing from RA_PROPAGATE_KEYS=%q", propagate)
+	if !strings.Contains(propagate, "RA_PLUGIN_TEST_BUCKET_PLUGIN_BUCKET") {
+		t.Errorf("plugin bucket env missing from RA_PROPAGATE_KEYS=%q", propagate)
 	}
 }
 
-func TestBuildContainerEnv_OmitsClaudeSyncBucketWhenDisabled(t *testing.T) {
+func TestBuildContainerEnv_OmitsPluginBucketsWhenDisabled(t *testing.T) {
+	withRegistry(t, testBucketPluginYAML)
 	cfg := &config.Config{
 		Git:    config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
 		Gcloud: config.GcloudConfig{Project: "p"},
+		Plugins: map[string]map[string]interface{}{
+			"test-bucket-plugin": {"enabled": false},
+		},
 	}
 	got := buildContainerEnv(cfg)
-	if strings.Contains(got, "RA_PLUGIN_CLAUDE_SYNC_BUCKET") {
-		t.Errorf("expected no RA_PLUGIN_CLAUDE_SYNC_BUCKET when plugin disabled; got %q", got)
+	// Look for the EXACT bucket env var key, not a substring — the
+	// plugin's `bucket_name_override` config field also serializes to
+	// RA_PLUGIN_TEST_BUCKET_PLUGIN_BUCKET_NAME_OVERRIDE which would
+	// otherwise false-positive a substring check.
+	for _, p := range strings.Split(got, ",") {
+		k, _, _ := strings.Cut(p, "=")
+		if k == "RA_PLUGIN_TEST_BUCKET_PLUGIN_BUCKET" {
+			t.Errorf("expected no plugin bucket env when disabled; key present in %q", got)
+		}
 	}
 }

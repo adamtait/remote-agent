@@ -81,39 +81,70 @@ func TestValidateBucketName(t *testing.T) {
 	}
 }
 
-func TestValidateBucketName_DerivedNamesAlwaysValid(t *testing.T) {
-	// The names we auto-derive must always pass validation; otherwise
-	// turning the plugin on alone would break ra create.
-	for _, p := range []string{"p", "my-proj", "abc-123-xyz"} {
-		for _, e := range []string{"a@x.com", "User+Tag@Sub.Domain.tld", ""} {
-			name := gcs.BucketName(p, e)
-			if err := gcs.ValidateBucketName(name); err != nil {
-				t.Errorf("BucketName(%q,%q)=%q failed validation: %v", p, e, name, err)
-			}
+func TestResolveBucketName_TemplateExpansion(t *testing.T) {
+	cases := []struct {
+		tmpl, proj, email, want string
+	}{
+		{"ra-claude-{project_id}-{user_email_hash}", "my-proj", "adam@example.com", ""}, // checked below
+		{"static-bucket-name", "my-proj", "a@x.com", "static-bucket-name"},
+		{"{project_id}-only", "p", "", "p-only"},
+	}
+	for _, tc := range cases {
+		got, err := gcs.ResolveBucketName(tc.tmpl, tc.proj, tc.email)
+		if err != nil {
+			t.Fatalf("ResolveBucketName(%q): unexpected error %v", tc.tmpl, err)
+		}
+		if tc.want != "" && got != tc.want {
+			t.Errorf("ResolveBucketName(%q) = %q, want %q", tc.tmpl, got, tc.want)
+		}
+		if !strings.Contains(got, "{") {
+			continue
+		}
+		t.Errorf("ResolveBucketName(%q) = %q still contains an unresolved placeholder", tc.tmpl, got)
+	}
+}
+
+func TestResolveBucketName_DeterministicHash(t *testing.T) {
+	a, _ := gcs.ResolveBucketName("p-{user_email_hash}", "p", "Adam@Example.com")
+	b, _ := gcs.ResolveBucketName("p-{user_email_hash}", "p", "  adam@example.com  ")
+	if a != b {
+		t.Errorf("user_email_hash should be case/whitespace-insensitive; got %q vs %q", a, b)
+	}
+	suffix := strings.TrimPrefix(a, "p-")
+	if len(suffix) != 8 {
+		t.Errorf("expected 8-char hex hash, got %q (len=%d)", suffix, len(suffix))
+	}
+	for _, c := range suffix {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Errorf("non-hex char %q in hash %q", c, suffix)
 		}
 	}
 }
 
-func TestBucketName_Deterministic(t *testing.T) {
-	a := gcs.BucketName("my-proj", "Adam@Example.com")
-	b := gcs.BucketName("my-proj", "  adam@example.com  ")
-	if a != b {
-		t.Errorf("expected case/whitespace-insensitive equality, got %q vs %q", a, b)
+func TestResolveBucketName_RejectsUnknownPlaceholder(t *testing.T) {
+	_, err := gcs.ResolveBucketName("p-{user_id}", "p", "a@x.com")
+	if err == nil {
+		t.Fatal("expected error for unknown placeholder {user_id}")
+	}
+	if !strings.Contains(err.Error(), "{user_id}") {
+		t.Errorf("error should name the unknown placeholder, got %v", err)
 	}
 }
 
-func TestBucketName_Format(t *testing.T) {
-	name := gcs.BucketName("my-proj", "adam@example.com")
-	if !strings.HasPrefix(name, "ra-claude-my-proj-") {
-		t.Errorf("unexpected prefix: %q", name)
-	}
-	suffix := strings.TrimPrefix(name, "ra-claude-my-proj-")
-	if len(suffix) != 8 {
-		t.Errorf("expected 8-char hex suffix, got %q (len=%d)", suffix, len(suffix))
-	}
-	for _, c := range suffix {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			t.Errorf("non-hex char %q in suffix %q", c, suffix)
+func TestResolveBucketName_DerivedNamesAlwaysValid(t *testing.T) {
+	// Any bucket name produced by the claude-sync template must pass
+	// ValidateBucketName for every combination of project + email that
+	// callers could realistically pass in.
+	const tmpl = "ra-claude-{project_id}-{user_email_hash}"
+	for _, p := range []string{"p", "my-proj", "abc-123-xyz"} {
+		for _, e := range []string{"a@x.com", "User+Tag@Sub.Domain.tld", ""} {
+			got, err := gcs.ResolveBucketName(tmpl, p, e)
+			if err != nil {
+				t.Fatalf("ResolveBucketName(%q,%q,%q): %v", tmpl, p, e, err)
+			}
+			if err := gcs.ValidateBucketName(got); err != nil {
+				t.Errorf("Resolved %q failed validation: %v", got, err)
+			}
 		}
 	}
 }
@@ -169,9 +200,9 @@ func TestEnsureBucket_PropagatesCreateError(t *testing.T) {
 	}
 }
 
-func TestGrantObjectAdmin_FirstAttemptSucceeds(t *testing.T) {
+func TestGrantRole_FirstAttemptSucceeds(t *testing.T) {
 	f := &fakeRunner{}
-	if err := gcs.GrantObjectAdmin(f, 3, time.Millisecond, io.Discard, "b", "sa@p.iam.gserviceaccount.com"); err != nil {
+	if err := gcs.GrantRole(f, 3, time.Millisecond, io.Discard, "b", "sa@p.iam.gserviceaccount.com", "roles/storage.objectAdmin"); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.calls) != 1 {
@@ -189,14 +220,25 @@ func TestGrantObjectAdmin_FirstAttemptSucceeds(t *testing.T) {
 	}
 }
 
-func TestGrantObjectAdmin_RetriesOnSANotFound(t *testing.T) {
+func TestGrantRole_HonorsRoleParameter(t *testing.T) {
+	f := &fakeRunner{}
+	if err := gcs.GrantRole(f, 1, time.Millisecond, io.Discard, "b", "sa@p.iam.gserviceaccount.com", "roles/storage.objectViewer"); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(f.calls[0], " ")
+	if !strings.Contains(got, "--role=roles/storage.objectViewer") {
+		t.Errorf("role parameter not propagated: %v", f.calls[0])
+	}
+}
+
+func TestGrantRole_RetriesOnSANotFound(t *testing.T) {
 	key := "storage buckets add-iam-policy-binding gs://b --member=serviceAccount:sa@p.iam.gserviceaccount.com --role=roles/storage.objectAdmin --condition=None"
 	f := &fakeRunner{
 		captures: map[string]string{key: "ERROR: service account sa@p.iam.gserviceaccount.com does not exist"},
 		captErr:  map[string]error{key: errors.New("exit status 1")},
 	}
 	// Use very short delay so the test is fast.
-	err := gcs.GrantObjectAdmin(f, 2, time.Millisecond, io.Discard, "b", "sa@p.iam.gserviceaccount.com")
+	err := gcs.GrantRole(f, 2, time.Millisecond, io.Discard, "b", "sa@p.iam.gserviceaccount.com", "roles/storage.objectAdmin")
 	if err == nil {
 		t.Fatal("expected eventual failure after exhausting retries")
 	}

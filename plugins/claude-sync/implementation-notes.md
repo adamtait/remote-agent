@@ -14,6 +14,44 @@ Format per entry:
 
 ---
 
+## 2026-05-21 — Refactor: removed all claude-sync-specific code from cmd/create.go
+
+**Decision:** Reviewing PR #126 surfaced an architectural smell — the
+initial implementation embedded claude-sync-specific knowledge (helper
+functions named `claudeSyncEnabled` / `claudeSyncBucketName`, a literal
+`RA_PLUGIN_CLAUDE_SYNC_BUCKET` env-var key, and a hard-coded "claude-sync
+disabled" placeholder step) inside `cmd/create.go`. That violated the
+"ra ships with no built-in plugins" principle from CLAUDE.md.
+
+Refactored to a generic `buckets:` field on the plugin schema (parallel
+to `auth_providers[].iam_roles:`):
+
+- `internal/plugins/schema.go`: new `BucketSpec` field on
+  `PluginSchema`, validated in `LoadPlugin`.
+- `internal/gcs/bucket.go`: added `ResolveBucketName(template, project,
+  email)` template resolver; renamed `GrantObjectAdmin` →
+  `GrantRole(role)` so plugins declare their own role.
+- `cmd/create.go`: a single `pluginBuckets(reg, cfg)` helper enumerates
+  every enabled plugin's bucket needs. The pipeline step, the IAM bind,
+  and the env injection in `buildContainerEnv` all iterate this list.
+  `grep -i claude-sync cmd/create.go` returns **zero matches**.
+- `plugins/claude-sync/plugin.yaml`: gained a `buckets:` declaration —
+  the sole source of truth for what bucket claude-sync needs.
+
+**Why:** The codebase already has the right shape for plugin-declared
+GCP needs (`iam_roles:`, `port-for-tunnel:`). Bucket provisioning should
+follow the same pattern: policy in plugin.yaml, mechanism in core. The
+next plugin that needs a GCS bucket adds zero lines to `cmd/create.go`.
+
+**Tradeoff:** Adds ~120 LOC of generic plugin-buckets handling (Go +
+tests); deletes ~80 LOC of claude-sync-specific code. Net +~40 LOC but
+the architectural quality is meaningfully better. The runtime contract
+on the workstation is unchanged — `RA_PLUGIN_CLAUDE_SYNC_BUCKET` is
+still injected, the boot scripts still read it. Only the *source of
+truth* for what env var to inject moved from Go into YAML.
+
+---
+
 ## 2026-05-21 — Review feedback applied (PR #126)
 
 Self-review on PR #126 surfaced 8 items. All applied in a follow-up

@@ -42,27 +42,64 @@ func logicalNameToEnvToken(logical string) string {
 	return strings.ToUpper(logical)
 }
 
-// claudeSyncEnabled reports whether the claude-sync plugin is installed and
-// has `enabled: true` in cfg.Plugins. Used to gate bucket provisioning,
-// IAM binding, and the RA_PLUGIN_CLAUDE_SYNC_BUCKET env injection.
-func claudeSyncEnabled(cfg *config.Config) bool {
-	pc, ok := cfg.Plugins["claude-sync"]
-	if !ok {
-		return false
-	}
-	en, _ := pc["enabled"].(bool)
-	return en
+// resolvedBucket pairs a plugin's BucketSpec declaration with the
+// concrete bucket name produced by resolving its template against the
+// active gcloud project + git user email (or the user-supplied
+// override). Returned by pluginBuckets() and consumed by both the
+// provisioning step and the env-injection in buildContainerEnv —
+// keeping the source of truth in plugin.yaml, not in cmd/create.go.
+type resolvedBucket struct {
+	Plugin string             // plugin name (for log/error messages only)
+	Spec   plugins.BucketSpec // verbatim from plugin.yaml
+	Name   string             // resolved + validated GCS bucket name
 }
 
-// claudeSyncBucketName returns the GCS bucket name for the (project, user)
-// pair, honoring plugins.claude-sync.bucket_name_override if set.
-func claudeSyncBucketName(cfg *config.Config) string {
-	if pc, ok := cfg.Plugins["claude-sync"]; ok {
-		if override, _ := pc["bucket_name_override"].(string); override != "" {
-			return override
+// pluginBuckets enumerates every BucketSpec declared by every installed
+// plugin that has `enabled: true`, resolving each one's name template
+// (or honoring its override_field) and validating the result. Returns
+// an error if any plugin's bucket cannot be resolved, so `ra create`
+// fails fast before provisioning anything.
+func pluginBuckets(reg *plugins.Registry, cfg *config.Config) ([]resolvedBucket, error) {
+	if reg == nil {
+		return nil, nil
+	}
+	var out []resolvedBucket
+	for _, p := range reg.All() {
+		schema := p.Schema()
+		if len(schema.Buckets) == 0 {
+			continue
+		}
+		pluginCfg := cfg.Plugins[p.Name()]
+		// Honor the existing `enabled: true` convention — plugin-side
+		// startup scripts also gate on RA_PLUGIN_<NAME>_ENABLED, so a
+		// disabled plugin contributes no buckets here.
+		if pluginCfg == nil {
+			continue
+		}
+		if en, _ := pluginCfg["enabled"].(bool); !en {
+			continue
+		}
+		for _, spec := range schema.Buckets {
+			name := ""
+			if spec.OverrideField != "" {
+				if v, _ := pluginCfg[spec.OverrideField].(string); v != "" {
+					name = v
+				}
+			}
+			if name == "" {
+				resolved, err := gcs.ResolveBucketName(spec.NameTemplate, cfg.Gcloud.Project, cfg.Git.UserEmail)
+				if err != nil {
+					return nil, fmt.Errorf("plugin %s bucket %q: %w", p.Name(), spec.Name, err)
+				}
+				name = resolved
+			}
+			if err := gcs.ValidateBucketName(name); err != nil {
+				return nil, fmt.Errorf("plugin %s bucket %q: %w", p.Name(), spec.Name, err)
+			}
+			out = append(out, resolvedBucket{Plugin: p.Name(), Spec: spec, Name: name})
 		}
 	}
-	return gcs.BucketName(cfg.Gcloud.Project, cfg.Git.UserEmail)
+	return out, nil
 }
 
 func buildContainerEnv(cfg *config.Config) string {
@@ -82,12 +119,18 @@ func buildContainerEnv(cfg *config.Config) string {
 	addProp("GCP_PROJECT_ID", cfg.Gcloud.Project)
 	addProp("GIT_USER_NAME", cfg.Git.UserName)
 	addProp("GIT_USER_EMAIL", cfg.Git.UserEmail)
-	// claude-sync's bucket name is computed at create-time (it depends on
-	// the gcloud project + git user email) rather than stored as plugin
-	// config, so inject it here in addition to the plugin's own config
-	// fields that flow through reg.AllContainerEnvPairs below.
-	if claudeSyncEnabled(cfg) {
-		addProp("RA_PLUGIN_CLAUDE_SYNC_BUCKET", claudeSyncBucketName(cfg))
+	// Plugin-declared GCS buckets (in plugin.yaml `buckets:`) are
+	// resolved at create-time — the names depend on gcloud project + git
+	// user email, not on static plugin config — so inject them here in
+	// addition to the plugin's own config fields that flow through
+	// reg.AllContainerEnvPairs below. pluginBuckets returns an error
+	// only on invalid template/override, which we've already surfaced
+	// up the pipeline; tolerate it here so buildContainerEnv stays
+	// total.
+	if buckets, err := pluginBuckets(reg, cfg); err == nil {
+		for _, b := range buckets {
+			addProp(b.Spec.EnvVar, b.Name)
+		}
 	}
 	for _, pair := range reg.AllContainerEnvPairs(cfg) {
 		pairs = append(pairs, pair)
@@ -317,30 +360,33 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 3 — GCS bucket for claude-sync (only if the plugin is enabled).
-	// The bucket holds per-workstation copies of ~/.claude/ so state syncs
-	// across workstations belonging to the same (project, user) pair.
-	// IAM binding is deferred to the service-account step below since the
-	// SA may not yet exist on first run.
-	claudeSyncBucket := ""
-	if claudeSyncEnabled(cfg) {
-		claudeSyncBucket = claudeSyncBucketName(cfg)
-		// Validate before any GCS-side call. A user-supplied
-		// bucket_name_override that violates GCS naming rules would
-		// otherwise fail mid-pipeline after AR repo creation, leaving
-		// half-provisioned state.
-		if err := gcs.ValidateBucketName(claudeSyncBucket); err != nil {
-			return fmt.Errorf("claude-sync bucket name invalid: %w", err)
+	// Step 3 — Plugin-declared GCS buckets.
+	// Each installed+enabled plugin can declare `buckets:` in
+	// plugin.yaml; ra walks them all generically here. No plugin name
+	// is hard-coded — any plugin that needs a bucket lands here
+	// automatically. IAM binding is deferred to the service-account
+	// step below since the SA may not yet exist.
+	pluginBucketList, err := pluginBuckets(reg, cfg)
+	if err != nil {
+		return fmt.Errorf("resolving plugin buckets: %w", err)
+	}
+	if len(pluginBucketList) > 0 {
+		names := make([]string, 0, len(pluginBucketList))
+		for _, b := range pluginBucketList {
+			names = append(names, b.Name)
 		}
-		done = logging.Step("ensure_gcs_bucket", 3, totalCreateSteps, fmt.Sprintf("Ensuring GCS bucket '%s' for claude-sync...", claudeSyncBucket), cmd.OutOrStdout())
-		if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, claudeSyncBucket, ws.Region); err != nil {
-			done(err)
-			return fmt.Errorf("ensuring claude-sync bucket: %w", err)
+		done = logging.Step("ensure_plugin_buckets", 3, totalCreateSteps, fmt.Sprintf("Ensuring %d plugin-declared GCS bucket(s): %s...", len(pluginBucketList), strings.Join(names, ", ")), cmd.OutOrStdout())
+		for _, b := range pluginBucketList {
+			if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, b.Name, ws.Region); err != nil {
+				done(err)
+				return fmt.Errorf("ensuring bucket %s (plugin %s): %w", b.Name, b.Plugin, err)
+			}
 		}
 		done(nil)
 	} else {
-		// Print a placeholder so step numbering stays consistent with totalCreateSteps.
-		done = logging.Step("ensure_gcs_bucket", 3, totalCreateSteps, "claude-sync disabled — skipping GCS bucket", cmd.OutOrStdout())
+		// Placeholder so the visible step counter stays monotonic
+		// even on workstations whose plugins don't declare buckets.
+		done = logging.Step("ensure_plugin_buckets", 3, totalCreateSteps, "no plugin-declared GCS buckets", cmd.OutOrStdout())
 		done(nil)
 	}
 
@@ -435,15 +481,16 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
-	// Bind claude-sync GCS bucket (only when the plugin is enabled and the
-	// bucket has been ensured above). Same RetryOnSANotFound pattern as the
-	// secret bindings to cover the IAM eventual-consistency window after a
-	// fresh service-account create.
-	if claudeSyncBucket != "" {
-		if err := gcs.GrantObjectAdmin(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
-			claudeSyncBucket, serviceAccountEmail); err != nil {
+	// Bind plugin-declared bucket IAM. Each plugin's BucketSpec carries
+	// its own `role:` (typically roles/storage.objectAdmin for a read+
+	// write plugin; could be a viewer role for a read-only one). Same
+	// RetryOnSANotFound pattern as the secret bindings to cover the IAM
+	// eventual-consistency window after a fresh service-account create.
+	for _, b := range pluginBucketList {
+		if err := gcs.GrantRole(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
+			b.Name, serviceAccountEmail, b.Spec.Role); err != nil {
 			done(err)
-			return fmt.Errorf("binding claude-sync bucket IAM: %w", err)
+			return fmt.Errorf("binding %s on bucket %s (plugin %s): %w", b.Spec.Role, b.Name, b.Plugin, err)
 		}
 	}
 	done(nil)

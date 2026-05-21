@@ -135,3 +135,43 @@ auth_providers:
 		t.Errorf("Secrets should be empty for vertex provider, got %v", s.AuthProviders[0].Secrets)
 	}
 }
+
+// TestPluginSchemaParse_Buckets confirms the generic plugin-buckets hook
+// parses fields correctly. The mechanism in cmd/create.go consumes this
+// shape directly — same pattern as iam_roles on auth_providers.
+func TestPluginSchemaParse_Buckets(t *testing.T) {
+	raw := `
+name: example
+version: "1.0.0"
+description: "Example plugin"
+buckets:
+  - name: state
+    name_template: "ra-example-{project_id}-{user_email_hash}"
+    override_field: bucket_name_override
+    role: roles/storage.objectAdmin
+    env_var: RA_PLUGIN_EXAMPLE_BUCKET
+  - name: cache
+    name_template: "ra-example-cache-{project_id}"
+    role: roles/storage.objectViewer
+    env_var: RA_PLUGIN_EXAMPLE_CACHE_BUCKET
+`
+	var s PluginSchema
+	if err := yaml.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(s.Buckets) != 2 {
+		t.Fatalf("len(Buckets) = %d, want 2", len(s.Buckets))
+	}
+	if s.Buckets[0].Name != "state" || s.Buckets[0].NameTemplate != "ra-example-{project_id}-{user_email_hash}" {
+		t.Errorf("Buckets[0] parsed wrong: %+v", s.Buckets[0])
+	}
+	if s.Buckets[0].OverrideField != "bucket_name_override" {
+		t.Errorf("Buckets[0].OverrideField = %q, want bucket_name_override", s.Buckets[0].OverrideField)
+	}
+	if s.Buckets[0].Role != "roles/storage.objectAdmin" || s.Buckets[0].EnvVar != "RA_PLUGIN_EXAMPLE_BUCKET" {
+		t.Errorf("Buckets[0] role/env_var wrong: %+v", s.Buckets[0])
+	}
+	if s.Buckets[1].OverrideField != "" {
+		t.Errorf("Buckets[1].OverrideField should be empty, got %q", s.Buckets[1].OverrideField)
+	}
+}

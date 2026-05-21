@@ -67,6 +67,59 @@ func TestLoadPlugin_MissingName(t *testing.T) {
 	}
 }
 
+func TestLoadPlugin_BucketValidation(t *testing.T) {
+	cases := []struct {
+		name      string
+		yamlBody  string
+		wantError string
+	}{
+		{
+			name:      "missing name",
+			yamlBody:  "buckets:\n  - name_template: t\n    role: r\n    env_var: E\n",
+			wantError: "name is required",
+		},
+		{
+			name:      "missing name_template",
+			yamlBody:  "buckets:\n  - name: state\n    role: r\n    env_var: E\n",
+			wantError: "name_template is required",
+		},
+		{
+			name:      "missing role",
+			yamlBody:  "buckets:\n  - name: state\n    name_template: t\n    env_var: E\n",
+			wantError: "role is required",
+		},
+		{
+			name:      "missing env_var",
+			yamlBody:  "buckets:\n  - name: state\n    name_template: t\n    role: r\n",
+			wantError: "env_var is required",
+		},
+		{
+			name:      "duplicate name",
+			yamlBody:  "buckets:\n  - { name: a, name_template: t, role: r, env_var: E1 }\n  - { name: a, name_template: u, role: r, env_var: E2 }\n",
+			wantError: "duplicate bucket name",
+		},
+		{
+			name:      "duplicate env_var",
+			yamlBody:  "buckets:\n  - { name: a, name_template: t, role: r, env_var: E }\n  - { name: b, name_template: u, role: r, env_var: E }\n",
+			wantError: "duplicate env_var",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fsys := fstest.MapFS{
+				"plugin.yaml": &fstest.MapFile{Data: []byte("name: testp\nversion: \"1\"\n" + tc.yamlBody)},
+			}
+			_, err := LoadPlugin(fsys)
+			if err == nil {
+				t.Fatalf("expected validation error containing %q", tc.wantError)
+			}
+			if !strings.Contains(err.Error(), tc.wantError) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.wantError)
+			}
+		})
+	}
+}
+
 func TestFilePlugin_DefaultConfigFragments(t *testing.T) {
 	p, _ := LoadPlugin(testPluginFS(nil))
 	cfg, secrets := p.DefaultConfigFragments()
