@@ -238,7 +238,7 @@ Manual end-to-end after the v1 build is in place:
 2. `ra plugin install ./plugins/claude-sync` (level: user).
 3. `ra create ws-alpha` — confirm bucket `ra-<project>-<hash>` appears in GCS console, and the workstation SA has `objectAdmin` on it.
 4. `ra connect ws-alpha`, run `claude -p "hello"`, observe `~/.claude/projects/<cwd>/<sessionId>.jsonl` filling.
-5. Wait ~70s, run `gcloud storage ls gs://<bucket>/workstations/ws-alpha/projects/...` — confirm the JSONL is there.
+5. Wait ~70s, run `gcloud storage ls gs://<bucket>/claude-sync/workstations/ws-alpha/projects/...` — confirm the JSONL is there.
 6. `ra create ws-bravo` from another terminal. Once it boots, `ra connect ws-bravo` and confirm `~/.claude/projects/<cwd>/<sessionId>.jsonl` from ws-alpha is present locally.
 7. Run claude on ws-bravo in the same project. Wait 70s. On ws-alpha, restart the workstation (or manually re-run `/etc/workstation-startup.d/270_claude-sync-pull.sh`); confirm ws-bravo's session JSONL is now present.
 8. `go test ./internal/gcs/... ./internal/scaffold/...` for the new helper + scaffold tests.

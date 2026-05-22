@@ -148,21 +148,8 @@ var pluginInstallCmd = &cobra.Command{
 		if level == "user" {
 			if v, _ := res.Config["sync_all_projects"].(bool); v {
 				if override, _ := res.Config["bucket_name_override"].(string); override == "" {
-					if userCfgPath, pathErr := config.UserConfigPath(); pathErr == nil {
-						if userCfg, loadErr := config.LoadUserConfig(userCfgPath); loadErr == nil {
-							if userCfg.Gcloud.Project != "" {
-								if bucketName, resolveErr := gcs.ResolveBucketName(
-									"ra-{project_id}-{user_email_hash}",
-									userCfg.Gcloud.Project,
-									userCfg.Git.UserEmail,
-								); resolveErr == nil {
-									res.Config["bucket_name_override"] = bucketName
-									fmt.Fprintf(cmd.OutOrStdout(),
-										"sync_all_projects: shared bucket → %q (user project: %s)\n",
-										bucketName, userCfg.Gcloud.Project)
-								}
-							}
-						}
+					if err := deriveSyncAllProjectsBucket(p, res, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "sync_all_projects: %v; set bucket_name_override manually\n", err)
 					}
 				}
 			}
@@ -643,6 +630,46 @@ func currentUsername() string {
 		return v
 	}
 	return "user"
+}
+
+// deriveSyncAllProjectsBucket resolves a shared GCS bucket name from the
+// user-level config and sets it as bucket_name_override in res.Config. The
+// template is read from the plugin schema rather than hard-coded so it stays
+// in sync with plugin.yaml automatically.
+func deriveSyncAllProjectsBucket(p *plugins.FilePlugin, res *plugins.PromptResult, out, errOut io.Writer) error {
+	// Find the bucket spec whose override_field is bucket_name_override.
+	var tmpl string
+	for _, spec := range p.Schema().Buckets {
+		if spec.OverrideField == "bucket_name_override" {
+			tmpl = spec.NameTemplate
+			break
+		}
+	}
+	if tmpl == "" {
+		return fmt.Errorf("plugin has no bucket spec with override_field=bucket_name_override")
+	}
+
+	userCfgPath, err := config.UserConfigPath()
+	if err != nil {
+		return fmt.Errorf("cannot locate user config: %w", err)
+	}
+	userCfg, err := config.LoadUserConfig(userCfgPath)
+	if err != nil {
+		return fmt.Errorf("cannot load user config: %w", err)
+	}
+	if userCfg.Gcloud.Project == "" {
+		return fmt.Errorf("user config has no gcloud.project set")
+	}
+
+	bucketName, err := gcs.ResolveBucketName(tmpl, userCfg.Gcloud.Project, userCfg.Git.UserEmail)
+	if err != nil {
+		return fmt.Errorf("resolving bucket name from template %q: %w", tmpl, err)
+	}
+
+	res.Config["bucket_name_override"] = bucketName
+	fmt.Fprintf(out, "sync_all_projects: shared bucket → %q (user project: %s)\n",
+		bucketName, userCfg.Gcloud.Project)
+	return nil
 }
 
 // uploadPluginSecrets uploads each secret value gathered during Prompt to GCP

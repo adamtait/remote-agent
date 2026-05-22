@@ -23,6 +23,9 @@ config:
   - name: bucket_name_override
     type: string
     description: "Override the auto-derived GCS bucket name (empty = use ra-<project>-<hash>)"
+  # Install-time only — not used by workstation scripts. When true at user-level
+  # install, ra plugin install auto-sets bucket_name_override so all workstations
+  # across GCP projects share one bucket. Has no runtime effect on the workstation.
   - name: sync_all_projects
     type: bool
     description: "Use a single shared GCS bucket across all GCP projects. When installed at user level and enabled, bucket_name_override is auto-set to the user-level default project's bucket so all workstations sync to the same place."
