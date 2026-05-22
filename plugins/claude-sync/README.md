@@ -29,19 +29,22 @@ See [`SPEC.md`](./SPEC.md) for the full design and
 log of decisions and deviations.
 
 ```
-Workstation A ──┐                                  ┌── Workstation C
-                ├── gs://ra-claude-<proj>-<hash>/  ──┤
-Workstation B ──┘     workstations/<ws-id>/...    └── Workstation D
-                      _manifest/<ws-id>.json
+Workstation A ──┐                              ┌── Workstation C
+                ├── gs://ra-<proj>-<hash>/  ───┤
+Workstation B ──┘     claude-sync/             └── Workstation D
+                        workstations/<ws-id>/...
+                        _manifest/<ws-id>.json
 ```
 
-- Each workstation pushes only to its own `workstations/<ws-id>/`
+- Each workstation pushes only to its own `claude-sync/workstations/<ws-id>/`
   prefix → no concurrent-write contention.
 - Boot pull merges every other namespace into `~/.claude/` via
   `cp -an` (newer local files win).
-- `_manifest/<ws-id>.json` carries `last_push_at_epoch` so the boot
-  pull picks the freshest namespace for last-writer-wins files
+- `claude-sync/_manifest/<ws-id>.json` carries `last_push_at_epoch` so
+  the boot pull picks the freshest namespace for last-writer-wins files
   (`history.jsonl`, `.claude.json`).
+- The bucket name (`ra-<project>-<hash>`) omits "claude" so future plugins
+  can share it under their own prefixes.
 
 ## Installation
 
@@ -55,7 +58,7 @@ ra plugin install ./plugins/claude-sync
 The next `ra create` will:
 
 1. Idempotently create the bucket
-   `ra-claude-<gcp-project>-<sha1(git-user-email)[:8]>` (or whatever
+   `ra-<gcp-project>-<sha1(git-user-email)[:8]>` (or whatever
    you put in `bucket_name_override`).
 2. Bind `roles/storage.objectAdmin` on it to the workstation service
    account.
@@ -64,11 +67,12 @@ The next `ra create` will:
 
 ## Configuration
 
-| Field                  | Type   | Default                            | Notes                                                                |
-|------------------------|--------|------------------------------------|----------------------------------------------------------------------|
-| `enabled`              | bool   | `false`                            | Master switch.                                                       |
-| `interval_seconds`     | int    | `60`                               | Push cadence. Below 10 starts to amortize the gcloud cold-start cost poorly. |
-| `bucket_name_override` | string | (derive `ra-claude-<proj>-<hash>`) | Must match GCS bucket naming (lowercase, 3–63 chars, no underscores). |
+| Field                  | Type   | Default                         | Notes                                                                |
+|------------------------|--------|---------------------------------|----------------------------------------------------------------------|
+| `enabled`              | bool   | `false`                         | Master switch.                                                       |
+| `interval_seconds`     | int    | `60`                            | Push cadence. Below 10 starts to amortize the gcloud cold-start cost poorly. |
+| `bucket_name_override` | string | (derive `ra-<proj>-<hash>`)     | Must match GCS bucket naming (lowercase, 3–63 chars, no underscores). |
+| `sync_all_projects`    | bool   | `false`                         | User-level install only. Auto-sets `bucket_name_override` to the user's default GCP project bucket so all workstations across all GCP projects sync to one place. |
 
 ## Operations
 
@@ -79,7 +83,7 @@ The next `ra create` will:
 - **Manual pull**: re-run `/etc/workstation-startup.d/270_claude-sync-pull.sh`
   as root.
 - **Inspect a namespace**:
-  `gcloud storage ls gs://<bucket>/workstations/<ws-id>/projects/`.
+  `gcloud storage ls gs://<bucket>/claude-sync/workstations/<ws-id>/projects/`.
 
 ### Cleaning up stale namespaces from deleted workstations
 
@@ -87,8 +91,8 @@ The next `ra create` will:
 will add a bucket lifecycle rule). Until then:
 
 ```bash
-gcloud storage rm -r "gs://<bucket>/workstations/<old-ws-id>/"
-gcloud storage rm "gs://<bucket>/_manifest/<old-ws-id>.json"
+gcloud storage rm -r "gs://<bucket>/claude-sync/workstations/<old-ws-id>/"
+gcloud storage rm "gs://<bucket>/claude-sync/_manifest/<old-ws-id>.json"
 ```
 
 ## ⚠️ Security: transcripts contain whatever Claude saw
