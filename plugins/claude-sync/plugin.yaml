@@ -1,0 +1,23 @@
+name: claude-sync
+version: "1.0.0"
+description: "Syncs ~/.claude/ (session history, .claude.json, CLAUDE.md memory) across cloud workstations via a per-user GCS bucket"
+# Bucket needs declared in plugin.yaml; ra core walks all installed
+# plugins generically (no plugin-specific code in cmd/create.go).
+buckets:
+  - name: state
+    name_template: "ra-claude-{project_id}-{user_email_hash}"
+    override_field: bucket_name_override
+    role: roles/storage.objectAdmin
+    env_var: RA_PLUGIN_CLAUDE_SYNC_BUCKET
+config:
+  - name: enabled
+    type: bool
+    description: "Enable claude-sync?"
+    default: false
+  - name: interval_seconds
+    type: int
+    description: "Seconds between push cycles of ~/.claude/ to GCS"
+    default: 60
+  - name: bucket_name_override
+    type: string
+    description: "Override the auto-derived GCS bucket name (empty = use ra-claude-<project>-<hash>)"

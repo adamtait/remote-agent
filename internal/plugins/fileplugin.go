@@ -39,6 +39,30 @@ func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
 	if s.PortForTunnel < 0 || s.PortForTunnel > 65535 {
 		return nil, fmt.Errorf("plugin.yaml: port-for-tunnel %d is out of range (0-65535)", s.PortForTunnel)
 	}
+	seenBucketNames := map[string]bool{}
+	seenBucketEnvVars := map[string]bool{}
+	for i, b := range s.Buckets {
+		if b.Name == "" {
+			return nil, fmt.Errorf("plugin.yaml: buckets[%d].name is required", i)
+		}
+		if seenBucketNames[b.Name] {
+			return nil, fmt.Errorf("plugin.yaml: duplicate bucket name %q", b.Name)
+		}
+		seenBucketNames[b.Name] = true
+		if b.NameTemplate == "" {
+			return nil, fmt.Errorf("plugin.yaml: buckets[%d] (%q): name_template is required", i, b.Name)
+		}
+		if b.Role == "" {
+			return nil, fmt.Errorf("plugin.yaml: buckets[%d] (%q): role is required", i, b.Name)
+		}
+		if b.EnvVar == "" {
+			return nil, fmt.Errorf("plugin.yaml: buckets[%d] (%q): env_var is required", i, b.Name)
+		}
+		if seenBucketEnvVars[b.EnvVar] {
+			return nil, fmt.Errorf("plugin.yaml: buckets[%d] (%q): duplicate env_var %q", i, b.Name, b.EnvVar)
+		}
+		seenBucketEnvVars[b.EnvVar] = true
+	}
 	return &FilePlugin{fsys: fsys, schema: s}, nil
 }
 

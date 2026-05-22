@@ -15,6 +15,7 @@ import (
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/configwrite"
 	"github.com/adamtait/remote-agent/internal/gcloud"
+	"github.com/adamtait/remote-agent/internal/gcs"
 	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/naming"
 	"github.com/adamtait/remote-agent/internal/plugins"
@@ -26,7 +27,7 @@ import (
 // totalCreateSteps is the count of numbered pipeline phases in runCreate,
 // rendered in the "==> [N/M] ..." progress prefix. Update if you add or
 // remove a Step() call.
-const totalCreateSteps = 10
+const totalCreateSteps = 11
 
 // Bindings on a freshly-created service account can briefly fail with
 // "Service account ... does not exist" while IAM propagates. Up to
@@ -39,6 +40,66 @@ const (
 
 func logicalNameToEnvToken(logical string) string {
 	return strings.ToUpper(logical)
+}
+
+// resolvedBucket pairs a plugin's BucketSpec declaration with the
+// concrete bucket name produced by resolving its template against the
+// active gcloud project + git user email (or the user-supplied
+// override). Returned by pluginBuckets() and consumed by both the
+// provisioning step and the env-injection in buildContainerEnv —
+// keeping the source of truth in plugin.yaml, not in cmd/create.go.
+type resolvedBucket struct {
+	Plugin string             // plugin name (for log/error messages only)
+	Spec   plugins.BucketSpec // verbatim from plugin.yaml
+	Name   string             // resolved + validated GCS bucket name
+}
+
+// pluginBuckets enumerates every BucketSpec declared by every installed
+// plugin that has `enabled: true`, resolving each one's name template
+// (or honoring its override_field) and validating the result. Returns
+// an error if any plugin's bucket cannot be resolved, so `ra create`
+// fails fast before provisioning anything.
+func pluginBuckets(reg *plugins.Registry, cfg *config.Config) ([]resolvedBucket, error) {
+	if reg == nil {
+		return nil, nil
+	}
+	var out []resolvedBucket
+	for _, p := range reg.All() {
+		schema := p.Schema()
+		if len(schema.Buckets) == 0 {
+			continue
+		}
+		pluginCfg := cfg.Plugins[p.Name()]
+		// Honor the existing `enabled: true` convention — plugin-side
+		// startup scripts also gate on RA_PLUGIN_<NAME>_ENABLED, so a
+		// disabled plugin contributes no buckets here.
+		if pluginCfg == nil {
+			continue
+		}
+		if en, _ := pluginCfg["enabled"].(bool); !en {
+			continue
+		}
+		for _, spec := range schema.Buckets {
+			name := ""
+			if spec.OverrideField != "" {
+				if v, _ := pluginCfg[spec.OverrideField].(string); v != "" {
+					name = v
+				}
+			}
+			if name == "" {
+				resolved, err := gcs.ResolveBucketName(spec.NameTemplate, cfg.Gcloud.Project, cfg.Git.UserEmail)
+				if err != nil {
+					return nil, fmt.Errorf("plugin %s bucket %q: %w", p.Name(), spec.Name, err)
+				}
+				name = resolved
+			}
+			if err := gcs.ValidateBucketName(name); err != nil {
+				return nil, fmt.Errorf("plugin %s bucket %q: %w", p.Name(), spec.Name, err)
+			}
+			out = append(out, resolvedBucket{Plugin: p.Name(), Spec: spec, Name: name})
+		}
+	}
+	return out, nil
 }
 
 func buildContainerEnv(cfg *config.Config) string {
@@ -58,6 +119,19 @@ func buildContainerEnv(cfg *config.Config) string {
 	addProp("GCP_PROJECT_ID", cfg.Gcloud.Project)
 	addProp("GIT_USER_NAME", cfg.Git.UserName)
 	addProp("GIT_USER_EMAIL", cfg.Git.UserEmail)
+	// Plugin-declared GCS buckets (in plugin.yaml `buckets:`) are
+	// resolved at create-time — the names depend on gcloud project + git
+	// user email, not on static plugin config — so inject them here in
+	// addition to the plugin's own config fields that flow through
+	// reg.AllContainerEnvPairs below. pluginBuckets returns an error
+	// only on invalid template/override, which we've already surfaced
+	// up the pipeline; tolerate it here so buildContainerEnv stays
+	// total.
+	if buckets, err := pluginBuckets(reg, cfg); err == nil {
+		for _, b := range buckets {
+			addProp(b.Spec.EnvVar, b.Name)
+		}
+	}
 	for _, pair := range reg.AllContainerEnvPairs(cfg) {
 		pairs = append(pairs, pair)
 		if eq := strings.IndexByte(pair, '='); eq > 0 {
@@ -286,8 +360,38 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 3 — Build and push image
-	done = logging.Step("build_image", 3, totalCreateSteps, fmt.Sprintf("Building image %s...", imageURI), cmd.OutOrStdout())
+	// Step 3 — Plugin-declared GCS buckets.
+	// Each installed+enabled plugin can declare `buckets:` in
+	// plugin.yaml; ra walks them all generically here. No plugin name
+	// is hard-coded — any plugin that needs a bucket lands here
+	// automatically. IAM binding is deferred to the service-account
+	// step below since the SA may not yet exist.
+	pluginBucketList, err := pluginBuckets(reg, cfg)
+	if err != nil {
+		return fmt.Errorf("resolving plugin buckets: %w", err)
+	}
+	if len(pluginBucketList) > 0 {
+		names := make([]string, 0, len(pluginBucketList))
+		for _, b := range pluginBucketList {
+			names = append(names, b.Name)
+		}
+		done = logging.Step("ensure_plugin_buckets", 3, totalCreateSteps, fmt.Sprintf("Ensuring %d plugin-declared GCS bucket(s): %s...", len(pluginBucketList), strings.Join(names, ", ")), cmd.OutOrStdout())
+		for _, b := range pluginBucketList {
+			if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, b.Name, ws.Region); err != nil {
+				done(err)
+				return fmt.Errorf("ensuring bucket %s (plugin %s): %w", b.Name, b.Plugin, err)
+			}
+		}
+		done(nil)
+	} else {
+		// Placeholder so the visible step counter stays monotonic
+		// even on workstations whose plugins don't declare buckets.
+		done = logging.Step("ensure_plugin_buckets", 3, totalCreateSteps, "no plugin-declared GCS buckets", cmd.OutOrStdout())
+		done(nil)
+	}
+
+	// Step 4 — Build and push image
+	done = logging.Step("build_image", 4, totalCreateSteps, fmt.Sprintf("Building image %s...", imageURI), cmd.OutOrStdout())
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -330,9 +434,9 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 4 — Create any secrets whose values we collected during pre-flight.
+	// Step 5 — Create any secrets whose values we collected during pre-flight.
 	// Existing secrets were skipped already; this loop only writes new ones.
-	done = logging.Step("ensure_secrets", 4, totalCreateSteps, fmt.Sprintf("Creating %d new GCP secret(s)...", len(pendingSecrets)), cmd.OutOrStdout())
+	done = logging.Step("ensure_secrets", 5, totalCreateSteps, fmt.Sprintf("Creating %d new GCP secret(s)...", len(pendingSecrets)), cmd.OutOrStdout())
 	for _, ps := range pendingSecrets {
 		if err := secrets.CreateFromValue(r, cfg.Gcloud.Project, ps.gcpName, ps.value); err != nil {
 			done(err)
@@ -341,8 +445,8 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 5 — Service account and IAM
-	done = logging.Step("ensure_service_acct", 5, totalCreateSteps, fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail), cmd.OutOrStdout())
+	// Step 6 — Service account and IAM
+	done = logging.Step("ensure_service_acct", 6, totalCreateSteps, fmt.Sprintf("Ensuring service account '%s'...", serviceAccountEmail), cmd.OutOrStdout())
 	if !r.Check("iam", "service-accounts", "describe", serviceAccountEmail, "--project", cfg.Gcloud.Project) {
 		if err := r.Run("iam", "service-accounts", "create", ws.ServiceAccountName,
 			"--display-name=ra Workstation SA",
@@ -376,10 +480,23 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("binding secret %s IAM: %w", secret, err)
 		}
 	}
+
+	// Bind plugin-declared bucket IAM. Each plugin's BucketSpec carries
+	// its own `role:` (typically roles/storage.objectAdmin for a read+
+	// write plugin; could be a viewer role for a read-only one). Same
+	// RetryOnSANotFound pattern as the secret bindings to cover the IAM
+	// eventual-consistency window after a fresh service-account create.
+	for _, b := range pluginBucketList {
+		if err := gcs.GrantRole(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
+			b.Name, serviceAccountEmail, b.Spec.Role); err != nil {
+			done(err)
+			return fmt.Errorf("binding %s on bucket %s (plugin %s): %w", b.Spec.Role, b.Name, b.Plugin, err)
+		}
+	}
 	done(nil)
 
 	// Bind Artifact Registry repo
-	done = logging.Step("bind_ar_iam", 6, totalCreateSteps, fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName), cmd.OutOrStdout())
+	done = logging.Step("bind_ar_iam", 7, totalCreateSteps, fmt.Sprintf("Granting artifactregistry.reader on '%s'...", ws.RepoName), cmd.OutOrStdout())
 	if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
 		"artifacts", "repositories", "add-iam-policy-binding", ws.RepoName,
 		"--location", ws.Region,
@@ -398,7 +515,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	// authenticates via Vertex AI using this same service account).
 	projectRoles := []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"}
 	projectRoles = appendUniqueRoles(projectRoles, pluginAuthIAMRoles(reg.All(), cfg))
-	done = logging.Step("bind_project_iam", 7, totalCreateSteps, fmt.Sprintf("Granting %d project-level IAM role(s)...", len(projectRoles)), cmd.OutOrStdout())
+	done = logging.Step("bind_project_iam", 8, totalCreateSteps, fmt.Sprintf("Granting %d project-level IAM role(s)...", len(projectRoles)), cmd.OutOrStdout())
 	for _, role := range projectRoles {
 		if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),
 			"projects", "add-iam-policy-binding", cfg.Gcloud.Project,
@@ -411,8 +528,8 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 8 — Workstations cluster
-	done = logging.Step("ensure_cluster", 8, totalCreateSteps, fmt.Sprintf("Ensuring workstations cluster '%s'...", ws.ClusterName), cmd.OutOrStdout())
+	// Step 9 — Workstations cluster
+	done = logging.Step("ensure_cluster", 9, totalCreateSteps, fmt.Sprintf("Ensuring workstations cluster '%s'...", ws.ClusterName), cmd.OutOrStdout())
 	if !r.Check("workstations", "clusters", "describe", ws.ClusterName, "--region", ws.Region, "--project", cfg.Gcloud.Project) {
 		logging.WarnPrintf(cmd.OutOrStdout(), "Creating cluster — this takes ~20 minutes on first run.")
 		if err := r.Run("workstations", "clusters", "create", ws.ClusterName,
@@ -424,8 +541,8 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 9 — Workstations config
-	done = logging.Step("ensure_config", 9, totalCreateSteps, fmt.Sprintf("Ensuring workstations config '%s'...", ws.ConfigName), cmd.OutOrStdout())
+	// Step 10 — Workstations config
+	done = logging.Step("ensure_config", 10, totalCreateSteps, fmt.Sprintf("Ensuring workstations config '%s'...", ws.ConfigName), cmd.OutOrStdout())
 	containerEnv := buildContainerEnv(cfg)
 
 	configExists := r.Check("workstations", "configs", "describe", ws.ConfigName,
@@ -476,8 +593,8 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 10 — Resolve a unique workstation name and create it.
-	done = logging.Step("create_workstation", 10, totalCreateSteps, "Resolving workstation name and creating...", cmd.OutOrStdout())
+	// Step 11 — Resolve a unique workstation name and create it.
+	done = logging.Step("create_workstation", 11, totalCreateSteps, "Resolving workstation name and creating...", cmd.OutOrStdout())
 	existing, err := client.List(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName)
 	if err != nil {
 		done(err)
@@ -525,7 +642,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	done(nil)
 
-	// Step 11 — Print access info
+	// Print access info (post-pipeline; not counted in totalCreateSteps).
 	info, err := client.Describe(cfg.Gcloud.Project, ws.Region, ws.ClusterName, ws.ConfigName, workstationName)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
