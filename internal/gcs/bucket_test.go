@@ -132,10 +132,10 @@ func TestResolveBucketName_RejectsUnknownPlaceholder(t *testing.T) {
 }
 
 func TestResolveBucketName_DerivedNamesAlwaysValid(t *testing.T) {
-	// Any bucket name produced by the claude-sync template must pass
-	// ValidateBucketName for every combination of project + email that
+	// Any bucket name produced by the generic plugin bucket template must
+	// pass ValidateBucketName for every combination of project + email that
 	// callers could realistically pass in.
-	const tmpl = "ra-claude-{project_id}-{user_email_hash}"
+	const tmpl = "ra-{project_id}-{user_email_hash}"
 	for _, p := range []string{"p", "my-proj", "abc-123-xyz"} {
 		for _, e := range []string{"a@x.com", "User+Tag@Sub.Domain.tld", ""} {
 			got, err := gcs.ResolveBucketName(tmpl, p, e)

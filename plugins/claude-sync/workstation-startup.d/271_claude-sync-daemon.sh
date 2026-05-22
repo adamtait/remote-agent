@@ -28,7 +28,9 @@ cat > "${LOOP_PATH}" <<'LOOP_EOF'
 #
 # Waits for /run/ra/env (the core 200_*.sh boot script writes it on
 # every boot), then pushes a filtered allowlist of /home/user/.claude/
-# to gs://${BUCKET}/workstations/${WS_ID}/ every ${INTERVAL} seconds.
+# to gs://${BUCKET}/claude-sync/workstations/${WS_ID}/ every ${INTERVAL}
+# seconds. All data lives under the claude-sync/ prefix so other plugins
+# can share the same bucket without collisions.
 #
 # All gcloud chatter is appended to /var/log/ra-claude-sync.log so a
 # silent regression in steady state is auditable. Exits with status 1
@@ -83,8 +85,8 @@ WS_ID="$(curl -fs -H 'Metadata-Flavor: Google' \
     || true)"
 [ -n "${WS_ID}" ] || WS_ID="$(hostname)"
 
-PREFIX="gs://${BUCKET}/workstations/${WS_ID}"
-MANIFEST_PATH="gs://${BUCKET}/_manifest/${WS_ID}.json"
+PREFIX="gs://${BUCKET}/claude-sync/workstations/${WS_ID}"
+MANIFEST_PATH="gs://${BUCKET}/claude-sync/_manifest/${WS_ID}.json"
 
 log "starting push loop ws-id=${WS_ID} interval=${INTERVAL}s prefix=${PREFIX}"
 

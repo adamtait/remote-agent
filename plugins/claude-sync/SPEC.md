@@ -51,16 +51,16 @@ GCS bucket is provisioned by `ra create` (idempotent, like the Artifact Registry
                │ workload-identity SA (roles/storage.objectAdmin on bucket)
                ▼                  ▼
  ┌─────────────────────────────────────────────────────────────────────┐
- │  GCS bucket: ra-claude-<project-id>-<user-hash>                     │
+ │  GCS bucket: ra-<project-id>-<user-hash>  (shared with other plugins)│
  │                                                                     │
- │  workstations/<ws-id-A>/                                            │
+ │  claude-sync/workstations/<ws-id-A>/                                │
  │  ├── projects/<cwd>/<sessionId-A>.jsonl                             │
  │  ├── projects/<cwd>/memory/*.md                                     │
  │  ├── history.jsonl                                                  │
  │  └── claude.json                                                    │
- │  workstations/<ws-id-B>/...                                         │
- │  workstations/<ws-id-C>/...                                         │
- │  _manifest/<ws-id>.json   (last-push timestamp, version)            │
+ │  claude-sync/workstations/<ws-id-B>/...                             │
+ │  claude-sync/workstations/<ws-id-C>/...                             │
+ │  claude-sync/_manifest/<ws-id>.json   (last-push timestamp)         │
  └─────────────────────────────────────────────────────────────────────┘
                ▲                  ▲
                │ same pattern     │
@@ -81,7 +81,8 @@ Mirrors the layout of `plugins/github/`. Files:
 - **`plugin.yaml`** — config schema:
   - `enabled` (bool, default false)
   - `interval_seconds` (int, default 60)
-  - `bucket_name_override` (string, optional — if unset, derived as `ra-claude-<project-id>-<user-hash>`)
+  - `bucket_name_override` (string, optional — if unset, derived as `ra-<project-id>-<user-hash>`)
+  - `sync_all_projects` (bool, default false — at user-level install, auto-sets `bucket_name_override` to the user project's bucket so all GCP projects share one bucket)
   - No secrets — auth is via the existing workstation service account.
 - **`Dockerfile.d/110_claude-sync-tools.sh`** — ensures `jq` and `curl` are present (already in base image — script is a `command -v` guard + no-op).
 - **`workstation-startup.d/270_claude-sync-pull.sh`** — runs once per boot after `260_claude-setup.sh`. Pulls every namespace under `workstations/` and merges into `/home/user/.claude/`. Idempotent.
@@ -121,7 +122,7 @@ Separation of concerns: the **policy** ("claude-sync needs a bucket called X wit
 name: claude-sync
 buckets:
   - name: state
-    name_template: "ra-claude-{project_id}-{user_email_hash}"
+    name_template: "ra-{project_id}-{user_email_hash}"
     override_field: bucket_name_override
     role: roles/storage.objectAdmin
     env_var: RA_PLUGIN_CLAUDE_SYNC_BUCKET
@@ -129,6 +130,7 @@ config:
   - { name: enabled, type: bool, default: false }
   - { name: interval_seconds, type: int, default: 60 }
   - { name: bucket_name_override, type: string }
+  - { name: sync_all_projects, type: bool, default: false }
 ```
 
 The runtime contract on the workstation is unchanged: `270_*.sh` and `271_*.sh` read `RA_PLUGIN_CLAUDE_SYNC_BUCKET` exactly as before. Only the *source of truth* for what env var to inject moved from Go into YAML.
@@ -183,7 +185,7 @@ The runtime contract on the workstation is unchanged: `270_*.sh` and `271_*.sh` 
 - **`.claude.json` divergence** (numStartups, tipsHistory counters drift per workstation): last-writer-wins; not load-bearing — claude regenerates missing fields.
 - **Workstation killed mid-rsync**: `gcloud storage rsync` uploads whole files (not atomic across the set), so the destination namespace may be partially updated. Acceptable: next cycle reconciles. Pull-side merge tolerates partial namespaces.
 - **Secrets leaking into transcripts**: session JSONLs may contain shell output, tool outputs, and pasted content. The bucket inherits project-level encryption and is IAM-locked to the workstation SA + project owners. Document this risk in the plugin README; recommend CMEK in v2.
-- **Bucket name globally unique**: derive as `ra-claude-<project-id>-<sha1(user-email)[:8]>` to avoid collisions and not leak identifying info. Allow override via `bucket_name_override`.
+- **Bucket name globally unique**: derive as `ra-<project-id>-<sha1(user-email)[:8]>` to avoid collisions and not leak identifying info. Allow override via `bucket_name_override`. The name intentionally omits "claude" so other plugins can share the same bucket under their own prefixes.
 - **Stale namespaces from deleted workstations**: linger in GCS forever in v1. Document `gcloud storage rm -r gs://.../workstations/<old-ws-id>/` as the manual cleanup. v2 adds a lifecycle rule.
 - **`claude-sync` enabled but `claude` plugin missing**: documented in the plugin README. v1 noops if `/home/user/.claude/` doesn't exist.
 - **Concurrent claude write + rsync read**: `gcloud storage rsync` does a streaming read of each file; a partial write could ship a torn JSONL. Acceptable for v1; next cycle overwrites.
@@ -234,7 +236,7 @@ Manual end-to-end after the v1 build is in place:
 
 1. `make build && make install`.
 2. `ra plugin install ./plugins/claude-sync` (level: user).
-3. `ra create ws-alpha` — confirm bucket `ra-claude-<project>-<hash>` appears in GCS console, and the workstation SA has `objectAdmin` on it.
+3. `ra create ws-alpha` — confirm bucket `ra-<project>-<hash>` appears in GCS console, and the workstation SA has `objectAdmin` on it.
 4. `ra connect ws-alpha`, run `claude -p "hello"`, observe `~/.claude/projects/<cwd>/<sessionId>.jsonl` filling.
 5. Wait ~70s, run `gcloud storage ls gs://<bucket>/workstations/ws-alpha/projects/...` — confirm the JSONL is there.
 6. `ra create ws-bravo` from another terminal. Once it boots, `ra connect ws-bravo` and confirm `~/.claude/projects/<cwd>/<sessionId>.jsonl` from ws-alpha is present locally.

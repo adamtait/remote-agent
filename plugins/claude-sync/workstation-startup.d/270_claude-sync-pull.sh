@@ -1,9 +1,12 @@
 #!/bin/bash
 # claude-sync plugin — one-shot boot pull.
 #
-# Pulls every workstation's namespace under gs://${BUCKET}/workstations/
+# Pulls every workstation's namespace under gs://${BUCKET}/claude-sync/workstations/
 # and merges into /home/user/.claude/. Idempotent. Bails fast when the
 # plugin is disabled or the bucket env var is missing.
+#
+# All claude-sync data lives under the claude-sync/ prefix inside the
+# bucket so other plugins can share the same bucket without collisions.
 #
 # Files that are namespace-scoped and UUID-named (projects/, todos/,
 # plans/, session-env/) are pulled additively into a tmpdir first, then
@@ -44,17 +47,19 @@ WS_ID="$(curl -fs -H 'Metadata-Flavor: Google' \
     'http://metadata.google.internal/computeMetadata/v1/instance/name' 2>>"${LOG_FILE}" \
     || true)"
 [ -n "${WS_ID}" ] || WS_ID="$(hostname)"
-log "starting pull as ws-id=${WS_ID} from gs://${BUCKET}"
+PLUGIN_PREFIX="gs://${BUCKET}/claude-sync"
+
+log "starting pull as ws-id=${WS_ID} from ${PLUGIN_PREFIX}"
 
 mkdir -p "${USER_HOME}/.claude"
 
 # List namespaces. `gcloud storage ls` returns one
-# `gs://bucket/workstations/<ws>/` per line; an empty/nonexistent prefix
-# is not an error here.
-mapfile -t NAMESPACES < <(gcloud storage ls "gs://${BUCKET}/workstations/" 2>>"${LOG_FILE}" | sort -u || true)
+# `gs://bucket/claude-sync/workstations/<ws>/` per line; an
+# empty/nonexistent prefix is not an error here.
+mapfile -t NAMESPACES < <(gcloud storage ls "${PLUGIN_PREFIX}/workstations/" 2>>"${LOG_FILE}" | sort -u || true)
 
 if [ "${#NAMESPACES[@]}" -eq 0 ]; then
-    log "no namespaces under gs://${BUCKET}/workstations/ — first boot"
+    log "no namespaces under ${PLUGIN_PREFIX}/workstations/ — first boot"
     chown -R "${USER_NAME}:${USER_NAME}" "${USER_HOME}/.claude"
     exit 0
 fi
@@ -95,7 +100,7 @@ for ns in "${NAMESPACES[@]}"; do
     [ "${ns_id}" = "${WS_ID}" ] && continue
     # Guard against gcloud cat failure leaving an empty value; jq's
     # `// 0` default only kicks in for valid JSON without the field.
-    ts="$(gcloud storage cat "gs://${BUCKET}/_manifest/${ns_id}.json" 2>>"${LOG_FILE}" \
+    ts="$(gcloud storage cat "${PLUGIN_PREFIX}/_manifest/${ns_id}.json" 2>>"${LOG_FILE}" \
           | jq -r '.last_push_at_epoch // 0' 2>>"${LOG_FILE}" || echo 0)"
     ts="${ts:-0}"
     case "${ts}" in *[!0-9]*) ts=0 ;; esac

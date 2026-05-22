@@ -14,6 +14,46 @@ Format per entry:
 
 ---
 
+## 2026-05-22 — Generic bucket name + plugin-namespaced paths + `sync_all_projects`
+
+### Bucket name: removed "claude" from template
+
+**Decision:** Changed `name_template` from `"ra-claude-{project_id}-{user_email_hash}"` to `"ra-{project_id}-{user_email_hash}"`.
+
+**Why:** The bucket is now intended to be shared across plugins. A name that embeds "claude" implies exclusive ownership and would be misleading if, say, a `github-sync` plugin also writes to it.
+
+**Tradeoff:** Existing deployments that already provisioned a `ra-claude-*` bucket will not automatically migrate. Users upgrading will get a new bucket on the next `ra create`. Their data in the old bucket is orphaned unless they manually copy it or set `bucket_name_override: ra-claude-<proj>-<hash>` in their config to keep using the old bucket. This is a one-time migration cost; new installs are unaffected. Documented in this note rather than adding migration code since the plugin is young and production deployments are few.
+
+**What was NOT changed:** The systemd service name (`ra-claude-sync.service`), the log file path (`/var/log/ra-claude-sync.log`), and the push loop binary (`/usr/local/bin/ra-claude-sync-loop.sh`) all still include "claude-sync" — these are internal workstation artifact names scoped to this plugin, not global GCS namespace identifiers, so keeping them claude-sync-specific is correct.
+
+---
+
+### GCS paths: plugin-namespaced under `claude-sync/` prefix
+
+**Decision:** All GCS paths inside the bucket are now prefixed with `claude-sync/`. Previously data lived at `gs://bucket/workstations/{ws-id}/...` and `gs://bucket/_manifest/...`. Now it's `gs://bucket/claude-sync/workstations/{ws-id}/...` and `gs://bucket/claude-sync/_manifest/...`.
+
+**Why:** Without a prefix, the top-level bucket namespace is unpartitioned. A second plugin that writes `workstations/` or `_manifest/` objects would collide. The `claude-sync/` prefix acts as a namespace that is easy to read in GCS console and unambiguous in `gsutil`/gcloud commands.
+
+**Implementation note on 270_claude-sync-pull.sh:** Introduced a `PLUGIN_PREFIX="gs://${BUCKET}/claude-sync"` variable to avoid repeating the string. The `NAMESPACES` array is populated by `gcloud storage ls "${PLUGIN_PREFIX}/workstations/"` so each `${ns}` URL already carries the full path — the `rsync` calls inside the loop (`${ns}${sub}/`) still work without change.
+
+**Tradeoff:** Same migration issue as the bucket rename — existing data under the old paths is stranded. Same mitigation (manual copy or `bucket_name_override` to keep the old bucket entirely).
+
+---
+
+### `sync_all_projects` config option
+
+**Decision:** Added `sync_all_projects: bool` (default: false) to `plugin.yaml`. When `true` at user-level install and `bucket_name_override` is not already set, a post-prompt step in `cmd/plugin.go` resolves `ra-{user_project_id}-{user_email_hash}` from the user-level config and writes it into `res.Config["bucket_name_override"]` before `writePluginAndSecrets` persists it.
+
+**Why:** Loading the user config (`config.UserConfigPath()` + `config.LoadUserConfig()`) directly — rather than using the already-merged `cfg` — ensures we get the user's home project ID even when `ra plugin install` is invoked from a project directory whose `.ra/config.yaml` overrides `project_id`. The merged config could be a project-specific project, not the user's intended home project.
+
+**Tradeoff:** We use `UserConfig.Git.UserEmail` from the user config. If the user's email differs between user and project configs, the derived bucket name uses the user-level email. This is the right behavior (we want a stable, user-anchored identifier), but it means the bucket for `sync_all_projects` may differ from the per-project bucket even in the same GCP project if emails diverge.
+
+**What happens at project-level install:** The `if level == "user"` guard means `sync_all_projects=true` at project level silently stores `true` in config but never auto-derives `bucket_name_override`. The plugin still resolves the template (`ra-{project_id}-{user_email_hash}`) at `ra create` time. This is intentional: project-level installs are expected to be project-specific, and the user can always set `bucket_name_override` manually if they want cross-project sharing from a project install.
+
+**Cross-project IAM:** When `sync_all_projects=true` and workstations in project B run `ra create`, `gcs.EnsureBucket` is called with `bucket_name_override` pointing at a bucket owned by project A. The `gcloud storage buckets describe` check succeeds globally (GCS bucket names are unique; the describe command returns success if the caller has read access, regardless of owning project). The bucket creation is skipped. `gcs.GrantRole` then grants project B's workstation SA `objectAdmin` on the bucket — this is a bucket-level IAM grant that works cross-project. No changes to `cmd/create.go` or `internal/gcs/` were needed.
+
+---
+
 ## 2026-05-21 — Refactor: removed all claude-sync-specific code from cmd/create.go
 
 **Decision:** Reviewing PR #126 surfaced an architectural smell — the

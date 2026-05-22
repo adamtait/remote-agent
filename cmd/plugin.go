@@ -15,7 +15,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/configwrite"
+	"github.com/adamtait/remote-agent/internal/gcs"
 	"github.com/adamtait/remote-agent/internal/logging"
 	"github.com/adamtait/remote-agent/internal/plugins"
 	"github.com/spf13/cobra"
@@ -136,6 +138,34 @@ var pluginInstallCmd = &cobra.Command{
 		res, err := p.Prompt(r, cmd.OutOrStdout(), cmd.ErrOrStderr(), os.Stdin)
 		if err != nil {
 			return fmt.Errorf("prompting plugin config: %w", err)
+		}
+
+		// ── 5.25. sync_all_projects: auto-derive shared bucket ────────────────
+		// When the plugin is installed at user level with sync_all_projects=true
+		// and the user hasn't manually set bucket_name_override, resolve the
+		// shared bucket name from the user-level default project so every
+		// workstation across all GCP projects converges on one bucket.
+		if level == "user" {
+			if v, _ := res.Config["sync_all_projects"].(bool); v {
+				if override, _ := res.Config["bucket_name_override"].(string); override == "" {
+					if userCfgPath, pathErr := config.UserConfigPath(); pathErr == nil {
+						if userCfg, loadErr := config.LoadUserConfig(userCfgPath); loadErr == nil {
+							if userCfg.Gcloud.Project != "" {
+								if bucketName, resolveErr := gcs.ResolveBucketName(
+									"ra-{project_id}-{user_email_hash}",
+									userCfg.Gcloud.Project,
+									userCfg.Git.UserEmail,
+								); resolveErr == nil {
+									res.Config["bucket_name_override"] = bucketName
+									fmt.Fprintf(cmd.OutOrStdout(),
+										"sync_all_projects: shared bucket → %q (user project: %s)\n",
+										bucketName, userCfg.Gcloud.Project)
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 
 		// ── 5.5. resolve GCP secret names (level follows plugin install level) ─
