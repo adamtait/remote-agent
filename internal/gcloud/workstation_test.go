@@ -270,6 +270,25 @@ func TestClient_Stop_CallsCorrectArgs(t *testing.T) {
 	}
 }
 
+func TestClient_SSH_PassesKeepaliveFlags(t *testing.T) {
+	fake := &fakeRunner{}
+	client := gcloud.NewClient(fake)
+	if err := client.SSH("proj", "us-central1", "cl", "cfg", "myws"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(fake.calls))
+	}
+	got := strings.Join(fake.calls[0], " ")
+	want := "workstations ssh myws --cluster cl --config cfg --region us-central1 --project proj " +
+		"--ssh-flag=-o ServerAliveInterval=30 " +
+		"--ssh-flag=-o ServerAliveCountMax=10 " +
+		"--ssh-flag=-o TCPKeepAlive=yes"
+	if got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
 func TestClient_StartTCPTunnel_CallsCorrectArgs(t *testing.T) {
 	fake := &fakeRunner{}
 	client := gcloud.NewClient(fake)

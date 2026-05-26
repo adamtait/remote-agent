@@ -212,11 +212,18 @@ func (c *Client) Delete(project, region, cluster, cfgName, name string) error {
 }
 
 // SSH opens an interactive SSH session to the workstation.
+//
+// Keepalive flags are passed to the underlying ssh client so the IAP tunnel
+// that gcloud builds under the hood does not drop the session when the
+// terminal is idle (the cause of "Connection to Cloud Workstation lost.").
 func (c *Client) SSH(project, region, cluster, cfgName, name string) error {
 	return c.runner.Run(
 		"workstations", "ssh", name,
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,
+		"--ssh-flag=-o ServerAliveInterval=30",
+		"--ssh-flag=-o ServerAliveCountMax=10",
+		"--ssh-flag=-o TCPKeepAlive=yes",
 	)
 }
 
