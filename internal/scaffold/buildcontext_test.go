@@ -3,6 +3,7 @@ package scaffold
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adamtait/remote-agent/internal/plugins"
@@ -56,6 +57,13 @@ func TestAssembleBuildContext_DockerfileFromEmbedded(t *testing.T) {
 	}
 	if len(got) == 0 {
 		t.Fatal("Dockerfile is empty; expected embedded default bytes")
+	}
+	// The image must bake server-side SSH keepalive (sshd ClientAlive*) so
+	// idle `gcloud workstations ssh` tunnels don't get reaped by the backend.
+	for _, want := range []string{"ClientAliveInterval 30", "ClientAliveCountMax 10"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("Dockerfile missing server-side keepalive directive %q", want)
+		}
 	}
 }
 

@@ -17,6 +17,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && exit 1)
 
+# --- SSH keepalive ----------------------------------------------------------
+# `gcloud workstations ssh` tunnels SSH over a websocket and provides no
+# keepalive on either layer: it hard-codes the client-side
+# `-o ServerAliveInterval=0` (which wins, since ssh honors the first -o value,
+# so a client --ssh-flag can't override it) and opens the websocket with no
+# ping. An idle session's tunnel is therefore closed by the backend, surfacing
+# as "ERROR: Connection to Cloud Workstation lost." Drive keepalives from the
+# server instead: sshd sends ClientAlive probes over the tunnel every 30s,
+# keeping the websocket warm. ClientAliveCountMax bounds how long an
+# unresponsive client is tolerated (~5 min) before sshd reaps the session.
+# Debian-based images Include sshd_config.d/*.conf at the top of sshd_config
+# (first-wins), so this drop-in takes effect; prepend the Include if missing.
+RUN mkdir -p /etc/ssh/sshd_config.d \
+    && printf 'ClientAliveInterval 30\nClientAliveCountMax 10\n' \
+        > /etc/ssh/sshd_config.d/10-ra-keepalive.conf \
+    && if ! grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' /etc/ssh/sshd_config; then \
+        printf 'Include /etc/ssh/sshd_config.d/*.conf\n' | cat - /etc/ssh/sshd_config > /etc/ssh/sshd_config.ra \
+        && mv /etc/ssh/sshd_config.ra /etc/ssh/sshd_config; \
+    fi
+
 # --- Plugin build-time hooks ------------------------------------------------
 COPY Dockerfile.d/ /tmp/ra-dockerfile-d/
 RUN set -e; \
