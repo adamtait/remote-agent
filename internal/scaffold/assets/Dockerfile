@@ -24,13 +24,20 @@ RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && ex
 # so a client --ssh-flag can't override it) and opens the websocket with no
 # ping. An idle session's tunnel is therefore closed by the backend, surfacing
 # as "ERROR: Connection to Cloud Workstation lost." Drive keepalives from the
-# server instead: sshd sends ClientAlive probes over the tunnel every 30s,
-# keeping the websocket warm. ClientAliveCountMax bounds how long an
-# unresponsive client is tolerated (~5 min) before sshd reaps the session.
-# Debian-based images Include sshd_config.d/*.conf at the top of sshd_config
+# server instead: sshd sends ClientAlive probes over the tunnel, keeping the
+# websocket warm.
+#
+# Interval must be comfortably *under* the backend's idle-reap window, which
+# measures ~30s empirically. The original 30s value was too long — its first
+# probe fires *at* ~30s and loses the race to the reap, so idle sessions still
+# dropped at ~30-35s. 15s gives a ~2x margin: verified on a live workstation,
+# an idle session that drops at ~30s under a 30s interval survives 90s+ under
+# 15s. ClientAliveCountMax bounds how long an unresponsive client is tolerated
+# (15s x 10 = ~2.5 min) before sshd reaps it.
+# Debian/Ubuntu images Include sshd_config.d/*.conf at the top of sshd_config
 # (first-wins), so this drop-in takes effect; prepend the Include if missing.
 RUN mkdir -p /etc/ssh/sshd_config.d \
-    && printf 'ClientAliveInterval 30\nClientAliveCountMax 10\n' \
+    && printf 'ClientAliveInterval 15\nClientAliveCountMax 10\n' \
         > /etc/ssh/sshd_config.d/10-ra-keepalive.conf \
     && if ! grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' /etc/ssh/sshd_config; then \
         printf 'Include /etc/ssh/sshd_config.d/*.conf\n' | cat - /etc/ssh/sshd_config > /etc/ssh/sshd_config.ra \
