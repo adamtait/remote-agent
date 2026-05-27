@@ -30,9 +30,10 @@ RUN command -v gcloud >/dev/null || (echo "gcloud missing from base image" && ex
 # Interval must be comfortably *under* the backend's idle-reap window, which
 # measures ~30s empirically. The original 30s value was too long — its first
 # probe fires *at* ~30s and loses the race to the reap, so idle sessions still
-# dropped at ~30-35s. 15s gives a ~2x margin (verified: 90s idle survives at
-# 15s, drops reliably at 30s). ClientAliveCountMax bounds how long an
-# unresponsive client is tolerated (15s x 10 = ~2.5 min) before sshd reaps it.
+# dropped at ~30-35s. 15s gives a ~2x margin: verified on a live workstation,
+# an idle session that drops at ~30s under a 30s interval survives 90s+ under
+# 15s. ClientAliveCountMax bounds how long an unresponsive client is tolerated
+# (15s x 10 = ~2.5 min) before sshd reaps it.
 # Debian/Ubuntu images Include sshd_config.d/*.conf at the top of sshd_config
 # (first-wins), so this drop-in takes effect; prepend the Include if missing.
 RUN mkdir -p /etc/ssh/sshd_config.d \
