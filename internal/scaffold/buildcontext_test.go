@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,61 @@ func TestAssembleBuildContext_DockerfileFromUser(t *testing.T) {
 	}
 	if string(got) != "USER-DOCKERFILE\n" {
 		t.Fatalf("Dockerfile = %q, want USER-DOCKERFILE", got)
+	}
+}
+
+func TestAssembleBuildContext_WarnsOnStaleDockerfileOverride(t *testing.T) {
+	// A user/project Dockerfile that differs from the embedded default is a
+	// full-file override that silently shadows built-in image changes. The
+	// assembler must surface that on ErrOut so it isn't a silent footgun
+	// (the failure mode that hid the SSH-keepalive fix behind a stale copy).
+	cwd := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".config", "ra", "Dockerfile"), "FROM scratch\n# stale custom copy\n")
+
+	var errOut bytes.Buffer
+	_, cleanup, err := AssembleBuildContext(BuildContextOptions{
+		Dest: dest(t), Cwd: cwd, Home: home, ErrOut: &errOut,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	got := errOut.String()
+	if !strings.Contains(got, "custom user Dockerfile") {
+		t.Errorf("expected stale-override warning naming the user source, got: %q", got)
+	}
+	if !strings.Contains(got, "built-in image updates are NOT applied") {
+		t.Errorf("warning should explain built-in updates are skipped, got: %q", got)
+	}
+}
+
+func TestAssembleBuildContext_NoWarnWhenOverrideMatchesEmbedded(t *testing.T) {
+	// An override byte-identical to the embedded default shadows nothing of
+	// substance, so it must NOT trigger the warning (no false alarms for
+	// freshly-scaffolded, unmodified copies).
+	cwd := t.TempDir()
+	home := t.TempDir()
+	userPath := filepath.Join(home, ".config", "ra", "Dockerfile")
+	if err := os.MkdirAll(filepath.Dir(userPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, embeddedDockerfile, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var errOut bytes.Buffer
+	_, cleanup, err := AssembleBuildContext(BuildContextOptions{
+		Dest: dest(t), Cwd: cwd, Home: home, ErrOut: &errOut,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	if got := errOut.String(); got != "" {
+		t.Errorf("expected no warning for override matching embedded default, got: %q", got)
 	}
 }
 
