@@ -61,7 +61,9 @@ func TestAssembleBuildContext_DockerfileFromEmbedded(t *testing.T) {
 	}
 	// The image must bake server-side SSH keepalive (sshd ClientAlive*) so
 	// idle `gcloud workstations ssh` tunnels don't get reaped by the backend.
-	for _, want := range []string{"ClientAliveInterval 30", "ClientAliveCountMax 10"} {
+	// The interval must stay under the ~30s backend idle-reap window — 30s
+	// raced the reap and lost, so 15s is the corrected value.
+	for _, want := range []string{"ClientAliveInterval 15", "ClientAliveCountMax 10"} {
 		if !strings.Contains(string(got), want) {
 			t.Errorf("Dockerfile missing server-side keepalive directive %q", want)
 		}
