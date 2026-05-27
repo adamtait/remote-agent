@@ -76,6 +76,7 @@ Each targeted command accepts an optional name argument; otherwise the default w
 - `plugins/claude/`, `plugins/github/` — in-tree homes of the Claude Code and GitHub plugins (each will move to its own repo in a follow-up changeset)
 - `~/.config/ra/` — your user-global ra config + materialized core assets + installed plugins
 - `.ra/` — project-local ra config + (optional) overrides + installed plugins
+- `docs/adr/` — architecture decision records ([index](docs/adr/README.md))
 
 
 ## `ra plugin` reference
