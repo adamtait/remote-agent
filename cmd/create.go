@@ -417,6 +417,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 		Cwd:     cwd,
 		Home:    home,
 		Plugins: reg.All(),
+		ErrOut:  cmd.OutOrStdout(),
 	})
 	if err != nil {
 		done(err)

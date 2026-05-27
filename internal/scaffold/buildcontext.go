@@ -4,7 +4,9 @@
 package scaffold
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,10 +18,11 @@ import (
 
 // BuildContextOptions controls AssembleBuildContext.
 type BuildContextOptions struct {
-	Dest    string             // absolute output path; required
-	Cwd     string             // project root (contains .ra/) — sources only
-	Home    string             // user home (contains .config/ra/) — sources only
+	Dest    string // absolute output path; required
+	Cwd     string // project root (contains .ra/) — sources only
+	Home    string // user home (contains .config/ra/) — sources only
 	Plugins []*plugins.FilePlugin
+	ErrOut  io.Writer // optional; where user-facing warnings are surfaced (nil → log only)
 }
 
 // AssembleBuildContext writes a fresh docker build context at opts.Dest from
@@ -66,6 +69,14 @@ func AssembleBuildContext(opts BuildContextOptions) (string, func(), error) {
 
 // writeDockerfile chooses project > user > embedded Dockerfile bytes and
 // writes them into <root>/Dockerfile.
+//
+// A project/user Dockerfile is a full-file override: it replaces the embedded
+// default wholesale (unlike the per-file merges for the *.d dirs). A stale
+// materialized copy is therefore dangerous — it silently freezes the base
+// image and shadows every built-in Dockerfile improvement (e.g. the sshd
+// keepalive that stops idle `gcloud workstations ssh` tunnels from being
+// reaped). So when an override is used AND it differs from the current
+// embedded default, warn with the path and how to adopt the latest.
 func writeDockerfile(opts BuildContextOptions, root string) error {
 	candidates := []struct {
 		path   string
@@ -78,6 +89,9 @@ func writeDockerfile(opts BuildContextOptions, root string) error {
 		data, err := os.ReadFile(c.path)
 		if err == nil {
 			logging.L().Debug("dockerfile source", "source", c.source)
+			if !bytes.Equal(data, embeddedDockerfile) {
+				warnStaleDockerfile(opts.ErrOut, c.source, c.path)
+			}
 			return os.WriteFile(filepath.Join(root, "Dockerfile"), data, 0644)
 		}
 		if !os.IsNotExist(err) {
@@ -86,6 +100,20 @@ func writeDockerfile(opts BuildContextOptions, root string) error {
 	}
 	logging.L().Debug("dockerfile source", "source", "embedded")
 	return os.WriteFile(filepath.Join(root, "Dockerfile"), embeddedDockerfile, 0644)
+}
+
+// warnStaleDockerfile surfaces that a custom Dockerfile override is shadowing
+// the embedded default, so built-in image changes (keepalive, base-image bumps)
+// are not applied. Visible on opts.ErrOut when set; otherwise logged only.
+func warnStaleDockerfile(errOut io.Writer, source, path string) {
+	const format = "using custom %s Dockerfile (%s); it overrides the built-in default, so " +
+		"built-in image updates are NOT applied. If you didn't mean to customize it, delete the " +
+		"file (or run `ra setup scaffold --force`) to adopt the current default."
+	if errOut != nil {
+		logging.WarnPrintf(errOut, format, source, path)
+		return
+	}
+	logging.L().Warn(fmt.Sprintf(format, source, path))
 }
 
 // mergedDirs are the three image-mirror directories that get merged from
