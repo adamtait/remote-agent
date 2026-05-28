@@ -14,6 +14,137 @@ Format per entry:
 
 ---
 
+## 2026-05-28 — Fix: setsid fallback when systemd is not PID 1
+
+### What was broken
+
+On every workstation provisioned since claude-sync was installed, the
+push loop **never started**. The boot-time pull script ran once
+correctly. The systemd unit file and the loop binary were materialized
+on disk. But `gcloud storage ls gs://<bucket>/claude-sync/workstations/`
+returned **zero objects** across the entire fleet — no workstation has
+ever pushed to GCS.
+
+### Root cause
+
+The Cloud Workstations default base image runs
+`/google/scripts/entrypoint.sh` as PID 1, **not systemd**:
+
+```
+$ systemctl is-active ra-claude-sync
+System has not been booted with systemd as init system (PID 1).
+Failed to connect to bus: Host is down
+```
+
+`271_claude-sync-daemon.sh` called `systemctl daemon-reload && systemctl
+enable --now ... && systemctl restart ...`, all of which **failed
+silently** because of the trailing `|| true`. The unit file was on disk
+but no init system ever launched it. The pull side (270) ran fine
+because it executes directly during boot, not via systemd.
+
+`SPEC.md` anticipated this exact failure mode in "Possible bottlenecks":
+> **systemd inside the Cloud Workstations container**: if not available,
+> fall back to a `nohup` background loop launched from `271_*.sh`.
+
+The fallback was never implemented.
+
+### Decision
+
+Detect PID 1 in `271_*.sh` and pick the launch strategy at runtime:
+
+- `[ "$(cat /proc/1/comm)" = "systemd" ]` → existing systemd path
+  (preserves correct behavior on any future image that does boot systemd).
+- otherwise → `setsid --fork "${LOOP_PATH}" </dev/null`, mirroring the
+  marimo plugin's daemon-launch pattern (`plugins/marimo/workstation-startup.d/250_marimo-start.sh:75-79`).
+
+Idempotency in the fallback path: `pgrep -f ra-claude-sync-loop\.sh`
+detects an already-running loop and `pkill`s it before relaunch (with
+a 5s graceful-exit grace before SIGKILL). This matches marimo's
+`pgrep` guard pattern. Re-running 271 (or rebooting the workstation)
+picks up env changes from `ra create` without spawning duplicate loops.
+
+### Tradeoffs
+
+**No supervisor in the setsid path.** Under systemd, `Restart=always`
+would respawn the loop after any death. Under setsid, if the loop
+exits — e.g., a kernel signal, or any of its three startup `exit 1`
+branches — it stays dead until the next workstation reboot re-runs
+271. Considered acceptable because:
+
+- All three `exit 1` branches in the loop are preconditions that 271
+  itself re-validates before launching the loop. If 271 launched the
+  loop, those checks pass, so the early exits don't fire.
+- The loop body wraps every `gcloud` call in `|| true`, so transient
+  gcloud failures never kill the loop.
+- A real death (signal, OOM) on a Cloud Workstation is rare; reboot
+  recovery is well-established (this is how the original broken
+  systemd path also "recovered" — via reboot).
+- Adding a supervisor wrapper would be ~20 LOC and duplicate
+  systemd's job for what is effectively a corner case.
+
+If we observe production loop deaths, the next step is a small
+respawn wrapper in 271 (`while true; do setsid --fork ...; sleep 60;
+done` style), not changing the loop body.
+
+**Two-path complexity.** The script now branches on systemd
+availability. Could simplify by deleting the systemd path entirely
+(it's dead code on the current image), but keeping it costs nothing
+and preserves correct behavior if Cloud Workstations ever switches
+to systemd-as-PID-1 (which is the documented default for many of
+their newer image variants).
+
+**Pidfile-based idempotency (not `pgrep -f`).** First draft used
+`pgrep -f "ra-claude-sync-loop\.sh"` / `pkill -f` to find and stop
+existing loops. Live-tested it on the broken workstation and noticed
+the regex also matches the **calling shell's own command line**
+whenever that shell happens to mention the loop path (a developer who
+just `cat`ed the script, or any shell whose argv contains the string).
+A `pkill -f` from inside 271 would therefore SIGTERM the calling shell.
+
+Switched to a pidfile (`/run/ra-claude-sync.pid`): the loop writes its
+own PID on start and clears it via an EXIT trap. 271 reads the file
+and calls `kill <pid>` directly — no pattern matching, no risk of
+collateral kills. `/run` is cleared on every boot so stale pidfiles
+auto-clean.
+
+**Migration: one-time double-loop possible.** If someone manually
+re-runs the new 271 on a workstation that already has the **old**
+loop running (no pidfile written), 271 has no way to discover that
+loop and spawns a second one. Acceptable because:
+- The intended deploy path is a workstation rebuild, which reboots and
+  clears the old loop via OS cleanup.
+- The migration window is small and operator-visible
+  (`pgrep -af ra-claude-sync-loop`).
+- Adding a `pgrep -fx` fallback would re-introduce a more bounded
+  version of the same matches-calling-shell risk.
+
+### Verified live
+
+Reproduced the original "bucket is empty" bug on a Cloud Workstation
+running PID 1 = `entrypoint.sh`. With this fix applied:
+- `sudo bash 271_claude-sync-daemon.sh` → setsid branch fires, loop
+  starts, pidfile written.
+- Within seconds, `gcloud storage ls gs://<bucket>/claude-sync/workstations/`
+  shows the workstation's namespace populated for the first time.
+- Re-running 271 cleanly stops the old loop and starts a new one;
+  exactly one `ra-claude-sync-loop.sh` process remains afterwards.
+- `_manifest/<ws>.json` records the freshest push timestamp.
+
+### What was NOT changed
+
+- The loop script body. It's identical to the previous version, and
+  is correct under both launch strategies. Its `exit 1` semantics
+  match systemd's restart policy; under setsid those exits are
+  near-unreachable as noted above.
+- The systemd unit file content. Same.
+- The Dockerfile.d/110_*.sh "WARN if systemctl missing" check. The
+  `systemctl` binary is still present on the image (the failure mode
+  is "systemd is not PID 1", not "systemctl is missing"), so the
+  soft-assert remains meaningful for environments where someone
+  builds against a stripped image.
+
+---
+
 ## 2026-05-22 — Generic bucket name + plugin-namespaced paths + `sync_all_projects`
 
 ### Bucket name: removed "claude" from template

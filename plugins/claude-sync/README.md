@@ -2,7 +2,8 @@
 
 Syncs `~/.claude/` across cloud workstations belonging to the same
 (GCP project, git user email) pair. Backed by a per-user GCS bucket and
-a 60-second systemd push loop running on each workstation.
+a 60-second push loop running on each workstation (launched via systemd
+when PID 1 is systemd, otherwise via `setsid` — see Operations below).
 
 ## What gets synced
 
@@ -77,7 +78,14 @@ The next `ra create` will:
 ## Operations
 
 - **Logs**: `/var/log/ra-claude-sync.log` on each workstation.
-- **Service**: `systemctl status ra-claude-sync.service`.
+- **Process check**: `pgrep -af ra-claude-sync-loop` — works under both
+  the systemd and `setsid` launch paths. Cloud Workstations' default base
+  image runs `entrypoint.sh` as PID 1 (not systemd), so the `setsid`
+  fallback is what runs in production; on those workstations
+  `systemctl status ra-claude-sync.service` reports "Failed to connect
+  to bus" and is not the right diagnostic.
+- **Restart the loop**: re-run `/etc/workstation-startup.d/271_claude-sync-daemon.sh`
+  as root. It is idempotent — it `pkill`s the running loop and relaunches.
 - **Manual push**: `/usr/local/bin/ra-claude-sync-loop.sh` (just run
   the loop body interactively — Ctrl-C to stop).
 - **Manual pull**: re-run `/etc/workstation-startup.d/270_claude-sync-pull.sh`
