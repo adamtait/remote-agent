@@ -38,6 +38,9 @@ Blocks until Ctrl-C.`,
 		if len(args) == 2 {
 			wsName = args[1]
 		}
+		noKeepAwake, _ := cmd.Flags().GetBool("no-keep-awake")
+		stop := keepAwake(!noKeepAwake, cmd.ErrOrStderr())
+		defer stop()
 		return runTunnel(cfg, client, wsName, readLocationOverrides(cmd), localPort, remotePort, cmd.ErrOrStderr())
 	},
 }
@@ -124,5 +127,6 @@ func runTunnel(cfg *config.Config, client *gcloud.Client, name string, override 
 func init() {
 	tunnelCmd.Flags().Int("local-port", 0, "Override local port (named or single-port targets only)")
 	addLocationOverrideFlags(tunnelCmd)
+	addKeepAwakeFlag(tunnelCmd)
 	rootCmd.AddCommand(tunnelCmd)
 }

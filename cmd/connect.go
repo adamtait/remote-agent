@@ -17,6 +17,9 @@ var connectCmd = &cobra.Command{
 		if len(args) == 1 {
 			name = args[0]
 		}
+		noKeepAwake, _ := cmd.Flags().GetBool("no-keep-awake")
+		stop := keepAwake(!noKeepAwake, cmd.ErrOrStderr())
+		defer stop()
 		return runConnect(cfg, client, name, readLocationOverrides(cmd), cmd.ErrOrStderr())
 	},
 }
@@ -34,5 +37,6 @@ func runConnect(cfg *config.Config, client *gcloud.Client, name string, override
 
 func init() {
 	addLocationOverrideFlags(connectCmd)
+	addKeepAwakeFlag(connectCmd)
 	rootCmd.AddCommand(connectCmd)
 }

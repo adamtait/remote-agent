@@ -13,3 +13,4 @@ table below.
 | [0001](0001-ra-tunnel-and-plugin-port-field.md) | `ra tunnel` and the plugin `port-for-tunnel:` field | Accepted | 2026-05-15 |
 | [0002](0002-claude-state-sync.md) | Per-user GCS bucket + per-workstation namespacing for `claude-sync` | Accepted | 2026-05-21 |
 | [0003](0003-ssh-keepalive-iap-idle-reap.md) | SSH keepalive to survive the Cloud Workstations IAP idle reap | Accepted | 2026-05-27 |
+| [0004](0004-keep-awake-on-connect.md) | Keep the local machine awake during `ra connect` / `ra tunnel` | Accepted | 2026-05-29 |

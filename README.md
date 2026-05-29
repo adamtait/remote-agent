@@ -65,7 +65,10 @@ Each targeted command accepts an optional name argument; otherwise the default w
 
 ## Troubleshooting
 
-**`ERROR: Connection to Cloud Workstation lost.`** — the Cloud Workstations IAP tunnel reaps idle SSH connections after ~30s. The workstation image bakes a server-side sshd keepalive (`ClientAliveInterval 15`) to keep the tunnel warm. If drops persist: rebuild the workstation (`ra create`) so the image picks up the current keepalive, and make sure no stale `~/.config/ra/Dockerfile` or `.ra/Dockerfile` override is shadowing the embedded one (`ra create` warns when it diverges). Full analysis: [ADR 0003](docs/adr/0003-ssh-keepalive-iap-idle-reap.md).
+**`ERROR: Connection to Cloud Workstation lost.`** — the Cloud Workstations IAP tunnel reaps a connection after ~30s with no traffic flowing in either direction. There are two distinct causes:
+
+- **The session goes idle (server-side mitigation).** The workstation image bakes a server-side sshd keepalive (`ClientAliveInterval 15`) that keeps a *connected* idle session warm indefinitely (verified to 12+ min). If drops still happen on a connected session: rebuild the workstation (`ra create`) so the image picks up the current keepalive, and make sure no stale `~/.config/ra/Dockerfile` or `.ra/Dockerfile` override is shadowing the embedded one (`ra create` warns when it diverges). Full analysis: [ADR 0003](docs/adr/0003-ssh-keepalive-iap-idle-reap.md).
+- **The laptop idle-sleeps while you're away (client-side mitigation).** gcloud's tunnel relay runs locally; when macOS idle-sleeps (you walk away, lid open), the relay freezes, no keepalives flow, and the backend reaps the tunnel — surfacing the same error on wake. The server keepalive can't help because the *client* stopped responding. `ra connect` / `ra tunnel` therefore hold a `caffeinate -i` idle-sleep assertion for the lifetime of the connection (macOS; on by default). Pass `--no-keep-awake` to opt out (e.g. to preserve battery). Closing the lid still sleeps the machine, but the workstation's persistent tmux session means reconnecting loses no work. Full analysis: [ADR 0004](docs/adr/0004-keep-awake-on-connect.md).
 
 
 ## Files
