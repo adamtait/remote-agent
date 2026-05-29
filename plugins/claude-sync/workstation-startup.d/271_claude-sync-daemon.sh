@@ -59,7 +59,7 @@ USER_HOME="/home/user"
 LOG_FILE="/var/log/ra-claude-sync.log"
 PID_FILE="/run/ra-claude-sync.pid"
 
-mkdir -p "$(dirname "${LOG_FILE}")"
+mkdir -p "$(dirname "${LOG_FILE}")" "$(dirname "${PID_FILE}")"
 exec >> "${LOG_FILE}" 2>&1
 
 # Record our PID so 271_*.sh can find and stop us idempotently on the
@@ -198,17 +198,26 @@ start_via_setsid() {
     # shell session that just `cat`ed the script).
     if [ -f "${PID_FILE}" ]; then
         old_pid="$(cat "${PID_FILE}" 2>/dev/null || true)"
-        if [ -n "${old_pid}" ] && [ "${old_pid}" -eq "${old_pid}" ] 2>/dev/null \
-            && kill -0 "${old_pid}" 2>/dev/null; then
-            echo "[claude-sync-daemon] stopping existing loop pid=${old_pid}"
-            kill "${old_pid}" 2>/dev/null || true
-            # Give the previous loop up to 5s to exit cleanly before SIGKILL.
-            for _ in 1 2 3 4 5; do
-                kill -0 "${old_pid}" 2>/dev/null || break
-                sleep 1
-            done
-            kill -9 "${old_pid}" 2>/dev/null || true
-        fi
+        # Validate before kill: empty, non-numeric, or dead-PID values
+        # all fall through to the harmless `rm -f` below. Matches the
+        # case-pattern style used elsewhere in this file (see INTERVAL
+        # validation in the loop body).
+        case "${old_pid}" in
+            ''|*[!0-9]*)
+                ;;
+            *)
+                if kill -0 "${old_pid}" 2>/dev/null; then
+                    echo "[claude-sync-daemon] stopping existing loop pid=${old_pid}"
+                    kill "${old_pid}" 2>/dev/null || true
+                    # Give the previous loop up to 5s to exit cleanly before SIGKILL.
+                    for _ in 1 2 3 4 5; do
+                        kill -0 "${old_pid}" 2>/dev/null || break
+                        sleep 1
+                    done
+                    kill -9 "${old_pid}" 2>/dev/null || true
+                fi
+                ;;
+        esac
         rm -f "${PID_FILE}"
     fi
 

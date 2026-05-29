@@ -57,11 +57,18 @@ Detect PID 1 in `271_*.sh` and pick the launch strategy at runtime:
 - otherwise → `setsid --fork "${LOOP_PATH}" </dev/null`, mirroring the
   marimo plugin's daemon-launch pattern (`plugins/marimo/workstation-startup.d/250_marimo-start.sh:75-79`).
 
-Idempotency in the fallback path: `pgrep -f ra-claude-sync-loop\.sh`
-detects an already-running loop and `pkill`s it before relaunch (with
-a 5s graceful-exit grace before SIGKILL). This matches marimo's
-`pgrep` guard pattern. Re-running 271 (or rebooting the workstation)
-picks up env changes from `ra create` without spawning duplicate loops.
+Idempotency in the fallback path: a pidfile at `/run/ra-claude-sync.pid`,
+which the loop writes (`echo $$ > "${PID_FILE}"`) as one of its first
+actions and clears via an `EXIT` trap. 271 reads that file and `kill
+<pid>`s the previous loop with a 5s SIGTERM grace before SIGKILL — no
+pattern matching, no risk of collateral kills. (The first draft used
+`pgrep -f`; see the "Pidfile-based idempotency" tradeoff below for why
+it was abandoned.) Re-running 271, or rebooting the workstation, picks
+up env changes from `ra create` without spawning duplicate loops.
+
+The pidfile lives in `/run` so it auto-clears on reboot — any leftover
+PID would refer to a vanished process anyway, and the `kill -0` liveness
+check before SIGTERM means a stale file is a no-op rather than an error.
 
 ### Tradeoffs
 
@@ -117,6 +124,34 @@ loop and spawns a second one. Acceptable because:
   (`pgrep -af ra-claude-sync-loop`).
 - Adding a `pgrep -fx` fallback would re-introduce a more bounded
   version of the same matches-calling-shell risk.
+
+**Launch race between 271 and the loop's first pidfile write.** If 271
+is invoked twice in rapid succession (millisecond gap), the second
+invocation reads no pidfile yet — the first loop hasn't run `echo $$ >
+"${PID_FILE}"` — and spawns a second loop. Last-writer-wins on the
+pidfile means future 271 runs will only see the most recent PID; the
+older loop becomes an untracked orphan. Unlikely in practice (271 is a
+boot-time script invoked once; manual re-runs are seconds apart, not
+milliseconds), and the operator can spot it via
+`pgrep -af ra-claude-sync-loop`. Closing the race would require
+flocking the pidfile path or a synchronous PID-capture wrapper around
+`setsid`; neither is worth the complexity for a corner that's near-
+impossible to hit non-deliberately.
+
+**Stale-pidfile + PID reuse.** If the loop is SIGKILL'd externally
+(skipping the EXIT trap), the pidfile is left behind. On reboot
+`/run` is cleared so the stale file vanishes; without a reboot, the
+next 271 run reads the stale PID, `kill -0`s it, and if the kernel
+has reused that PID for an unrelated process, 271 will SIGTERM the
+unrelated process. Generic pidfile concern; mitigating it requires a
+comm/cmdline cross-check that brings back the pgrep-pattern issues
+this design deliberately avoided. Accepted given:
+- The loop's EXIT trap fires on SIGTERM, SIGINT, and clean exit; only
+  SIGKILL (or kernel OOM kill) skips it.
+- PIDs on Linux range to 4 million by default; reuse within seconds
+  of a SIGKILL on a single-tenant workstation is unlikely.
+- The kill target is a single integer read from a root-only-writable
+  file, so the threat model is operator error, not adversarial.
 
 ### Verified live
 

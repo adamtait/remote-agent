@@ -85,7 +85,10 @@ The next `ra create` will:
   `systemctl status ra-claude-sync.service` reports "Failed to connect
   to bus" and is not the right diagnostic.
 - **Restart the loop**: re-run `/etc/workstation-startup.d/271_claude-sync-daemon.sh`
-  as root. It is idempotent — it `pkill`s the running loop and relaunches.
+  as root. It is idempotent — under the `setsid` path it sends SIGTERM
+  to the loop PID recorded in `/run/ra-claude-sync.pid` (5s grace before
+  SIGKILL) and then relaunches; under the systemd path it `systemctl
+  restart`s the unit.
 - **Manual push**: `/usr/local/bin/ra-claude-sync-loop.sh` (just run
   the loop body interactively — Ctrl-C to stop).
 - **Manual pull**: re-run `/etc/workstation-startup.d/270_claude-sync-pull.sh`
