@@ -58,7 +58,7 @@ type installMeta struct {
 	Repo        string `yaml:"repo,omitempty"`   // git URL or local path the plugin came from
 	Path        string `yaml:"path,omitempty"`   // subdirectory within Repo (empty = root)
 	Ref         string `yaml:"ref,omitempty"`    // git ref checked out, when specified
-	InstalledAt string `yaml:"installed_at"`     //
+	InstalledAt string `yaml:"installed_at"`     // RFC3339 install timestamp
 	Source      string `yaml:"source,omitempty"` // legacy; read-only for back-compat
 }
 
@@ -886,11 +886,16 @@ func dirExists(path string) bool {
 	return err == nil && fi.IsDir()
 }
 
-// copyDir recursively copies src directory to dst.
+// copyDir recursively copies src directory to dst. Git metadata (.git) is
+// skipped so cloned repositories don't drag their history into the installed
+// plugin (and, downstream, into the assembled docker build context).
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if info.IsDir() && info.Name() == ".git" {
+			return filepath.SkipDir
 		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {

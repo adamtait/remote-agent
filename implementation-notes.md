@@ -85,6 +85,17 @@ Items not in the original spec, or where I had to choose, are called out here.
   complete and correct (build + test + vet + gofmt; Go pinned via
   `go-version-file: go.mod`).
 
+### Code-review fixes (applied after /review)
+- **`copyDir` now skips `.git`.** A remote 1-arg whole-repo install previously
+  copied the cloned `.git` into the installed plugin (and thus into the docker
+  build context). Pre-existing, but the new feature made it obvious; fixed +
+  added `TestCopyDir_SkipsGitMetadata`.
+- Removed a dangling empty `//` comment on the `installMeta.InstalledAt` field.
+- Considered but **left as-is**: when `--ref` fails for a non-SHA reason
+  (typo/auth/network), the full-clone fallback surfaces the second error rather
+  than the branch-clone error. Acceptable — the SHA case is the common reason
+  and the code comment documents it.
+
 ## Follow-ups the user must do (outside this repo)
 - **Add `.github/workflows/ci.yml`** (present on disk, excluded from the PR due
   to missing `workflow` token scope — see deviation above).

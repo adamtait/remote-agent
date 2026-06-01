@@ -122,6 +122,31 @@ func TestResolvePluginSource_UnknownBareNameUnchanged(t *testing.T) {
 	}
 }
 
+func TestCopyDir_SkipsGitMetadata(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+	// A plugin file plus a .git dir that must not be copied.
+	if err := os.WriteFile(filepath.Join(src, "plugin.yaml"), []byte("name: x\n"), 0644); err != nil {
+		t.Fatalf("write plugin.yaml: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, ".git", "objects"), 0755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(src, ".git", "config"), []byte("[core]\n"), 0644); err != nil {
+		t.Fatalf("write .git/config: %v", err)
+	}
+
+	if err := copyDir(src, dst); err != nil {
+		t.Fatalf("copyDir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "plugin.yaml")); err != nil {
+		t.Errorf("plugin.yaml not copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, ".git")); !os.IsNotExist(err) {
+		t.Errorf(".git should not be copied; stat err = %v", err)
+	}
+}
+
 // ── resolvePluginDir tests ─────────────────────────────────────────────────────
 
 func TestResolvePluginDir_EmptySubpathReturnsRoot(t *testing.T) {
