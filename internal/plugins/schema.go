@@ -2,9 +2,9 @@ package plugins
 
 // PluginSchema is the parsed structure of a plugin.yaml file.
 type PluginSchema struct {
-	Name          string         `yaml:"name"`
-	Version       string         `yaml:"version"`
-	Description   string         `yaml:"description"`
+	Name        string `yaml:"name"`
+	Version     string `yaml:"version"`
+	Description string `yaml:"description"`
 	// PortForTunnel, when set, advertises the in-workstation TCP port the
 	// plugin listens on and serves as the default rendered into the
 	// `plugins.<name>.port-for-tunnel` config key at install time. The same

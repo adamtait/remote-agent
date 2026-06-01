@@ -59,12 +59,12 @@ func gcloudSubcmd(args []string) string {
 // what Run uses: stdout to terminal, stdin from terminal, Error-level
 // failure log with "gcloud failed" message.
 type execOpts struct {
-	op       string    // op name attached to every slog record (e.g. "gcloud.Run")
-	stdout   io.Writer // nil → os.Stdout
-	stdin    io.Reader // nil → os.Stdin
-	failLvl  slog.Level
-	failMsg  string
-	args     []string
+	op      string    // op name attached to every slog record (e.g. "gcloud.Run")
+	stdout  io.Writer // nil → os.Stdout
+	stdin   io.Reader // nil → os.Stdin
+	failLvl slog.Level
+	failMsg string
+	args    []string
 }
 
 // execAndLog runs gcloud with opts.args, mirroring stderr to the terminal

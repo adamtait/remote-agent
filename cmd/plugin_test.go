@@ -10,6 +10,7 @@ import (
 	"testing/fstest"
 
 	"github.com/adamtait/remote-agent/internal/plugins"
+	"gopkg.in/yaml.v3"
 )
 
 func TestPluginListCommand_Registered(t *testing.T) {
@@ -28,6 +29,24 @@ func TestPluginListCommand_Registered(t *testing.T) {
 	}
 	if !strings.Contains(help, "remove") {
 		t.Errorf("plugin --help missing 'remove': %s", help)
+	}
+}
+
+func TestPluginInstall_AcceptsOneOrTwoArgs(t *testing.T) {
+	cases := []struct {
+		args    []string
+		wantErr bool
+	}{
+		{[]string{}, true},
+		{[]string{"./my-plugin"}, false},
+		{[]string{"https://x/repo", "github"}, false},
+		{[]string{"a", "b", "c"}, true},
+	}
+	for _, tc := range cases {
+		err := pluginInstallCmd.Args(pluginInstallCmd, tc.args)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("Args(%v) err=%v, wantErr=%v", tc.args, err, tc.wantErr)
+		}
 	}
 }
 
@@ -100,6 +119,131 @@ func TestResolvePluginSource_UnknownBareNameUnchanged(t *testing.T) {
 	got := resolvePluginSource("custom")
 	if got != "custom" {
 		t.Errorf("resolvePluginSource(custom) = %q, want custom", got)
+	}
+}
+
+// ── resolvePluginDir tests ─────────────────────────────────────────────────────
+
+func TestResolvePluginDir_EmptySubpathReturnsRoot(t *testing.T) {
+	root := t.TempDir()
+	got, err := resolvePluginDir(root, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != root {
+		t.Errorf("got %q, want root %q", got, root)
+	}
+}
+
+func TestResolvePluginDir_Subpath(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "github")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	got, err := resolvePluginDir(root, "github")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != sub {
+		t.Errorf("got %q, want %q", got, sub)
+	}
+}
+
+func TestResolvePluginDir_NestedSubpath(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "tools", "claude")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	got, err := resolvePluginDir(root, "tools/claude")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != sub {
+		t.Errorf("got %q, want %q", got, sub)
+	}
+}
+
+func TestResolvePluginDir_EscapeRejected(t *testing.T) {
+	root := t.TempDir()
+	// Sibling dir outside root must not be reachable, even though it exists.
+	if err := os.MkdirAll(filepath.Join(filepath.Dir(root), "evil"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, bad := range []string{"../evil", "/etc", "github/../../evil"} {
+		if _, err := resolvePluginDir(root, bad); err == nil {
+			t.Errorf("resolvePluginDir(root, %q) = nil error, want escape/not-found error", bad)
+		}
+	}
+}
+
+func TestResolvePluginDir_MissingSubpath(t *testing.T) {
+	root := t.TempDir()
+	if _, err := resolvePluginDir(root, "does-not-exist"); err == nil {
+		t.Fatal("expected error for missing subpath, got nil")
+	}
+}
+
+// ── installMeta tests ──────────────────────────────────────────────────────────
+
+func TestInstallMeta_DisplaySource(t *testing.T) {
+	cases := []struct {
+		name string
+		meta installMeta
+		want string
+	}{
+		{"repo only", installMeta{Repo: "https://x/repo"}, "https://x/repo"},
+		{"repo+path", installMeta{Repo: "https://x/repo", Path: "github"}, "https://x/repo (github)"},
+		{"repo+path+ref", installMeta{Repo: "https://x/repo", Path: "github", Ref: "v1"}, "https://x/repo (github) @v1"},
+		{"repo+ref", installMeta{Repo: "https://x/repo", Ref: "main"}, "https://x/repo @main"},
+		{"legacy source", installMeta{Source: "https://x/old"}, "https://x/old"},
+		{"empty", installMeta{}, ""},
+	}
+	for _, tc := range cases {
+		if got := tc.meta.displaySource(); got != tc.want {
+			t.Errorf("%s: displaySource() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestInstallMeta_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	want := installMeta{
+		Repo:        "https://github.com/owner/ra-plugins",
+		Path:        "github",
+		Ref:         "v1.2.0",
+		InstalledAt: "2026-06-01T00:00:00Z",
+	}
+	data, err := yaml.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ra-install.yaml"), data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := readInstallMeta(dir)
+	if got.Repo != want.Repo || got.Path != want.Path || got.Ref != want.Ref || got.InstalledAt != want.InstalledAt {
+		t.Errorf("round-trip mismatch: got %+v, want %+v", got, want)
+	}
+	// Legacy "source" field should not be emitted for new installs.
+	if strings.Contains(string(data), "source:") {
+		t.Errorf("new install meta should not write a 'source' field; yaml:\n%s", data)
+	}
+}
+
+func TestReadInstallMeta_LegacySourceOnly(t *testing.T) {
+	dir := t.TempDir()
+	legacy := "source: https://github.com/owner/old-plugin\ninstalled_at: 2026-01-01T00:00:00Z\n"
+	if err := os.WriteFile(filepath.Join(dir, ".ra-install.yaml"), []byte(legacy), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := readInstallMeta(dir)
+	if got.Source != "https://github.com/owner/old-plugin" {
+		t.Errorf("legacy Source not parsed: got %+v", got)
+	}
+	if got.displaySource() != "https://github.com/owner/old-plugin" {
+		t.Errorf("legacy displaySource() = %q", got.displaySource())
 	}
 }
 

@@ -33,7 +33,7 @@ func (l *levelRecorder) Handle(_ context.Context, r slog.Record) error {
 	return nil
 }
 func (l *levelRecorder) WithAttrs(_ []slog.Attr) slog.Handler { return l }
-func (l *levelRecorder) WithGroup(_ string) slog.Handler     { return l }
+func (l *levelRecorder) WithGroup(_ string) slog.Handler      { return l }
 
 func (l *levelRecorder) hasLevel(want slog.Level) bool {
 	l.mu.Lock()

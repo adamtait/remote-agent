@@ -190,4 +190,3 @@ func TestMerge_GcloudProject_UserDefaultProjectOverride(t *testing.T) {
 		t.Errorf("gcloud.project override lost: %+v", cfg)
 	}
 }
-

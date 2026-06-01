@@ -19,7 +19,7 @@ func MergePluginConfig(
 	original string,
 	pluginName string,
 	pluginCfg map[string]any,
-	secretNames map[string]string,   // logical name → GCP secret name
+	secretNames map[string]string, // logical name → GCP secret name
 	secretEnvVars map[string]string, // logical name → env var name
 ) (string, error) {
 	// Parse original document (or start from empty mapping).
@@ -88,7 +88,7 @@ func MergePluginConfig(
 // config file than the plugin config.
 func MergeSecretEntries(
 	original string,
-	secretNames map[string]string,   // logical name → GCP secret name
+	secretNames map[string]string, // logical name → GCP secret name
 	secretEnvVars map[string]string, // logical name → env var name
 ) (string, error) {
 	var root yaml.Node

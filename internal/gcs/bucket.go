@@ -57,8 +57,10 @@ func userEmailHash(email string) string {
 
 // ResolveBucketName expands the BucketSpec.NameTemplate placeholders
 // against the active gcloud project and git user email. Supported:
-//   {project_id}       — the gcloud project ID, as-is
-//   {user_email_hash}  — 8-hex-char prefix of sha1(lower(trim(email)))
+//
+//	{project_id}       — the gcloud project ID, as-is
+//	{user_email_hash}  — 8-hex-char prefix of sha1(lower(trim(email)))
+//
 // Unknown placeholders (anything matching `{...}` we don't recognize)
 // surface as an error so a typo doesn't silently produce a bucket
 // named with a literal `{wrong_placeholder}` substring.

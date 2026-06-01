@@ -28,6 +28,7 @@ func init() {
 	pluginInstallCmd.Flags().BoolVar(&pluginInstallUser, "user", false, "Install into ~/.config/ra/plugins/ (user level)")
 	pluginInstallCmd.Flags().BoolVar(&pluginInstallLocal, "local", false, "Install into .ra/plugins/ (project level)")
 	pluginInstallCmd.Flags().BoolVar(&pluginInstallForce, "force", false, "Overwrite existing plugin of the same name")
+	pluginInstallCmd.Flags().StringVar(&pluginInstallRef, "ref", "", "Git ref (branch, tag, or commit) to install from a remote repo")
 	pluginCmd.AddCommand(pluginInstallCmd)
 	pluginCmd.AddCommand(pluginListCmd)
 	pluginCmd.AddCommand(pluginRemoveCmd)
@@ -45,22 +46,74 @@ var pluginCmd = &cobra.Command{
 var pluginInstallUser bool
 var pluginInstallLocal bool
 var pluginInstallForce bool
+var pluginInstallRef string
 
 // installMeta is the structure written/read from .ra-install.yaml inside a
 // plugin's installed directory.
+//
+// New installs populate Repo/Path/Ref. The legacy Source field is retained for
+// reading .ra-install.yaml files written by older ra versions (single flat
+// source string, no subpath); it is no longer written.
 type installMeta struct {
-	Source      string `yaml:"source"`
-	InstalledAt string `yaml:"installed_at"`
+	Repo        string `yaml:"repo,omitempty"`   // git URL or local path the plugin came from
+	Path        string `yaml:"path,omitempty"`   // subdirectory within Repo (empty = root)
+	Ref         string `yaml:"ref,omitempty"`    // git ref checked out, when specified
+	InstalledAt string `yaml:"installed_at"`     //
+	Source      string `yaml:"source,omitempty"` // legacy; read-only for back-compat
+}
+
+// displaySource renders a human-readable source for `ra plugin list`. It prefers
+// the new Repo/Path/Ref fields and falls back to the legacy Source field.
+func (m installMeta) displaySource() string {
+	if m.Repo == "" {
+		return m.Source
+	}
+	s := m.Repo
+	if m.Path != "" {
+		s += " (" + m.Path + ")"
+	}
+	if m.Ref != "" {
+		s += " @" + m.Ref
+	}
+	return s
 }
 
 var pluginInstallCmd = &cobra.Command{
-	Use:   "install <source>",
+	Use:   "install <source> [<plugin-path>]",
 	Short: "Install a plugin from a git repository or local path",
-	Args:  cobra.ExactArgs(1),
+	Long: `Install a plugin from a git repository or local path.
+
+Single-argument form installs from a path or repo whose root contains
+plugin.yaml:
+
+  ra plugin install ./my-plugin
+  ra plugin install https://github.com/owner/my-plugin
+
+Two-argument form installs one plugin from a subdirectory of a repo (or local
+directory) that holds several plugins — useful for a plugins monorepo:
+
+  ra plugin install https://github.com/owner/ra-plugins github
+  ra plugin install https://github.com/owner/ra-plugins claude --ref v1.2.0`,
+	Args: cobra.RangeArgs(1, 2),
 	// No PersistentPreRunE override → inherits pluginCmd.PersistentPreRunE
 	// which loads cfg (logging and runner are not initialized for plugin subcommands).
 	RunE: func(cmd *cobra.Command, args []string) error {
-		source := resolvePluginSource(args[0])
+		// Parse args. With two args the first is the repo/dir and the second is
+		// the subpath to the plugin within it; with one arg a bare name may
+		// resolve to a local plugins/<name> dir (see resolvePluginSource).
+		var source, subpath string
+		if len(args) == 2 {
+			source = args[0]
+			subpath = args[1]
+		} else {
+			source = resolvePluginSource(args[0])
+		}
+		ref := pluginInstallRef
+		local := isLocalPath(source)
+		if ref != "" && local {
+			fmt.Fprintln(cmd.ErrOrStderr(), "--ref is ignored for local-path installs")
+			ref = ""
+		}
 
 		// ── 1. acquire plugin into a temp dir ─────────────────────────────
 		tmp, err := os.MkdirTemp("", "ra-plugin-*")
@@ -69,7 +122,7 @@ var pluginInstallCmd = &cobra.Command{
 		}
 		defer os.RemoveAll(tmp)
 
-		if isLocalPath(source) {
+		if local {
 			// Local filesystem — copy into tmp so the rest of the flow is uniform.
 			abs, err := filepath.Abs(source)
 			if err != nil {
@@ -80,20 +133,20 @@ var pluginInstallCmd = &cobra.Command{
 			}
 		} else {
 			// Remote git URL.
-			logging.L().Debug("git clone starting", "source", source)
-			clone := exec.Command("git", "clone", "--depth=1", source, tmp)
-			clone.Stdout = os.Stdout
-			clone.Stderr = os.Stderr
-			if err := clone.Run(); err != nil {
-				logging.L().Debug("git clone failed", "source", source, "error", err.Error())
-				return fmt.Errorf("git clone: %w", err)
-			} else {
-				logging.L().Debug("git clone ok", "source", source)
+			if err := cloneRepo(source, ref, tmp); err != nil {
+				return err
 			}
 		}
 
+		// Rebase onto the requested subdirectory (if any) before reading the
+		// plugin so a single repo can host many plugins.
+		pluginDir, err := resolvePluginDir(tmp, subpath)
+		if err != nil {
+			return err
+		}
+
 		// ── 2. parse plugin.yaml ───────────────────────────────────────────
-		p, err := plugins.LoadPlugin(os.DirFS(tmp))
+		p, err := plugins.LoadPlugin(os.DirFS(pluginDir))
 		if err != nil {
 			return fmt.Errorf("reading plugin.yaml: %w", err)
 		}
@@ -126,7 +179,7 @@ var pluginInstallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := copyDir(tmp, dest); err != nil {
+		if err := copyDir(pluginDir, dest); err != nil {
 			return fmt.Errorf("installing plugin: %w", err)
 		}
 
@@ -197,7 +250,9 @@ var pluginInstallCmd = &cobra.Command{
 
 		// ── 8. write .ra-install.yaml ─────────────────────────────────────
 		meta := installMeta{
-			Source:      source,
+			Repo:        source,
+			Path:        subpath,
+			Ref:         ref,
 			InstalledAt: time.Now().UTC().Format(time.RFC3339),
 		}
 		metaBytes, err := yaml.Marshal(meta)
@@ -261,7 +316,7 @@ var pluginListCmd = &cobra.Command{
 			e := listEntry{
 				Name:        p.Name(),
 				Level:       "user",
-				Source:      meta.Source,
+				Source:      meta.displaySource(),
 				Description: p.Schema().Description,
 				Shadowed:    projNames[p.Name()],
 			}
@@ -272,7 +327,7 @@ var pluginListCmd = &cobra.Command{
 			entries = append(entries, listEntry{
 				Name:        p.Name(),
 				Level:       "project",
-				Source:      meta.Source,
+				Source:      meta.displaySource(),
 				Description: p.Schema().Description,
 			})
 		}
@@ -481,6 +536,86 @@ func resolvePluginSource(source string) string {
 		return localPlugin
 	}
 	return source
+}
+
+// resolvePluginDir returns the directory within an acquired tree (root) that
+// holds the plugin's plugin.yaml. subpath selects a subdirectory; an empty
+// subpath means the plugin lives at the root. It rejects subpaths that escape
+// root (e.g. via "..").
+func resolvePluginDir(root, subpath string) (string, error) {
+	if subpath == "" {
+		return root, nil
+	}
+	// Clean as if absolute so leading "/" or ".." cannot escape root, then strip
+	// the leading separator before joining.
+	clean := strings.TrimPrefix(filepath.Clean(string(filepath.Separator)+subpath), string(filepath.Separator))
+	pluginDir := filepath.Join(root, clean)
+	rel, err := filepath.Rel(root, pluginDir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("plugin path %q escapes the repository root", subpath)
+	}
+	if fi, err := os.Stat(pluginDir); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("plugin path %q not found in source", subpath)
+	}
+	return pluginDir, nil
+}
+
+// cloneRepo clones source into dest (an existing empty dir). When ref is empty
+// it shallow-clones the default branch. When ref is a branch or tag a shallow
+// clone of that ref is attempted first; if that fails (e.g. ref is a commit
+// SHA, which --branch rejects) it falls back to a full clone + checkout.
+func cloneRepo(source, ref, dest string) error {
+	logging.L().Debug("git clone starting", "source", source, "ref", ref)
+	if ref == "" {
+		if err := runGit("", "clone", "--depth=1", source, dest); err != nil {
+			logging.L().Debug("git clone failed", "source", source, "error", err.Error())
+			return fmt.Errorf("git clone: %w", err)
+		}
+		logging.L().Debug("git clone ok", "source", source)
+		return nil
+	}
+	if err := runGit("", "clone", "--depth=1", "--branch", ref, source, dest); err == nil {
+		logging.L().Debug("git clone ok", "source", source, "ref", ref)
+		return nil
+	}
+	// Fall back to a full clone + checkout to support commit SHAs and refs that
+	// --branch does not accept. Clear anything the failed attempt left behind.
+	logging.L().Debug("git clone --branch failed; retrying full clone", "source", source, "ref", ref)
+	if err := clearDir(dest); err != nil {
+		return fmt.Errorf("preparing clone dir: %w", err)
+	}
+	if err := runGit("", "clone", source, dest); err != nil {
+		return fmt.Errorf("git clone: %w", err)
+	}
+	if err := runGit(dest, "checkout", ref); err != nil {
+		return fmt.Errorf("git checkout %s: %w", ref, err)
+	}
+	logging.L().Debug("git clone ok", "source", source, "ref", ref)
+	return nil
+}
+
+// runGit runs a git subcommand, optionally inside dir, wiring stdout/stderr
+// through to the process.
+func runGit(dir string, args ...string) error {
+	c := exec.Command("git", args...)
+	c.Dir = dir
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
+}
+
+// clearDir removes all entries inside dir without removing dir itself.
+func clearDir(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func preparePluginDestination(destBase, name string, force bool) (string, error) {

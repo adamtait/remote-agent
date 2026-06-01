@@ -47,16 +47,16 @@ func TestNewSessionID_Format(t *testing.T) {
 // bufHandler is a minimal slog.Handler that records whether Handle was called
 // and captures output via a TextHandler on a bytes.Buffer.
 type bufHandler struct {
-	buf     *bytes.Buffer
-	inner   slog.Handler
+	buf      *bytes.Buffer
+	inner    slog.Handler
 	minLevel slog.Level
 }
 
 func newBufHandler(level slog.Level) *bufHandler {
 	buf := &bytes.Buffer{}
 	return &bufHandler{
-		buf:     buf,
-		inner:   slog.NewTextHandler(buf, &slog.HandlerOptions{Level: level}),
+		buf:      buf,
+		inner:    slog.NewTextHandler(buf, &slog.HandlerOptions{Level: level}),
 		minLevel: level,
 	}
 }

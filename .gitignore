@@ -1,6 +1,9 @@
 .env
 .worktrees/
 ra
+
+# Claude Code machine-specific local settings (keep shared .claude/settings.json)
+.claude/settings.local.json
 .ra/**/*
 !.ra/profile.d/
 !.ra/profile.d/*.sh

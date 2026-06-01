@@ -2,7 +2,7 @@
 
 `ra` is a simple CLI tool for moving CLI coding agents to the cloud. It's built on the rock-solid Google Cloud Workstations to keep your agents safely contained in a work-friendly environment.
 
-`ra` is a Go CLI that provisions a browser-accessible Google Cloud Workstation with the development tooling of your choice, plus a GitHub repo cloned and ready to go. Tooling is plugin-based: `ra` itself ships with no built-in plugins; you add Claude Code, GitHub-specific helpers, or any other integration via `ra plugin install`.
+`ra` is a Go CLI that provisions a browser-accessible Google Cloud Workstation with the development tooling of your choice, plus a GitHub repo cloned and ready to go. Tooling is plugin-based: `ra` itself ships with no built-in plugins; you add Claude Code, GitHub-specific helpers, or any other integration via `ra plugin install`. Plugins live in their own repositories — see [`ra-plugins`](https://github.com/adamtait/ra-plugins) for the maintained set (Claude Code, GitHub, AWS, and more).
 
 
 
@@ -33,9 +33,13 @@ auth flows) lives in the relevant plugin.
 ```bash
 make install                                 # installs ra to ~/.local/bin
 ra setup                                     # writes config.yaml + core assets
-ra plugin install ./plugins/github --user    # installs gh CLI + PAT credential helper,
+
+# Plugins live in the ra-plugins repo; install a plugin by repo + subdirectory:
+ra plugin install https://github.com/adamtait/ra-plugins github --user
+                                             #   installs gh CLI + PAT credential helper,
                                              #   prompts for repo_urls and PAT
-ra plugin install ./plugins/claude --user    # install the in-tree claude plugin
+ra plugin install https://github.com/adamtait/ra-plugins claude --user
+                                             #   installs the claude plugin
 ra create                                    # provisions the workstation
 ```
 
@@ -73,7 +77,7 @@ Each targeted command accepts an optional name argument; otherwise the default w
 - `main.go` / `cmd/` / `internal/` — `ra` CLI (idempotent provisioning)
 - `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
 - `internal/scaffold/assets/` — embedded core build assets (Dockerfile, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`)
-- `plugins/claude/`, `plugins/github/` — in-tree homes of the Claude Code and GitHub plugins (each will move to its own repo in a follow-up changeset)
+- [`ra-plugins`](https://github.com/adamtait/ra-plugins) — the maintained plugins (Claude Code, GitHub, AWS, …), each in its own subdirectory; installed via `ra plugin install <repo> <name>`
 - `~/.config/ra/` — your user-global ra config + materialized core assets + installed plugins
 - `.ra/` — project-local ra config + (optional) overrides + installed plugins
 - `docs/adr/` — architecture decision records ([index](docs/adr/README.md))
@@ -82,15 +86,25 @@ Each targeted command accepts an optional name argument; otherwise the default w
 ## `ra plugin` reference
 
 ```bash
-ra plugin install <git-url-or-path>          # interactive: choose user/project
-ra plugin install <source> --user            # force user-level
-ra plugin install <source> --local           # force project-level
-ra plugin install <source> --force           # overwrite existing at chosen level
+ra plugin install <git-url-or-path>          # plugin.yaml at the repo/dir root
+ra plugin install <git-url-or-path> <name>   # plugin in subdirectory <name> of a repo/dir
+ra plugin install <source> [<name>] --ref X  # install from git ref X (branch/tag/commit)
+ra plugin install <source> [<name>] --user   # force user-level
+ra plugin install <source> [<name>] --local  # force project-level
+ra plugin install <source> [<name>] --force  # overwrite existing at chosen level
 
 ra plugin list                               # show installed plugins, level, source
 ra plugin remove <name>                      # remove a plugin + its config + secret entries
                                              #   (GCP Secret Manager values are NOT auto-deleted;
                                              #    `ra plugin remove` prints the gcloud commands)
+```
+
+The two-argument form is how you install one plugin out of a multi-plugin repo
+like [`ra-plugins`](https://github.com/adamtait/ra-plugins):
+
+```bash
+ra plugin install https://github.com/adamtait/ra-plugins github
+ra plugin install https://github.com/adamtait/ra-plugins claude --ref v1.2.0
 ```
 
 ## Creating Plugins
@@ -219,7 +233,7 @@ chown user:user "${FIRST_BOOT_MARKER}"
 ### Installing and testing locally
 
 ```bash
-ra plugin install ./plugins/my-plugin --user   # install from local path
+ra plugin install ./my-plugin --user            # install from local path
 ra plugin list                                  # confirm installed
 ra create                                       # rebuild image + reprovision
 
@@ -237,10 +251,10 @@ sudo bash /etc/workstation-startup.d/250_my-plugin-setup.sh
 
 All rotations happen via Secret Manager — no need to re-run `ra create`.
 
-For plugins with command-generated credentials, re-run the plugin install command to capture and upload a new secret version:
+For plugins with command-generated credentials, re-run the plugin install command (same source you installed from) to capture and upload a new secret version:
 
 ```bash
-ra plugin install codex --force
+ra plugin install https://github.com/adamtait/ra-plugins codex --force
 ```
 
 ```bash
@@ -274,3 +288,13 @@ At every workstation boot:
 The workstation config carries zero secret values — only secret names and non-sensitive metadata. Anyone with `workstations.configs.get` can read the config and learn *which* secrets are in use, but cannot read the secret values themselves; that requires `secretmanager.secretAccessor`, granted only to the workstation's service account.
 
 To audit credential access, look at Secret Manager's data access audit logs — every fetch (boot-time, per-operation, periodic) appears there.
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+build/test instructions and project conventions, and [SECURITY.md](SECURITY.md)
+to report a vulnerability.
+
+## License
+
+[MIT](LICENSE) © Adam Tait
