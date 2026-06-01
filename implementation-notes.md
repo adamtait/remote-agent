@@ -77,7 +77,17 @@ Items not in the original spec, or where I had to choose, are called out here.
   documents the two-arg + `--ref` forms), the Files section, and the rotation
   example all point at the `ra-plugins` repo / repo+subpath syntax.
 
+### Deviation — CI workflow could not be pushed
+- `git push` was rejected: the auth token lacks the GitHub `workflow` scope, so
+  it cannot create `.github/workflows/ci.yml`. The file is written and ready on
+  disk but is **left untracked / not in the PR**. Add it via the GitHub web UI
+  or push it with a token that has `workflow` scope. The CI config itself is
+  complete and correct (build + test + vet + gofmt; Go pinned via
+  `go-version-file: go.mod`).
+
 ## Follow-ups the user must do (outside this repo)
+- **Add `.github/workflows/ci.yml`** (present on disk, excluded from the PR due
+  to missing `workflow` token scope — see deviation above).
 - Create `github.com/adamtait/ra-plugins`, populate it with the 11 plugins (each
   in its own subdir), and push. Until then, the README install examples point at
   a repo that does not yet exist.
