@@ -135,4 +135,3 @@ func TestLoadProjectConfig_Missing_ReturnsError(t *testing.T) {
 		t.Fatal("expected error for missing project config, got nil")
 	}
 }
-

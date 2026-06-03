@@ -613,8 +613,29 @@ config:
 	}
 }
 
-func TestCodexPluginOAuthSecretUsesValueCommand(t *testing.T) {
-	p, err := LoadPlugin(os.DirFS(filepath.Join("..", "..", "plugins", "codex")))
+// TestLoadPlugin_OAuthSecretValueCommand_FileBase64 exercises LoadPlugin's
+// parsing of an auth-provider secret that captures its value from a local
+// command writing a file (output: file_base64, validate: json, interactive).
+// It uses an in-memory plugin.yaml rather than a real plugin so the test does
+// not depend on any plugin shipping in-tree.
+func TestLoadPlugin_OAuthSecretValueCommand_FileBase64(t *testing.T) {
+	raw := `name: example
+auth_providers:
+  - name: oauth
+    description: "OAuth login"
+    secrets:
+      - name: example_auth_json
+        env_var: EXAMPLE_AUTH_JSON
+        description: "OAuth credentials captured from the CLI"
+        value_command:
+          command: example-cli
+          args: ["login"]
+          output: file_base64
+          path: "~/.example/auth.json"
+          validate: json
+          interactive: true
+`
+	p, err := LoadPlugin(fstest.MapFS{"plugin.yaml": &fstest.MapFile{Data: []byte(raw)}})
 	if err != nil {
 		t.Fatalf("LoadPlugin: %v", err)
 	}
@@ -624,25 +645,25 @@ func TestCodexPluginOAuthSecretUsesValueCommand(t *testing.T) {
 			continue
 		}
 		for i := range provider.Secrets {
-			if provider.Secrets[i].Name == "codex_auth_json" {
+			if provider.Secrets[i].Name == "example_auth_json" {
 				secret = &provider.Secrets[i]
 				break
 			}
 		}
 	}
 	if secret == nil {
-		t.Fatal("codex oauth secret codex_auth_json not found")
+		t.Fatal("oauth secret example_auth_json not found")
 	}
 	if secret.ValueCommand == nil {
-		t.Fatal("codex oauth secret missing value_command")
+		t.Fatal("oauth secret missing value_command")
 	}
-	if secret.ValueCommand.Command != "codex" {
-		t.Errorf("command = %q, want codex", secret.ValueCommand.Command)
+	if secret.ValueCommand.Command != "example-cli" {
+		t.Errorf("command = %q, want example-cli", secret.ValueCommand.Command)
 	}
 	if len(secret.ValueCommand.Args) != 1 || secret.ValueCommand.Args[0] != "login" {
 		t.Errorf("args = %+v, want [login]", secret.ValueCommand.Args)
 	}
-	if secret.ValueCommand.Output != "file_base64" || secret.ValueCommand.Path != "~/.codex/auth.json" {
+	if secret.ValueCommand.Output != "file_base64" || secret.ValueCommand.Path != "~/.example/auth.json" {
 		t.Errorf("unexpected value command file settings: %+v", secret.ValueCommand)
 	}
 	if secret.ValueCommand.Validate != "json" || !secret.ValueCommand.Interactive {

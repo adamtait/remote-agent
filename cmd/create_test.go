@@ -481,7 +481,7 @@ func TestBuildContainerEnv_InjectsPluginBucketsAndPropagates(t *testing.T) {
 	withRegistry(t, testBucketPluginYAML)
 	sleep := 2
 	cfg := &config.Config{
-		Git:    config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
+		Git: config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
 		Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{
 			Region: "us-central1", MachineType: "e2-standard-4", DiskSizeGB: 50,
 			ClusterName: "c", ConfigName: "cf", ServiceAccountName: "sa",

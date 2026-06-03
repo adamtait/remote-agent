@@ -9,7 +9,7 @@ import (
 )
 
 func TestValidateProjectID(t *testing.T) {
-	valid30 := "a" + strings.Repeat("b", 28) + "c" // 30 chars
+	valid30 := "a" + strings.Repeat("b", 28) + "c"   // 30 chars
 	invalid31 := "a" + strings.Repeat("b", 29) + "c" // 31 chars
 
 	cases := []struct {
