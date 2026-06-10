@@ -5,10 +5,21 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/spf13/cobra"
+)
+
+// waitRunningTimeout/waitRunningInterval bound how long ensureRunning polls for
+// a workstation to reach STATE_RUNNING. Cloud Workstations cold starts (image
+// pull + startup scripts) routinely take 1-2 min, so 5 min is generous while
+// still failing a genuinely stuck start in bounded time. Package-level so tests
+// can shrink them.
+var (
+	waitRunningTimeout  = 5 * time.Minute
+	waitRunningInterval = 5 * time.Second
 )
 
 // addLocationOverrideFlags registers --project/--cluster/--config on a command.
@@ -173,20 +184,55 @@ func pickStr(override, fallback string) string {
 	return fallback
 }
 
-// ensureRunning describes the workstation referenced by ref and, if it isn't
-// already running or starting, calls Start. Used by `ra connect` and
-// `ra tunnel` to provide the same auto-start UX.
+// ensureRunning describes the workstation referenced by ref and ensures it is
+// fully RUNNING before returning. If it is stopped it calls Start; if it is
+// starting (or was just started) it waits, polling until the state reaches
+// STATE_RUNNING. Used by `ra connect` and `ra tunnel`.
+//
+// Returning while the workstation is merely STARTING is the cause of the
+// "[SSL: UNEXPECTED_EOF_WHILE_READING]" failures callers used to hit: the SSH
+// tunnel would race ahead of the not-yet-ready backend. Blocking here until
+// RUNNING is what makes the subsequent connect reliable.
 func ensureRunning(client *gcloud.Client, ref gcloud.WorkstationRef, errOut io.Writer) error {
 	info, err := client.Describe(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
 	if err != nil {
 		return fmt.Errorf("describing workstation: %w", err)
 	}
-	if info.State == "STATE_RUNNING" || info.State == "STATE_STARTING" {
+	switch info.State {
+	case "STATE_RUNNING":
 		return nil
+	case "STATE_STARTING":
+		fmt.Fprintf(errOut, "Workstation %q is starting; waiting until it's ready...\n", ref.Name)
+	default:
+		fmt.Fprintf(errOut, "Workstation %q is %s; starting...\n", ref.Name, strings.TrimPrefix(info.State, "STATE_"))
+		if err := client.Start(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name); err != nil {
+			return fmt.Errorf("starting workstation: %w", err)
+		}
 	}
-	fmt.Fprintf(errOut, "Workstation %q is %s; starting...\n", ref.Name, strings.TrimPrefix(info.State, "STATE_"))
-	if err := client.Start(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name); err != nil {
-		return fmt.Errorf("starting workstation: %w", err)
+	return waitUntilRunning(client, ref, errOut)
+}
+
+// waitUntilRunning polls Describe until the workstation reaches STATE_RUNNING,
+// giving up after waitRunningTimeout. A workstation that ends up STOPPED again
+// (a failed start) is reported as a terminal error rather than waited on.
+func waitUntilRunning(client *gcloud.Client, ref gcloud.WorkstationRef, errOut io.Writer) error {
+	deadline := time.Now().Add(waitRunningTimeout)
+	for {
+		info, err := client.Describe(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
+		if err != nil {
+			return fmt.Errorf("describing workstation: %w", err)
+		}
+		switch info.State {
+		case "STATE_RUNNING":
+			return nil
+		case "STATE_STOPPED", "STATE_STOPPING":
+			return fmt.Errorf("workstation %q entered state %s while waiting for it to start",
+				ref.Name, strings.TrimPrefix(info.State, "STATE_"))
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("workstation %q did not reach RUNNING within %s (last state: %s)",
+				ref.Name, waitRunningTimeout, strings.TrimPrefix(info.State, "STATE_"))
+		}
+		time.Sleep(waitRunningInterval)
 	}
-	return nil
 }

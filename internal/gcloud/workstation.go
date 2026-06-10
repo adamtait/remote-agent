@@ -3,8 +3,19 @@ package gcloud
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"time"
+)
+
+// sshConnectAttempts/sshConnectDelay bound the retry on a transient
+// connection drop right after the workstation reports RUNNING but before its
+// sshd accepts connections. ~6 tries × 5s ≈ 30s of slack, which comfortably
+// covers the observed gap. Package-level so tests can shrink the delay.
+var (
+	sshConnectAttempts = 6
+	sshConnectDelay    = 5 * time.Second
 )
 
 // WorkstationRef fully identifies a workstation across projects/regions/configs.
@@ -218,8 +229,13 @@ func (c *Client) Delete(project, region, cluster, cfgName, name string) error {
 // hard-codes the client-side "-o ServerAliveInterval=0" ahead of any
 // --ssh-flag we pass, and ssh honors the first value, so a client-side
 // keepalive flag would be silently ignored. See the Dockerfile.
+// It retries a few times on a transient connection drop (see connDropRe):
+// gcloud's workstations API can report RUNNING a few seconds before the
+// in-container sshd starts accepting connections, and the first tunnel attempt
+// in that window fails with "[SSL: UNEXPECTED_EOF_WHILE_READING]". A clean
+// session that exits non-zero is not retried.
 func (c *Client) SSH(project, region, cluster, cfgName, name string) error {
-	return c.runner.Run(
+	return RetryOnConnDrop(c.runner, sshConnectAttempts, sshConnectDelay, os.Stderr,
 		"workstations", "ssh", name,
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,

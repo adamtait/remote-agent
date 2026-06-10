@@ -100,3 +100,39 @@ func TestRetryOnSANotFound_FirstAttemptSucceeds(t *testing.T) {
 		t.Errorf("expected no propagation notice on first-try success, got %q", notice.String())
 	}
 }
+
+func TestRetryOnConnDrop_RetriesPastTheSSLEOF(t *testing.T) {
+	transient := errors.New("exit status 1")
+	// The exact symptom reported for `ra connect` against a freshly-started
+	// workstation, followed by a clean connect once sshd is up.
+	r := &retryFakeRunner{results: []retryResult{
+		{stderr: "ERROR: Error connecting to workstation: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1081)", err: transient},
+		{stderr: "kex_exchange_identification: Connection closed by remote host", err: transient},
+		{stderr: "", err: nil},
+	}}
+	notice := new(bytes.Buffer)
+	if err := RetryOnConnDrop(r, 6, 1*time.Millisecond, notice, "workstations", "ssh"); err != nil {
+		t.Fatalf("expected success after retries, got %v", err)
+	}
+	if r.calls != 3 {
+		t.Errorf("expected 3 calls, got %d", r.calls)
+	}
+	if !strings.Contains(notice.String(), "not accepting connections yet") {
+		t.Errorf("expected a retry notice, got %q", notice.String())
+	}
+}
+
+func TestRetryOnConnDrop_DoesNotRetryCleanFailure(t *testing.T) {
+	// A non-zero exit that is NOT a connection drop (e.g. the user's remote
+	// command failed, or an auth error) must surface immediately.
+	r := &retryFakeRunner{results: []retryResult{
+		{stderr: "ERROR: PERMISSION_DENIED: caller lacks workstations.workstations.use", err: errors.New("exit status 1")},
+		{stderr: "", err: nil}, // never reached
+	}}
+	if err := RetryOnConnDrop(r, 6, 1*time.Millisecond, nil, "workstations", "ssh"); err == nil {
+		t.Fatal("expected the error to bubble up unchanged")
+	}
+	if r.calls != 1 {
+		t.Errorf("expected exactly 1 call (no retry on unrelated failure), got %d", r.calls)
+	}
+}

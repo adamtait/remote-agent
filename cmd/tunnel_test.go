@@ -212,12 +212,17 @@ func TestRunTunnel_Running_CallsStartTCPTunnel(t *testing.T) {
 }
 
 func TestRunTunnel_Stopped_StartsFirst(t *testing.T) {
+	zeroPollInterval(t)
 	runner := &testRunner{
 		checks: map[string]bool{
 			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
 		},
-		outputs: map[string][]byte{
-			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_STOPPED\t\n"),
+		// STOPPED initially, then RUNNING once the wait loop polls after Start.
+		outputSeq: map[string][][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": {
+				[]byte("p-user\tSTATE_STOPPED\t\n"),
+				[]byte("p-user\tSTATE_RUNNING\thost\n"),
+			},
 		},
 	}
 	client := gcloud.NewClient(runner)

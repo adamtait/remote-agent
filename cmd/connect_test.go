@@ -59,13 +59,28 @@ func TestRunConnect_Running_SkipsStart(t *testing.T) {
 	}
 }
 
+// zeroPollInterval makes ensureRunning's wait loop spin without sleeping, so
+// state-transition tests finish instantly. Restored after the test.
+func zeroPollInterval(t *testing.T) {
+	t.Helper()
+	prev := waitRunningInterval
+	waitRunningInterval = 0
+	t.Cleanup(func() { waitRunningInterval = prev })
+}
+
 func TestRunConnect_Stopped_StartsThenSSH(t *testing.T) {
+	zeroPollInterval(t)
 	runner := &testRunner{
 		checks: map[string]bool{
 			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
 		},
-		outputs: map[string][]byte{
-			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_STOPPED\t\n"),
+		// STOPPED on the initial describe, then RUNNING once the wait loop polls
+		// after Start.
+		outputSeq: map[string][][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": {
+				[]byte("p-user\tSTATE_STOPPED\t\n"),
+				[]byte("p-user\tSTATE_RUNNING\thost\n"),
+			},
 		},
 	}
 	client := gcloud.NewClient(runner)
@@ -99,13 +114,20 @@ func TestRunConnect_Stopped_StartsThenSSH(t *testing.T) {
 	}
 }
 
-func TestRunConnect_Starting_SkipsStart(t *testing.T) {
+func TestRunConnect_Starting_WaitsThenSSH(t *testing.T) {
+	zeroPollInterval(t)
 	runner := &testRunner{
 		checks: map[string]bool{
 			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
 		},
-		outputs: map[string][]byte{
-			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_STARTING\t\n"),
+		// STARTING initially, then RUNNING — the wait loop must poll past the
+		// STARTING state rather than SSHing into a not-yet-ready backend.
+		outputSeq: map[string][][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": {
+				[]byte("p-user\tSTATE_STARTING\t\n"),
+				[]byte("p-user\tSTATE_STARTING\t\n"),
+				[]byte("p-user\tSTATE_RUNNING\thost\n"),
+			},
 		},
 	}
 	client := gcloud.NewClient(runner)
@@ -113,10 +135,67 @@ func TestRunConnect_Starting_SkipsStart(t *testing.T) {
 	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
+	foundSSH := false
 	for _, call := range runner.runs {
-		if strings.HasPrefix(strings.Join(call, " "), "workstations start ") {
+		joined := strings.Join(call, " ")
+		if strings.HasPrefix(joined, "workstations start ") {
 			t.Errorf("did not expect a start call for STARTING state, got: %v", call)
 		}
+		if strings.HasPrefix(joined, "workstations ssh p-user ") {
+			foundSSH = true
+		}
+	}
+	if !foundSSH {
+		t.Errorf("expected ssh call after waiting for RUNNING, got runs=%v", runner.runs)
+	}
+	if !strings.Contains(errOut.String(), "waiting") {
+		t.Errorf("expected a 'waiting' notice while starting, got %q", errOut.String())
+	}
+}
+
+func TestEnsureRunning_TerminalStateWhileWaiting(t *testing.T) {
+	zeroPollInterval(t)
+	runner := &testRunner{
+		// Starts STARTING but falls back to STOPPED — a failed start. We must
+		// surface this as an error rather than spinning until the timeout.
+		outputSeq: map[string][][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": {
+				[]byte("p-user\tSTATE_STARTING\t\n"),
+				[]byte("p-user\tSTATE_STOPPED\t\n"),
+			},
+		},
+	}
+	client := gcloud.NewClient(runner)
+	ref := gcloud.WorkstationRef{Project: "p", Region: "r", Cluster: "cl", Config: "cfg", Name: "p-user"}
+	var errOut bytes.Buffer
+	err := ensureRunning(client, ref, &errOut)
+	if err == nil {
+		t.Fatalf("expected an error when the workstation falls back to STOPPED")
+	}
+	if !strings.Contains(err.Error(), "STOPPED") {
+		t.Errorf("error should mention the terminal state, got: %v", err)
+	}
+}
+
+func TestEnsureRunning_Timeout(t *testing.T) {
+	zeroPollInterval(t)
+	prevTimeout := waitRunningTimeout
+	waitRunningTimeout = 0 // expire immediately on the first deadline check
+	t.Cleanup(func() { waitRunningTimeout = prevTimeout })
+	runner := &testRunner{
+		outputs: map[string][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_STARTING\t\n"),
+		},
+	}
+	client := gcloud.NewClient(runner)
+	ref := gcloud.WorkstationRef{Project: "p", Region: "r", Cluster: "cl", Config: "cfg", Name: "p-user"}
+	var errOut bytes.Buffer
+	err := ensureRunning(client, ref, &errOut)
+	if err == nil {
+		t.Fatalf("expected a timeout error when the workstation never reaches RUNNING")
+	}
+	if !strings.Contains(err.Error(), "did not reach RUNNING") {
+		t.Errorf("error should describe the timeout, got: %v", err)
 	}
 }
 
