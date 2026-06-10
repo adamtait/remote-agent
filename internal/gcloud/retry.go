@@ -64,20 +64,34 @@ var connDropRe = regexp.MustCompile(`(?i)error connecting to workstation|unexpec
 // error. Non-matching failures (auth errors, bad flags, a clean session that
 // exits non-zero) return immediately without retrying.
 //
+// maxAge scopes the retry to connection *establishment*. The same patterns that
+// signal "sshd isn't up yet" also appear when a long-running interactive
+// session drops mid-stream (laptop sleep, wifi blip, workstation auto-sleep,
+// auth expiry). Silently reconnecting in those cases would be surprising, so a
+// failed attempt that took at least maxAge is treated as a real session ending
+// and returned immediately. Pass maxAge <= 0 to disable the guard (always retry
+// on a pattern match).
+//
 // On the first retry it prints a one-line hint to notice so the user
 // understands the pause. Pass nil to suppress.
-func RetryOnConnDrop(r Runner, attempts int, delay time.Duration, notice io.Writer, args ...string) error {
+func RetryOnConnDrop(r Runner, attempts int, delay, maxAge time.Duration, notice io.Writer, args ...string) error {
 	if attempts < 1 {
 		attempts = 1
 	}
 	var lastErr error
 	for i := 0; i < attempts; i++ {
+		start := time.Now()
 		stderr, err := r.RunCapture(args...)
 		if err == nil {
 			return nil
 		}
 		lastErr = err
 		if !connDropRe.MatchString(stderr) {
+			return err
+		}
+		// A drop that surfaced only after a long-lived attempt is a session
+		// ending, not a failure to connect — don't reconnect under the user.
+		if maxAge > 0 && time.Since(start) >= maxAge {
 			return err
 		}
 		if i == 0 && notice != nil {

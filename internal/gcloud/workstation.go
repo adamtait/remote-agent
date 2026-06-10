@@ -13,9 +13,14 @@ import (
 // connection drop right after the workstation reports RUNNING but before its
 // sshd accepts connections. ~6 tries × 5s ≈ 30s of slack, which comfortably
 // covers the observed gap. Package-level so tests can shrink the delay.
+//
+// sshConnectMaxAge scopes that retry to connection establishment: a drop that
+// surfaces only after the session has been up longer than this is treated as
+// the session ending, not a failure to connect, so we don't silently reconnect.
 var (
 	sshConnectAttempts = 6
 	sshConnectDelay    = 5 * time.Second
+	sshConnectMaxAge   = 25 * time.Second
 )
 
 // WorkstationRef fully identifies a workstation across projects/regions/configs.
@@ -235,7 +240,7 @@ func (c *Client) Delete(project, region, cluster, cfgName, name string) error {
 // in that window fails with "[SSL: UNEXPECTED_EOF_WHILE_READING]". A clean
 // session that exits non-zero is not retried.
 func (c *Client) SSH(project, region, cluster, cfgName, name string) error {
-	return RetryOnConnDrop(c.runner, sshConnectAttempts, sshConnectDelay, os.Stderr,
+	return RetryOnConnDrop(c.runner, sshConnectAttempts, sshConnectDelay, sshConnectMaxAge, os.Stderr,
 		"workstations", "ssh", name,
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,
