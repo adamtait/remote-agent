@@ -114,8 +114,19 @@ func runTunnel(cfg *config.Config, client *gcloud.Client, name string, override 
 	if err != nil {
 		return err
 	}
-	if _, err := ensureRunning(client, ref, errOut); err != nil {
+	alreadyRunning, err := ensureRunning(client, ref, errOut)
+	if err != nil {
 		return err
+	}
+	// start-tcp-tunnel connects through the same workstation tunnel backend as
+	// ssh, so it hits the same "RUNNING but backend not serving yet" race. When
+	// we just started or waited for the workstation, gate on SSH readiness — if
+	// sshd answers through the tunnel, the SSL/websocket layer is up and the
+	// tunnel won't fail to establish. (This does not check the remote target
+	// port itself; a service that isn't listening yet still refuses on first
+	// use — a separate, app-level concern from the connection hang.)
+	if !alreadyRunning {
+		waitSSHReady(client, ref, errOut)
 	}
 	fmt.Fprintf(errOut, "Tunneling localhost:%d -> %s:%d (Ctrl-C to stop)\n", localPort, ref.Name, remotePort)
 	return client.StartTCPTunnel(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name, localPort, remotePort)
