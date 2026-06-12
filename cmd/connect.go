@@ -37,10 +37,17 @@ func runConnect(cfg *config.Config, client *gcloud.Client, name string, override
 	if err != nil {
 		return err
 	}
-	if err := ensureRunning(client, ref, errOut); err != nil {
+	alreadyRunning, err := ensureRunning(client, ref, errOut)
+	if err != nil {
 		return err
 	}
-	waitSSHReady(client, ref, errOut)
+	// Only probe for SSH readiness when we just started or waited for the
+	// workstation — that's the only window where the API reports RUNNING before
+	// sshd is up. On a warm reconnect sshd is long up, so skip the probe and its
+	// multi-second round-trip.
+	if !alreadyRunning {
+		waitSSHReady(client, ref, errOut)
+	}
 	return client.SSH(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
 }
 

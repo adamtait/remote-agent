@@ -31,7 +31,6 @@ func TestRunConnect_Running_SkipsStart(t *testing.T) {
 		},
 		outputs: map[string][]byte{
 			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_RUNNING\thost\n"),
-			sshReadyProbeKey: []byte("__ra_ssh_ready__\n"),
 		},
 	}
 	client := gcloud.NewClient(runner)
@@ -54,6 +53,11 @@ func TestRunConnect_Running_SkipsStart(t *testing.T) {
 	}
 	if !foundSSH {
 		t.Errorf("expected ssh call, got runs=%v", runner.runs)
+	}
+	// Warm path: already RUNNING, so the SSH-readiness probe must be skipped
+	// (it would only add a multi-second round-trip) and nothing is printed.
+	if len(runner.quietRuns) != 0 {
+		t.Errorf("expected no SSH-readiness probe on the warm path, got %v", runner.quietRuns)
 	}
 	if errOut.Len() != 0 {
 		t.Errorf("expected no stderr output when already running, got %q", errOut.String())
@@ -185,7 +189,7 @@ func TestEnsureRunning_TerminalStateWhileWaiting(t *testing.T) {
 	client := gcloud.NewClient(runner)
 	ref := gcloud.WorkstationRef{Project: "p", Region: "r", Cluster: "cl", Config: "cfg", Name: "p-user"}
 	var errOut bytes.Buffer
-	err := ensureRunning(client, ref, &errOut)
+	_, err := ensureRunning(client, ref, &errOut)
 	if err == nil {
 		t.Fatalf("expected an error when the workstation falls back to STOPPED")
 	}
@@ -207,7 +211,7 @@ func TestEnsureRunning_Timeout(t *testing.T) {
 	client := gcloud.NewClient(runner)
 	ref := gcloud.WorkstationRef{Project: "p", Region: "r", Cluster: "cl", Config: "cfg", Name: "p-user"}
 	var errOut bytes.Buffer
-	err := ensureRunning(client, ref, &errOut)
+	_, err := ensureRunning(client, ref, &errOut)
 	if err == nil {
 		t.Fatalf("expected a timeout error when the workstation never reaches RUNNING")
 	}
@@ -222,12 +226,14 @@ func TestRunConnect_WaitsForSSHReadyThenSSH(t *testing.T) {
 		checks: map[string]bool{
 			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
 		},
-		outputs: map[string][]byte{
-			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_RUNNING\thost\n"),
-		},
-		// sshd not ready on the first probe, ready on the second — runConnect
-		// must poll past the empty probe rather than SSHing into the gap.
+		// STARTING -> RUNNING so this is the post-start path that actually
+		// probes; then sshd not ready on the first probe, ready on the second —
+		// runConnect must poll past the empty probe rather than SSHing into the gap.
 		outputSeq: map[string][][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": {
+				[]byte("p-user\tSTATE_STARTING\t\n"),
+				[]byte("p-user\tSTATE_RUNNING\thost\n"),
+			},
 			sshReadyProbeKey: {
 				[]byte(""),
 				[]byte("__ra_ssh_ready__\n"),
@@ -265,11 +271,15 @@ func TestRunConnect_SSHReadyTimeout_ConnectsAnyway(t *testing.T) {
 		checks: map[string]bool{
 			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
 		},
-		// RUNNING per the API, but the SSH probe never returns the sentinel.
-		outputs: map[string][]byte{
-			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_RUNNING\thost\n"),
-			sshReadyProbeKey: []byte(""),
+		// STARTING -> RUNNING (so the probe runs), but the SSH probe never
+		// returns the sentinel — connect must fall through anyway.
+		outputSeq: map[string][][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": {
+				[]byte("p-user\tSTATE_STARTING\t\n"),
+				[]byte("p-user\tSTATE_RUNNING\thost\n"),
+			},
 		},
+		outputs: map[string][]byte{sshReadyProbeKey: []byte("")},
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer

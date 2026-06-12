@@ -22,6 +22,10 @@ type testRunner struct {
 	// entry; once exhausted, the last entry is returned for all further calls.
 	// Takes precedence over outputs when a key is present in both.
 	outputSeq map[string][][]byte
+
+	// quietRuns records OutputQuiet calls (the SSH-readiness probe), so tests
+	// can assert whether the probe ran — e.g. that the warm path skips it.
+	quietRuns [][]string
 }
 
 func (f *testRunner) key(args []string) string { return strings.Join(args, " ") }
@@ -55,7 +59,10 @@ func (f *testRunner) Output(args ...string) ([]byte, error) {
 	}
 	return nil, nil
 }
-func (f *testRunner) OutputQuiet(args ...string) ([]byte, error) { return f.Output(args...) }
+func (f *testRunner) OutputQuiet(args ...string) ([]byte, error) {
+	f.quietRuns = append(f.quietRuns, args)
+	return f.Output(args...)
+}
 func (f *testRunner) RunCapture(args ...string) (string, error) {
 	return "", f.Run(args...)
 }

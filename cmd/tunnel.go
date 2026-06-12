@@ -114,7 +114,7 @@ func runTunnel(cfg *config.Config, client *gcloud.Client, name string, override 
 	if err != nil {
 		return err
 	}
-	if err := ensureRunning(client, ref, errOut); err != nil {
+	if _, err := ensureRunning(client, ref, errOut); err != nil {
 		return err
 	}
 	fmt.Fprintf(errOut, "Tunneling localhost:%d -> %s:%d (Ctrl-C to stop)\n", localPort, ref.Name, remotePort)

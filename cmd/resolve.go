@@ -193,23 +193,28 @@ func pickStr(override, fallback string) string {
 // "[SSL: UNEXPECTED_EOF_WHILE_READING]" failures callers used to hit: the SSH
 // tunnel would race ahead of the not-yet-ready backend. Blocking here until
 // RUNNING is what makes the subsequent connect reliable.
-func ensureRunning(client *gcloud.Client, ref gcloud.WorkstationRef, errOut io.Writer) error {
+//
+// The returned bool is true only when the workstation was already RUNNING on
+// the first describe — i.e. nothing had to be started or waited for. Callers
+// use it to skip the post-start SSH-readiness probe on the warm path, where
+// sshd is long up and a probe would only add latency.
+func ensureRunning(client *gcloud.Client, ref gcloud.WorkstationRef, errOut io.Writer) (alreadyRunning bool, err error) {
 	info, err := client.Describe(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
 	if err != nil {
-		return fmt.Errorf("describing workstation: %w", err)
+		return false, fmt.Errorf("describing workstation: %w", err)
 	}
 	switch info.State {
 	case "STATE_RUNNING":
-		return nil
+		return true, nil
 	case "STATE_STARTING":
 		fmt.Fprintf(errOut, "Workstation %q is starting; waiting until it's ready...\n", ref.Name)
 	default:
 		fmt.Fprintf(errOut, "Workstation %q is %s; starting...\n", ref.Name, strings.TrimPrefix(info.State, "STATE_"))
 		if err := client.Start(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name); err != nil {
-			return fmt.Errorf("starting workstation: %w", err)
+			return false, fmt.Errorf("starting workstation: %w", err)
 		}
 	}
-	return waitUntilRunning(client, ref, errOut)
+	return false, waitUntilRunning(client, ref, errOut)
 }
 
 // waitUntilRunning polls Describe until the workstation reaches STATE_RUNNING,
