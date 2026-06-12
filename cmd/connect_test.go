@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
@@ -67,6 +68,10 @@ func TestRunConnect_Running_SkipsStart(t *testing.T) {
 // zeroPollInterval makes the ensureRunning and waitSSHReady poll loops spin
 // without sleeping, so state-transition tests finish instantly. Restored after
 // the test.
+//
+// It mutates package-global poll knobs, so tests using it (and the timeout
+// overrides) must NOT call t.Parallel() — they rely on Go's default serial
+// execution within a package.
 func zeroPollInterval(t *testing.T) {
 	t.Helper()
 	prevRun, prevSSH := waitRunningInterval, sshReadyInterval
@@ -81,10 +86,10 @@ func zeroPollInterval(t *testing.T) {
 // sshReadyProbeKey is the OutputQuiet command waitSSHReady runs for the p-user
 // fixture; readyProbeOutputs maps it to a sentinel-bearing stdout so the probe
 // reports ready on the first try (the common case once RUNNING).
-const sshReadyProbeKey = "workstations ssh p-user --cluster cl --config cfg --region r --project p --command echo __ra_ssh_ready__"
+const sshReadyProbeKey = `workstations ssh p-user --cluster cl --config cfg --region r --project p --command echo "ra_$((6*7))_ready"`
 
 func readyProbeOutputs() map[string][]byte {
-	return map[string][]byte{sshReadyProbeKey: []byte("__ra_ssh_ready__\n")}
+	return map[string][]byte{sshReadyProbeKey: []byte("ra_42_ready\n")}
 }
 
 func TestRunConnect_Stopped_StartsThenSSH(t *testing.T) {
@@ -220,6 +225,33 @@ func TestEnsureRunning_Timeout(t *testing.T) {
 	}
 }
 
+func TestEnsureRunning_EmptyStateFailsFast(t *testing.T) {
+	zeroPollInterval(t)
+	// A describe that yields no state (parse/format drift) must fail fast rather
+	// than poll for the full timeout — set a long timeout to prove we don't wait.
+	prevTimeout := waitRunningTimeout
+	waitRunningTimeout = time.Hour
+	t.Cleanup(func() { waitRunningTimeout = prevTimeout })
+	runner := &testRunner{
+		outputSeq: map[string][][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": {
+				[]byte("p-user\tSTATE_STARTING\t\n"),
+				[]byte("p-user\t\t\n"), // RUNNING never comes; state parses empty
+			},
+		},
+	}
+	client := gcloud.NewClient(runner)
+	ref := gcloud.WorkstationRef{Project: "p", Region: "r", Cluster: "cl", Config: "cfg", Name: "p-user"}
+	var errOut bytes.Buffer
+	_, err := ensureRunning(client, ref, &errOut)
+	if err == nil {
+		t.Fatalf("expected an error when the workstation returns no state")
+	}
+	if !strings.Contains(err.Error(), "no state") {
+		t.Errorf("error should describe the missing state, got: %v", err)
+	}
+}
+
 func TestRunConnect_WaitsForSSHReadyThenSSH(t *testing.T) {
 	zeroPollInterval(t)
 	runner := &testRunner{
@@ -236,7 +268,7 @@ func TestRunConnect_WaitsForSSHReadyThenSSH(t *testing.T) {
 			},
 			sshReadyProbeKey: {
 				[]byte(""),
-				[]byte("__ra_ssh_ready__\n"),
+				[]byte("ra_42_ready\n"),
 			},
 		},
 	}

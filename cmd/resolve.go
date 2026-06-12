@@ -233,6 +233,11 @@ func waitUntilRunning(client *gcloud.Client, ref gcloud.WorkstationRef, errOut i
 		case "STATE_STOPPED", "STATE_STOPPING":
 			return fmt.Errorf("workstation %q entered state %s while waiting for it to start",
 				ref.Name, strings.TrimPrefix(info.State, "STATE_"))
+		case "":
+			// A successful Describe with no state means we couldn't parse the
+			// output (format drift, wrong resource) — polling won't fix that, so
+			// fail fast instead of spinning for the full timeout.
+			return fmt.Errorf("workstation %q returned no state; cannot determine readiness", ref.Name)
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("workstation %q did not reach RUNNING within %s (last state: %s)",

@@ -292,13 +292,13 @@ func TestClient_StartTCPTunnel_CallsCorrectArgs(t *testing.T) {
 
 // sshReadyProbeKey is the OutputQuiet command SSHReady runs. Kept here so the
 // test breaks loudly if the probe's args (or the sentinel) ever change.
-const sshReadyProbeKey = "workstations ssh myws --cluster cl --config cfg --region us-central1 --project proj --command echo __ra_ssh_ready__"
+const sshReadyProbeKey = `workstations ssh myws --cluster cl --config cfg --region us-central1 --project proj --command echo "ra_$((6*7))_ready"`
 
 func TestClient_SSHReady_TrueWhenSentinelRoundTrips(t *testing.T) {
 	fake := &fakeRunner{
-		// gcloud's own noise (port lines, host-key warning) plus the echoed
-		// sentinel on stdout.
-		outputs: map[string][]byte{sshReadyProbeKey: []byte("__ra_ssh_ready__\n")},
+		// gcloud's own noise (port lines, host-key warning) plus the remotely
+		// computed sentinel on stdout.
+		outputs: map[string][]byte{sshReadyProbeKey: []byte("ra_42_ready\n")},
 	}
 	client := gcloud.NewClient(fake)
 	if !client.SSHReady("proj", "us-central1", "cl", "cfg", "myws") {
@@ -314,5 +314,20 @@ func TestClient_SSHReady_FalseWhenSentinelAbsent(t *testing.T) {
 	client := gcloud.NewClient(fake)
 	if client.SSHReady("proj", "us-central1", "cl", "cfg", "myws") {
 		t.Errorf("expected SSHReady false when the sentinel is absent from stdout")
+	}
+}
+
+func TestClient_SSHReady_FalseWhenOnlyCommandTextEchoed(t *testing.T) {
+	// Defense against a self-match: if the unevaluated probe command ever leaked
+	// into the scanned stream (e.g. gcloud echoing it in a diagnostic), it
+	// carries the literal `ra_$((6*7))_ready`, not the computed `ra_42_ready`.
+	// The remote shell must actually run for the success token to appear, so
+	// this must read as not-ready.
+	fake := &fakeRunner{outputs: map[string][]byte{
+		sshReadyProbeKey: []byte(`ERROR: failed running command [echo "ra_$((6*7))_ready"]`),
+	}}
+	client := gcloud.NewClient(fake)
+	if client.SSHReady("proj", "us-central1", "cl", "cfg", "myws") {
+		t.Errorf("expected SSHReady false when only the unevaluated command text is present")
 	}
 }

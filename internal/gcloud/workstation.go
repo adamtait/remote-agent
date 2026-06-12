@@ -8,12 +8,21 @@ import (
 	"strings"
 )
 
-// sshReadySentinel is echoed back by the SSHReady probe. We treat the
-// workstation as connectable only when this exact string round-trips on stdout
-// — a content-verified signal that is robust to two unreliable alternatives:
-// gcloud's error-message wording (which changes across versions/locales) and
-// its exit code (`workstations ssh` exits 0 even on connection failures).
-const sshReadySentinel = "__ra_ssh_ready__"
+// SSHReady judges connectability by whether sshReadySentinel round-trips on the
+// probe's stdout — a content-verified signal robust to two unreliable
+// alternatives: gcloud's error-message wording (changes across versions/locales)
+// and its exit code (`workstations ssh` exits 0 even on connection failures).
+//
+// The probe runs sshReadyProbeCmd, which *computes* the sentinel remotely via
+// shell arithmetic rather than echoing a literal. So the success token never
+// appears verbatim in the command line — it can only show up in the output if
+// the remote shell actually executed. That guards against a false "ready" if
+// gcloud ever echoed the probe command back into the stream we scan (today
+// stdout and stderr are kept separate; this keeps it correct regardless).
+const (
+	sshReadyProbeCmd = `echo "ra_$((6*7))_ready"`
+	sshReadySentinel = "ra_42_ready"
+)
 
 // WorkstationRef fully identifies a workstation across projects/regions/configs.
 // Used by callers that need to target a workstation whose location is not
@@ -246,7 +255,7 @@ func (c *Client) SSHReady(project, region, cluster, cfgName, name string) bool {
 		"workstations", "ssh", name,
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,
-		"--command", "echo "+sshReadySentinel,
+		"--command", sshReadyProbeCmd,
 	)
 	return bytes.Contains(out, []byte(sshReadySentinel))
 }
