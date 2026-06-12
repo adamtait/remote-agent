@@ -1,27 +1,19 @@
 package gcloud
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
-// sshConnectAttempts/sshConnectDelay bound the retry on a transient
-// connection drop right after the workstation reports RUNNING but before its
-// sshd accepts connections. ~6 tries × 5s ≈ 30s of slack, which comfortably
-// covers the observed gap. Package-level so tests can shrink the delay.
-//
-// sshConnectMaxAge scopes that retry to connection establishment: a drop that
-// surfaces only after the session has been up longer than this is treated as
-// the session ending, not a failure to connect, so we don't silently reconnect.
-var (
-	sshConnectAttempts = 6
-	sshConnectDelay    = 5 * time.Second
-	sshConnectMaxAge   = 25 * time.Second
-)
+// sshReadySentinel is echoed back by the SSHReady probe. We treat the
+// workstation as connectable only when this exact string round-trips on stdout
+// — a content-verified signal that is robust to two unreliable alternatives:
+// gcloud's error-message wording (which changes across versions/locales) and
+// its exit code (`workstations ssh` exits 0 even on connection failures).
+const sshReadySentinel = "__ra_ssh_ready__"
 
 // WorkstationRef fully identifies a workstation across projects/regions/configs.
 // Used by callers that need to target a workstation whose location is not
@@ -234,17 +226,29 @@ func (c *Client) Delete(project, region, cluster, cfgName, name string) error {
 // hard-codes the client-side "-o ServerAliveInterval=0" ahead of any
 // --ssh-flag we pass, and ssh honors the first value, so a client-side
 // keepalive flag would be silently ignored. See the Dockerfile.
-// It retries a few times on a transient connection drop (see connDropRe):
-// gcloud's workstations API can report RUNNING a few seconds before the
-// in-container sshd starts accepting connections, and the first tunnel attempt
-// in that window fails with "[SSL: UNEXPECTED_EOF_WHILE_READING]". A clean
-// session that exits non-zero is not retried.
 func (c *Client) SSH(project, region, cluster, cfgName, name string) error {
-	return RetryOnConnDrop(c.runner, sshConnectAttempts, sshConnectDelay, sshConnectMaxAge, os.Stderr,
+	return c.runner.Run(
 		"workstations", "ssh", name,
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,
 	)
+}
+
+// SSHReady reports whether the workstation's sshd is accepting connections, by
+// running a non-interactive probe that echoes a sentinel and checking whether
+// it round-trips on stdout. Readiness is judged by the sentinel's presence, NOT
+// the probe's exit code: gcloud's `workstations ssh` exits 0 even when it fails
+// to connect (it prints the error to stderr), so the exit code cannot be
+// trusted. Used to close the window where the workstation reports RUNNING a few
+// seconds before its in-container sshd starts accepting connections.
+func (c *Client) SSHReady(project, region, cluster, cfgName, name string) bool {
+	out, _ := c.runner.OutputQuiet(
+		"workstations", "ssh", name,
+		"--cluster", cluster, "--config", cfgName,
+		"--region", region, "--project", project,
+		"--command", "echo "+sshReadySentinel,
+	)
+	return bytes.Contains(out, []byte(sshReadySentinel))
 }
 
 // StartTCPTunnel opens a foreground TCP tunnel from localhost:localPort to

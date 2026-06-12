@@ -55,6 +55,7 @@ func (f *testRunner) Output(args ...string) ([]byte, error) {
 	}
 	return nil, nil
 }
+func (f *testRunner) OutputQuiet(args ...string) ([]byte, error) { return f.Output(args...) }
 func (f *testRunner) RunCapture(args ...string) (string, error) {
 	return "", f.Run(args...)
 }

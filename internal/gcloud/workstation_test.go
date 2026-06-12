@@ -35,6 +35,10 @@ func (f *fakeRunner) Output(args ...string) ([]byte, error) {
 	return nil, nil
 }
 
+func (f *fakeRunner) OutputQuiet(args ...string) ([]byte, error) {
+	return f.Output(args...)
+}
+
 func (f *fakeRunner) RunCapture(args ...string) (string, error) {
 	return "", f.Run(args...)
 }
@@ -283,5 +287,32 @@ func TestClient_StartTCPTunnel_CallsCorrectArgs(t *testing.T) {
 	want := "workstations start-tcp-tunnel --cluster cl --config cfg --region us-central1 --project proj --local-host-port localhost:8080 myws 2718"
 	if got != want {
 		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+// sshReadyProbeKey is the OutputQuiet command SSHReady runs. Kept here so the
+// test breaks loudly if the probe's args (or the sentinel) ever change.
+const sshReadyProbeKey = "workstations ssh myws --cluster cl --config cfg --region us-central1 --project proj --command echo __ra_ssh_ready__"
+
+func TestClient_SSHReady_TrueWhenSentinelRoundTrips(t *testing.T) {
+	fake := &fakeRunner{
+		// gcloud's own noise (port lines, host-key warning) plus the echoed
+		// sentinel on stdout.
+		outputs: map[string][]byte{sshReadyProbeKey: []byte("__ra_ssh_ready__\n")},
+	}
+	client := gcloud.NewClient(fake)
+	if !client.SSHReady("proj", "us-central1", "cl", "cfg", "myws") {
+		t.Errorf("expected SSHReady true when the sentinel round-trips")
+	}
+}
+
+func TestClient_SSHReady_FalseWhenSentinelAbsent(t *testing.T) {
+	// The not-yet-ready case: gcloud printed the SSL EOF to (discarded) stderr
+	// and exited 0, so stdout carries no sentinel. Exit code is untrustworthy
+	// here by design, so SSHReady must key off stdout content alone.
+	fake := &fakeRunner{outputs: map[string][]byte{sshReadyProbeKey: []byte("")}}
+	client := gcloud.NewClient(fake)
+	if client.SSHReady("proj", "us-central1", "cl", "cfg", "myws") {
+		t.Errorf("expected SSHReady false when the sentinel is absent from stdout")
 	}
 }
