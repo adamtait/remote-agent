@@ -15,6 +15,17 @@ type testRunner struct {
 	checks    map[string]bool
 	runs      [][]string
 	runErrors map[string]error
+
+	// outputSeq supplies a different Output result per successive call to the
+	// same command, modeling state transitions (e.g. a workstation that goes
+	// STARTING -> RUNNING across poll iterations). Each call consumes the next
+	// entry; once exhausted, the last entry is returned for all further calls.
+	// Takes precedence over outputs when a key is present in both.
+	outputSeq map[string][][]byte
+
+	// quietRuns records OutputQuiet calls (the SSH-readiness probe), so tests
+	// can assert whether the probe ran — e.g. that the warm path skips it.
+	quietRuns [][]string
 }
 
 func (f *testRunner) key(args []string) string { return strings.Join(args, " ") }
@@ -35,10 +46,22 @@ func (f *testRunner) Check(args ...string) bool {
 	return false
 }
 func (f *testRunner) Output(args ...string) ([]byte, error) {
-	if out, ok := f.outputs[f.key(args)]; ok {
+	k := f.key(args)
+	if seq, ok := f.outputSeq[k]; ok && len(seq) > 0 {
+		out := seq[0]
+		if len(seq) > 1 {
+			f.outputSeq[k] = seq[1:]
+		}
+		return out, nil
+	}
+	if out, ok := f.outputs[k]; ok {
 		return out, nil
 	}
 	return nil, nil
+}
+func (f *testRunner) OutputQuiet(args ...string) ([]byte, error) {
+	f.quietRuns = append(f.quietRuns, args)
+	return f.Output(args...)
 }
 func (f *testRunner) RunCapture(args ...string) (string, error) {
 	return "", f.Run(args...)

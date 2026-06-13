@@ -206,24 +206,39 @@ func TestRunTunnel_Running_CallsStartTCPTunnel(t *testing.T) {
 	if !found {
 		t.Errorf("expected start-tcp-tunnel call, got runs=%v", runner.runs)
 	}
+	// Warm path: already RUNNING, so the SSH-readiness probe is skipped.
+	if len(runner.quietRuns) != 0 {
+		t.Errorf("expected no SSH-readiness probe on the warm path, got %v", runner.quietRuns)
+	}
 	if !strings.Contains(errOut.String(), "Tunneling localhost:2718") {
 		t.Errorf("expected status line in stderr, got %q", errOut.String())
 	}
 }
 
 func TestRunTunnel_Stopped_StartsFirst(t *testing.T) {
+	zeroPollInterval(t)
 	runner := &testRunner{
 		checks: map[string]bool{
 			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
 		},
-		outputs: map[string][]byte{
-			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_STOPPED\t\n"),
+		// STOPPED initially, then RUNNING once the wait loop polls after Start.
+		outputSeq: map[string][][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": {
+				[]byte("p-user\tSTATE_STOPPED\t\n"),
+				[]byte("p-user\tSTATE_RUNNING\thost\n"),
+			},
 		},
+		// Cold path: tunnel gates on SSH readiness too, so the probe must
+		// report ready (sentinel round-trips) before start-tcp-tunnel.
+		outputs: readyProbeOutputs(),
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
 	if err := runTunnel(newConnectCfg(), client, "", wsOverride{}, 8080, 8080, &errOut); err != nil {
 		t.Fatalf("runTunnel: %v", err)
+	}
+	if len(runner.quietRuns) == 0 {
+		t.Errorf("expected an SSH-readiness probe before tunnelling on the cold path")
 	}
 	var startIdx, tunnelIdx = -1, -1
 	for i, call := range runner.runs {

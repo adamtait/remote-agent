@@ -59,12 +59,13 @@ func gcloudSubcmd(args []string) string {
 // what Run uses: stdout to terminal, stdin from terminal, Error-level
 // failure log with "gcloud failed" message.
 type execOpts struct {
-	op      string    // op name attached to every slog record (e.g. "gcloud.Run")
-	stdout  io.Writer // nil → os.Stdout
-	stdin   io.Reader // nil → os.Stdin
-	failLvl slog.Level
-	failMsg string
-	args    []string
+	op         string    // op name attached to every slog record (e.g. "gcloud.Run")
+	stdout     io.Writer // nil → os.Stdout
+	stderrTerm io.Writer // terminal sink for stderr; nil → os.Stderr (always also captured for slog)
+	stdin      io.Reader // nil → os.Stdin
+	failLvl    slog.Level
+	failMsg    string
+	args       []string
 }
 
 // execAndLog runs gcloud with opts.args, mirroring stderr to the terminal
@@ -88,11 +89,15 @@ func (r LoggingRunner) execAndLog(opts execOpts) (string, error) {
 	if stdin == nil {
 		stdin = os.Stdin
 	}
+	stderrTerm := opts.stderrTerm
+	if stderrTerm == nil {
+		stderrTerm = os.Stderr
+	}
 
 	var stderrBuf bytes.Buffer
 	cmd := exec.Command("gcloud", opts.args...)
 	cmd.Stdout = stdout
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	cmd.Stderr = io.MultiWriter(stderrTerm, &stderrBuf)
 	cmd.Stdin = stdin
 	err := cmd.Run()
 
@@ -162,6 +167,22 @@ func (r LoggingRunner) Output(args ...string) ([]byte, error) {
 		return nil, err
 	}
 	return stdoutBuf.Bytes(), nil
+}
+
+// OutputQuiet executes gcloud like Output but discards stderr from the terminal
+// (it is still captured for the slog record). Used for repeated probes whose
+// transient errors should not spam the terminal.
+func (r LoggingRunner) OutputQuiet(args ...string) ([]byte, error) {
+	var stdoutBuf bytes.Buffer
+	_, err := r.execAndLog(execOpts{
+		op:         "gcloud.OutputQuiet",
+		stdout:     &stdoutBuf,
+		stderrTerm: io.Discard,
+		failLvl:    slog.LevelDebug,
+		failMsg:    "gcloud probe non-zero",
+		args:       args,
+	})
+	return stdoutBuf.Bytes(), err
 }
 
 // Check executes gcloud with args, discarding all output. Returns true if

@@ -1,10 +1,27 @@
 package gcloud
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
+)
+
+// SSHReady judges connectability by whether sshReadySentinel round-trips on the
+// probe's stdout — a content-verified signal robust to two unreliable
+// alternatives: gcloud's error-message wording (changes across versions/locales)
+// and its exit code (`workstations ssh` exits 0 even on connection failures).
+//
+// The probe runs sshReadyProbeCmd, which *computes* the sentinel remotely via
+// shell arithmetic rather than echoing a literal. So the success token never
+// appears verbatim in the command line — it can only show up in the output if
+// the remote shell actually executed. That guards against a false "ready" if
+// gcloud ever echoed the probe command back into the stream we scan (today
+// stdout and stderr are kept separate; this keeps it correct regardless).
+const (
+	sshReadyProbeCmd = `echo "ra_$((6*7))_ready"`
+	sshReadySentinel = "ra_42_ready"
 )
 
 // WorkstationRef fully identifies a workstation across projects/regions/configs.
@@ -224,6 +241,23 @@ func (c *Client) SSH(project, region, cluster, cfgName, name string) error {
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,
 	)
+}
+
+// SSHReady reports whether the workstation's sshd is accepting connections, by
+// running a non-interactive probe that echoes a sentinel and checking whether
+// it round-trips on stdout. Readiness is judged by the sentinel's presence, NOT
+// the probe's exit code: gcloud's `workstations ssh` exits 0 even when it fails
+// to connect (it prints the error to stderr), so the exit code cannot be
+// trusted. Used to close the window where the workstation reports RUNNING a few
+// seconds before its in-container sshd starts accepting connections.
+func (c *Client) SSHReady(project, region, cluster, cfgName, name string) bool {
+	out, _ := c.runner.OutputQuiet(
+		"workstations", "ssh", name,
+		"--cluster", cluster, "--config", cfgName,
+		"--region", region, "--project", project,
+		"--command", sshReadyProbeCmd,
+	)
+	return bytes.Contains(out, []byte(sshReadySentinel))
 }
 
 // StartTCPTunnel opens a foreground TCP tunnel from localhost:localPort to

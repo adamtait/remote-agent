@@ -25,6 +25,7 @@ func (f *retryFakeRunner) Run(args ...string) error                           { 
 func (f *retryFakeRunner) RunWithStdin(stdin io.Reader, args ...string) error { return nil }
 func (f *retryFakeRunner) RunSoft(args ...string) error                       { return nil }
 func (f *retryFakeRunner) Output(args ...string) ([]byte, error)              { return nil, nil }
+func (f *retryFakeRunner) OutputQuiet(args ...string) ([]byte, error)         { return nil, nil }
 func (f *retryFakeRunner) Check(args ...string) bool                          { return false }
 func (f *retryFakeRunner) RunCapture(args ...string) (string, error) {
 	if f.calls >= len(f.results) {

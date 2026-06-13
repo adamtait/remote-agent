@@ -26,6 +26,13 @@ type Runner interface {
 	RunCapture(args ...string) (stderr string, err error)
 	// Output executes gcloud with args and returns stdout bytes. Stderr streams to terminal.
 	Output(args ...string) ([]byte, error)
+	// OutputQuiet executes gcloud like Output but discards stderr instead of
+	// streaming it to the terminal. Use for probes that run repeatedly and
+	// whose transient gcloud errors (e.g. a not-yet-ready SSH backend) would
+	// otherwise spam the terminal. The returned error is unreliable for some
+	// gcloud subcommands (`workstations ssh` exits 0 even on failure), so
+	// callers should verify success from the returned stdout, not the error.
+	OutputQuiet(args ...string) ([]byte, error)
 	// Check executes gcloud with args, discarding all output. Returns true if exit code is 0.
 	Check(args ...string) bool
 }
@@ -76,6 +83,15 @@ func (r RealRunner) Output(args ...string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func (r RealRunner) OutputQuiet(args ...string) ([]byte, error) {
+	cmd := exec.Command("gcloud", args...)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = io.Discard
+	err := cmd.Run()
+	return buf.Bytes(), err
 }
 
 func (r RealRunner) Check(args ...string) bool {

@@ -41,6 +41,9 @@ func (f *fakeRunner) Output(args ...string) ([]byte, error) {
 	f.calls = append(f.calls, args)
 	return nil, nil
 }
+func (f *fakeRunner) OutputQuiet(args ...string) ([]byte, error) {
+	return f.Output(args...)
+}
 func (f *fakeRunner) Check(args ...string) bool {
 	f.calls = append(f.calls, args)
 	if v, ok := f.checks[f.key(args)]; ok {
