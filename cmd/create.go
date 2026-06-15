@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"io"
 	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +42,53 @@ const (
 
 func logicalNameToEnvToken(logical string) string {
 	return strings.ToUpper(logical)
+}
+
+// nsSafeRe matches one run of characters that are NOT safe in a GCS
+// object-prefix / filesystem path component. Everything outside
+// [a-z0-9_-] is collapsed to a single hyphen by stableNamespace so the
+// id stays a single, slash-free, lowercase path segment.
+var nsSafeRe = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+// stableNamespace derives a deterministic claude-sync namespace id from
+// inputs that survive `ra create` rebuilds — the gcloud project, the
+// workstation config_name, and the git user email. Unlike the GCE
+// instance name (which is a fresh UUID every create), these are stable
+// for a given (project, config, user) triple, so a rebuilt workstation
+// reuses ONE namespace instead of spawning a new one each time. That is
+// the whole point of #3 in the load-reduction plan: it stops the
+// per-create namespace sprawl that grew the boot-pull cost unbounded.
+//
+// The output is lowercased, restricted to [a-z0-9_-], slash-free, and
+// suffixed with an 8-hex digest of the raw triple so two triples that
+// collapse to the same sanitized stem (e.g. emails differing only in
+// punctuation) still get distinct namespaces. Returns "" if all three
+// inputs are empty, so the caller can fall back to the script-side
+// resolve_ws_id() rather than push to a degenerate "ws-<digest>".
+func stableNamespace(project, configName, userEmail string) string {
+	p := strings.ToLower(strings.TrimSpace(project))
+	c := strings.ToLower(strings.TrimSpace(configName))
+	e := strings.ToLower(strings.TrimSpace(userEmail))
+	raw := p + "/" + c + "/" + e
+	if raw == "//" {
+		return ""
+	}
+	sum := sha1.Sum([]byte(raw))
+	// Build the human-readable stem from the already-normalized
+	// components so re-cased / space-padded inputs produce the identical
+	// stem (not just the identical digest).
+	stem := p + "-" + c
+	stem = nsSafeRe.ReplaceAllString(stem, "-")
+	stem = strings.Trim(stem, "-_")
+	if stem == "" {
+		stem = "ws"
+	}
+	// Keep the human-readable stem short so the full namespace stays a
+	// tidy path segment; the digest carries the uniqueness guarantee.
+	if len(stem) > 40 {
+		stem = strings.Trim(stem[:40], "-_")
+	}
+	return fmt.Sprintf("%s-%x", stem, sum[:4])
 }
 
 // resolvedBucket pairs a plugin's BucketSpec declaration with the
@@ -102,6 +151,26 @@ func pluginBuckets(reg *plugins.Registry, cfg *config.Config) ([]resolvedBucket,
 	return out, nil
 }
 
+// lifecycleRulesFor converts a plugin's declared lifecycle rules
+// (plugins.LifecycleRule, parsed from plugin.yaml) into the gcs package's
+// rule type. The two are kept as separate types so internal/gcs need not
+// import internal/plugins; this is the single conversion seam.
+func lifecycleRulesFor(spec plugins.BucketSpec) []gcs.LifecycleRule {
+	if len(spec.Lifecycle) == 0 {
+		return nil
+	}
+	out := make([]gcs.LifecycleRule, 0, len(spec.Lifecycle))
+	for _, lr := range spec.Lifecycle {
+		out = append(out, gcs.LifecycleRule{
+			Action:       lr.Action,
+			StorageClass: lr.StorageClass,
+			AgeDays:      lr.AgeDays,
+			Prefixes:     lr.Prefixes,
+		})
+	}
+	return out
+}
+
 func buildContainerEnv(cfg *config.Config) string {
 	var pairs []string
 	// propagate is the explicit allowlist of keys that 200_remote-agent-setup.sh
@@ -130,6 +199,24 @@ func buildContainerEnv(cfg *config.Config) string {
 	if buckets, err := pluginBuckets(reg, cfg); err == nil {
 		for _, b := range buckets {
 			addProp(b.Spec.EnvVar, b.Name)
+		}
+	}
+	// Stable claude-sync namespace (load-reduction plan #3). The boot
+	// pull/push scripts default to the GCE instance name as their GCS
+	// namespace, which is a fresh UUID on every `ra create` — so each
+	// rebuild leaked a new ~85 MB namespace that nothing ever pruned.
+	// Inject a deterministic id derived from (project, config_name,
+	// user_email) so a rebuilt workstation reuses ONE namespace; the
+	// scripts prefer this over resolve_ws_id() when set. This is the one
+	// place core knows the claude-sync env-var name by string — gated on
+	// the plugin being enabled so it's a no-op for everyone else — because
+	// the value depends on create-time inputs (like the plugin buckets
+	// above) that the generic plugin-config path cannot express.
+	if pc := cfg.Plugins["claude-sync"]; pc != nil {
+		if en, _ := pc["enabled"].(bool); en {
+			if ns := stableNamespace(cfg.Gcloud.Project, cfg.Gcloud.Workstation.ConfigName, cfg.Git.UserEmail); ns != "" {
+				addProp("RA_PLUGIN_CLAUDE_SYNC_NAMESPACE", ns)
+			}
 		}
 	}
 	for _, pair := range reg.AllContainerEnvPairs(cfg) {
@@ -380,6 +467,16 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 			if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, b.Name, ws.Region); err != nil {
 				done(err)
 				return fmt.Errorf("ensuring bucket %s (plugin %s): %w", b.Name, b.Plugin, err)
+			}
+			// Apply any declared Object Lifecycle Management rules
+			// (load-reduction plan #4). GCS replaces the whole lifecycle
+			// config each call, so this re-asserts the policy idempotently
+			// on every `ra create`. No-op for plugins that declare none.
+			if rules := lifecycleRulesFor(b.Spec); len(rules) > 0 {
+				if err := gcs.ApplyLifecycle(r, cfg.Gcloud.Project, b.Name, rules); err != nil {
+					done(err)
+					return fmt.Errorf("applying lifecycle to bucket %s (plugin %s): %w", b.Name, b.Plugin, err)
+				}
 			}
 		}
 		done(nil)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -529,5 +530,125 @@ func TestBuildContainerEnv_OmitsPluginBucketsWhenDisabled(t *testing.T) {
 		if k == "RA_PLUGIN_TEST_BUCKET_PLUGIN_BUCKET" {
 			t.Errorf("expected no plugin bucket env when disabled; key present in %q", got)
 		}
+	}
+}
+
+// envMap parses a buildContainerEnv result into a key→value map for the
+// namespace tests below.
+func envMap(s string) map[string]string {
+	m := map[string]string{}
+	for _, p := range strings.Split(s, ",") {
+		if kv := strings.SplitN(p, "=", 2); len(kv) == 2 {
+			m[kv[0]] = kv[1]
+		}
+	}
+	return m
+}
+
+func TestStableNamespace_DeterministicAndStableAcrossRebuilds(t *testing.T) {
+	a := stableNamespace("my-proj", "ra-default", "Adam@Example.com")
+	b := stableNamespace("my-proj", "ra-default", "Adam@Example.com")
+	if a != b {
+		t.Fatalf("stableNamespace not deterministic: %q vs %q", a, b)
+	}
+	// Case/whitespace in inputs must not change the result — a rebuild
+	// reading the same config (possibly re-cased) must reuse the namespace.
+	c := stableNamespace("  MY-PROJ ", "RA-DEFAULT", "adam@example.com")
+	if a != c {
+		t.Errorf("stableNamespace not normalization-stable: %q vs %q", a, c)
+	}
+	// GCS/path safety: lowercase, single segment, allowed charset only.
+	if a != strings.ToLower(a) {
+		t.Errorf("namespace not lowercase: %q", a)
+	}
+	if strings.ContainsAny(a, "/ .") {
+		t.Errorf("namespace contains unsafe char: %q", a)
+	}
+	if !regexp.MustCompile(`^[a-z0-9_-]+$`).MatchString(a) {
+		t.Errorf("namespace has out-of-charset chars: %q", a)
+	}
+}
+
+func TestStableNamespace_DistinctInputsDistinctNamespaces(t *testing.T) {
+	cases := [][3]string{
+		{"proj-a", "cfg", "u@x.com"},
+		{"proj-b", "cfg", "u@x.com"},
+		{"proj-a", "cfg2", "u@x.com"},
+		{"proj-a", "cfg", "v@x.com"},
+	}
+	seen := map[string]bool{}
+	for _, c := range cases {
+		ns := stableNamespace(c[0], c[1], c[2])
+		if seen[ns] {
+			t.Errorf("collision for %v -> %q", c, ns)
+		}
+		seen[ns] = true
+	}
+}
+
+func TestStableNamespace_EmptyInputsYieldEmpty(t *testing.T) {
+	if ns := stableNamespace("", "", ""); ns != "" {
+		t.Errorf("expected empty namespace for empty inputs, got %q", ns)
+	}
+}
+
+func TestBuildContainerEnv_InjectsStableNamespaceWhenClaudeSyncEnabled(t *testing.T) {
+	withRegistry(t) // no plugins needed; injection keys off cfg.Plugins
+	cfg := &config.Config{
+		Git: config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
+		Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{
+			ConfigName: "ra-default",
+		}},
+		Plugins: map[string]map[string]interface{}{
+			"claude-sync": {"enabled": true},
+		},
+	}
+	m := envMap(buildContainerEnv(cfg))
+	want := stableNamespace("p", "ra-default", "a@x.com")
+	if m["RA_PLUGIN_CLAUDE_SYNC_NAMESPACE"] != want {
+		t.Errorf("RA_PLUGIN_CLAUDE_SYNC_NAMESPACE = %q, want %q", m["RA_PLUGIN_CLAUDE_SYNC_NAMESPACE"], want)
+	}
+	// Must be propagated so 200_remote-agent-setup.sh re-exports it to
+	// /run/ra/env where 270/271 read it.
+	if !strings.Contains(m["RA_PROPAGATE_KEYS"], "RA_PLUGIN_CLAUDE_SYNC_NAMESPACE") {
+		t.Errorf("namespace missing from RA_PROPAGATE_KEYS=%q", m["RA_PROPAGATE_KEYS"])
+	}
+}
+
+func TestBuildContainerEnv_OmitsNamespaceWhenClaudeSyncDisabled(t *testing.T) {
+	withRegistry(t)
+	cfg := &config.Config{
+		Git:    config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
+		Gcloud: config.GcloudConfig{Project: "p"},
+		Plugins: map[string]map[string]interface{}{
+			"claude-sync": {"enabled": false},
+		},
+	}
+	m := envMap(buildContainerEnv(cfg))
+	if _, ok := m["RA_PLUGIN_CLAUDE_SYNC_NAMESPACE"]; ok {
+		t.Errorf("namespace must not be injected when claude-sync disabled")
+	}
+}
+
+func TestLifecycleRulesFor_ConvertsSpec(t *testing.T) {
+	spec := plugins.BucketSpec{
+		Lifecycle: []plugins.LifecycleRule{
+			{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"claude-sync/"}},
+			{Action: "Delete", AgeDays: 365},
+		},
+	}
+	got := lifecycleRulesFor(spec)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(got))
+	}
+	if got[0].Action != "SetStorageClass" || got[0].StorageClass != "COLDLINE" || got[0].AgeDays != 90 ||
+		len(got[0].Prefixes) != 1 || got[0].Prefixes[0] != "claude-sync/" {
+		t.Errorf("rule 0 not converted faithfully: %+v", got[0])
+	}
+	if got[1].Action != "Delete" || got[1].AgeDays != 365 {
+		t.Errorf("rule 1 not converted faithfully: %+v", got[1])
+	}
+	if lifecycleRulesFor(plugins.BucketSpec{}) != nil {
+		t.Errorf("expected nil for spec with no lifecycle rules")
 	}
 }
