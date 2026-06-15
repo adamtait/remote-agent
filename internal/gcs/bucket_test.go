@@ -253,7 +253,7 @@ func TestGrantRole_RetriesOnSANotFound(t *testing.T) {
 
 func TestBuildLifecycleJSON_RendersGcsShape(t *testing.T) {
 	data, err := gcs.BuildLifecycleJSON([]gcs.LifecycleRule{
-		{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"claude-sync/"}},
+		{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"plugin-data/"}},
 		{Action: "Delete", AgeDays: 365},
 	})
 	if err != nil {
@@ -285,7 +285,7 @@ func TestBuildLifecycleJSON_RendersGcsShape(t *testing.T) {
 	if r0.Condition.Age == nil || *r0.Condition.Age != 90 {
 		t.Errorf("rule 0 age wrong: %+v", r0.Condition.Age)
 	}
-	if len(r0.Condition.MatchesPrefix) != 1 || r0.Condition.MatchesPrefix[0] != "claude-sync/" {
+	if len(r0.Condition.MatchesPrefix) != 1 || r0.Condition.MatchesPrefix[0] != "plugin-data/" {
 		t.Errorf("rule 0 prefix wrong: %+v", r0.Condition.MatchesPrefix)
 	}
 	r1 := parsed.Rule[1]
@@ -330,7 +330,7 @@ func TestApplyLifecycle_NoRulesIsNoop(t *testing.T) {
 func TestApplyLifecycle_RunsUpdateWithLifecycleFile(t *testing.T) {
 	f := &fakeRunner{}
 	err := gcs.ApplyLifecycle(f, "my-proj", "my-bucket", []gcs.LifecycleRule{
-		{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"claude-sync/"}},
+		{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"plugin-data/"}},
 	})
 	if err != nil {
 		t.Fatalf("ApplyLifecycle: %v", err)

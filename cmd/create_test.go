@@ -534,7 +534,7 @@ func TestBuildContainerEnv_OmitsPluginBucketsWhenDisabled(t *testing.T) {
 }
 
 // envMap parses a buildContainerEnv result into a key→value map for the
-// namespace tests below.
+// stable-id tests below.
 func envMap(s string) map[string]string {
 	m := map[string]string{}
 	for _, p := range strings.Split(s, ",") {
@@ -545,31 +545,31 @@ func envMap(s string) map[string]string {
 	return m
 }
 
-func TestStableNamespace_DeterministicAndStableAcrossRebuilds(t *testing.T) {
-	a := stableNamespace("my-proj", "ra-default", "Adam@Example.com")
-	b := stableNamespace("my-proj", "ra-default", "Adam@Example.com")
+func TestStableWorkstationID_DeterministicAndStableAcrossRebuilds(t *testing.T) {
+	a := stableWorkstationID("my-proj", "ra-default", "Adam@Example.com")
+	b := stableWorkstationID("my-proj", "ra-default", "Adam@Example.com")
 	if a != b {
-		t.Fatalf("stableNamespace not deterministic: %q vs %q", a, b)
+		t.Fatalf("stableWorkstationID not deterministic: %q vs %q", a, b)
 	}
 	// Case/whitespace in inputs must not change the result — a rebuild
-	// reading the same config (possibly re-cased) must reuse the namespace.
-	c := stableNamespace("  MY-PROJ ", "RA-DEFAULT", "adam@example.com")
+	// reading the same config (possibly re-cased) must reuse the id.
+	c := stableWorkstationID("  MY-PROJ ", "RA-DEFAULT", "adam@example.com")
 	if a != c {
-		t.Errorf("stableNamespace not normalization-stable: %q vs %q", a, c)
+		t.Errorf("stableWorkstationID not normalization-stable: %q vs %q", a, c)
 	}
 	// GCS/path safety: lowercase, single segment, allowed charset only.
 	if a != strings.ToLower(a) {
-		t.Errorf("namespace not lowercase: %q", a)
+		t.Errorf("id not lowercase: %q", a)
 	}
 	if strings.ContainsAny(a, "/ .") {
-		t.Errorf("namespace contains unsafe char: %q", a)
+		t.Errorf("id contains unsafe char: %q", a)
 	}
 	if !regexp.MustCompile(`^[a-z0-9_-]+$`).MatchString(a) {
-		t.Errorf("namespace has out-of-charset chars: %q", a)
+		t.Errorf("id has out-of-charset chars: %q", a)
 	}
 }
 
-func TestStableNamespace_DistinctInputsDistinctNamespaces(t *testing.T) {
+func TestStableWorkstationID_DistinctInputsDistinctIDs(t *testing.T) {
 	cases := [][3]string{
 		{"proj-a", "cfg", "u@x.com"},
 		{"proj-b", "cfg", "u@x.com"},
@@ -578,55 +578,72 @@ func TestStableNamespace_DistinctInputsDistinctNamespaces(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, c := range cases {
-		ns := stableNamespace(c[0], c[1], c[2])
-		if seen[ns] {
-			t.Errorf("collision for %v -> %q", c, ns)
+		id := stableWorkstationID(c[0], c[1], c[2])
+		if seen[id] {
+			t.Errorf("collision for %v -> %q", c, id)
 		}
-		seen[ns] = true
+		seen[id] = true
 	}
 }
 
-func TestStableNamespace_EmptyInputsYieldEmpty(t *testing.T) {
-	if ns := stableNamespace("", "", ""); ns != "" {
-		t.Errorf("expected empty namespace for empty inputs, got %q", ns)
+func TestStableWorkstationID_EmptyInputsYieldEmpty(t *testing.T) {
+	if id := stableWorkstationID("", "", ""); id != "" {
+		t.Errorf("expected empty id for empty inputs, got %q", id)
 	}
 }
 
-func TestBuildContainerEnv_InjectsStableNamespaceWhenClaudeSyncEnabled(t *testing.T) {
-	withRegistry(t) // no plugins needed; injection keys off cfg.Plugins
+// testStableIDPluginYAML is a fixture plugin that opts into stable-id
+// injection via the generic `stable_id:` declaration — exercising the
+// mechanism without naming any production plugin.
+const testStableIDPluginYAML = `
+name: test-stable-plugin
+version: "1.0.0"
+description: "fixture for stable_id injection tests"
+stable_id:
+  env_var: RA_PLUGIN_TEST_STABLE_PLUGIN_ID
+config:
+  - name: enabled
+    type: bool
+    default: false
+`
+
+func TestBuildContainerEnv_InjectsStableIDWhenPluginEnabled(t *testing.T) {
+	withRegistry(t, testStableIDPluginYAML)
 	cfg := &config.Config{
 		Git: config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
 		Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{
 			ConfigName: "ra-default",
 		}},
 		Plugins: map[string]map[string]interface{}{
-			"claude-sync": {"enabled": true},
+			"test-stable-plugin": {"enabled": true},
 		},
 	}
 	m := envMap(buildContainerEnv(cfg))
-	want := stableNamespace("p", "ra-default", "a@x.com")
-	if m["RA_PLUGIN_CLAUDE_SYNC_NAMESPACE"] != want {
-		t.Errorf("RA_PLUGIN_CLAUDE_SYNC_NAMESPACE = %q, want %q", m["RA_PLUGIN_CLAUDE_SYNC_NAMESPACE"], want)
+	want := stableWorkstationID("p", "ra-default", "a@x.com")
+	// The env-var name comes from the plugin's own `stable_id.env_var`
+	// declaration — core hard-codes nothing.
+	if m["RA_PLUGIN_TEST_STABLE_PLUGIN_ID"] != want {
+		t.Errorf("RA_PLUGIN_TEST_STABLE_PLUGIN_ID = %q, want %q", m["RA_PLUGIN_TEST_STABLE_PLUGIN_ID"], want)
 	}
 	// Must be propagated so 200_remote-agent-setup.sh re-exports it to
-	// /run/ra/env where 270/271 read it.
-	if !strings.Contains(m["RA_PROPAGATE_KEYS"], "RA_PLUGIN_CLAUDE_SYNC_NAMESPACE") {
-		t.Errorf("namespace missing from RA_PROPAGATE_KEYS=%q", m["RA_PROPAGATE_KEYS"])
+	// /run/ra/env where the plugin's startup scripts read it.
+	if !strings.Contains(m["RA_PROPAGATE_KEYS"], "RA_PLUGIN_TEST_STABLE_PLUGIN_ID") {
+		t.Errorf("stable id missing from RA_PROPAGATE_KEYS=%q", m["RA_PROPAGATE_KEYS"])
 	}
 }
 
-func TestBuildContainerEnv_OmitsNamespaceWhenClaudeSyncDisabled(t *testing.T) {
-	withRegistry(t)
+func TestBuildContainerEnv_OmitsStableIDWhenPluginDisabled(t *testing.T) {
+	withRegistry(t, testStableIDPluginYAML)
 	cfg := &config.Config{
 		Git:    config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
 		Gcloud: config.GcloudConfig{Project: "p"},
 		Plugins: map[string]map[string]interface{}{
-			"claude-sync": {"enabled": false},
+			"test-stable-plugin": {"enabled": false},
 		},
 	}
 	m := envMap(buildContainerEnv(cfg))
-	if _, ok := m["RA_PLUGIN_CLAUDE_SYNC_NAMESPACE"]; ok {
-		t.Errorf("namespace must not be injected when claude-sync disabled")
+	if _, ok := m["RA_PLUGIN_TEST_STABLE_PLUGIN_ID"]; ok {
+		t.Errorf("stable id must not be injected when plugin disabled")
 	}
 }
 
@@ -673,7 +690,7 @@ func TestUniqueBucketsWithLifecycle_NoLifecycleStillListsBucket(t *testing.T) {
 func TestLifecycleRulesFor_ConvertsSpec(t *testing.T) {
 	spec := plugins.BucketSpec{
 		Lifecycle: []plugins.LifecycleRule{
-			{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"claude-sync/"}},
+			{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"plugin-data/"}},
 			{Action: "Delete", AgeDays: 365},
 		},
 	}
@@ -682,7 +699,7 @@ func TestLifecycleRulesFor_ConvertsSpec(t *testing.T) {
 		t.Fatalf("expected 2 rules, got %d", len(got))
 	}
 	if got[0].Action != "SetStorageClass" || got[0].StorageClass != "COLDLINE" || got[0].AgeDays != 90 ||
-		len(got[0].Prefixes) != 1 || got[0].Prefixes[0] != "claude-sync/" {
+		len(got[0].Prefixes) != 1 || got[0].Prefixes[0] != "plugin-data/" {
 		t.Errorf("rule 0 not converted faithfully: %+v", got[0])
 	}
 	if got[1].Action != "Delete" || got[1].AgeDays != 365 {

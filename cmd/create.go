@@ -44,28 +44,27 @@ func logicalNameToEnvToken(logical string) string {
 	return strings.ToUpper(logical)
 }
 
-// nsSafeRe matches one run of characters that are NOT safe in a GCS
+// idSafeRe matches one run of characters that are NOT safe in a GCS
 // object-prefix / filesystem path component. Everything outside
-// [a-z0-9_-] is collapsed to a single hyphen by stableNamespace so the
-// id stays a single, slash-free, lowercase path segment.
-var nsSafeRe = regexp.MustCompile(`[^a-z0-9_-]+`)
+// [a-z0-9_-] is collapsed to a single hyphen by stableWorkstationID so
+// the id stays a single, slash-free, lowercase path segment.
+var idSafeRe = regexp.MustCompile(`[^a-z0-9_-]+`)
 
-// stableNamespace derives a deterministic claude-sync namespace id from
-// inputs that survive `ra create` rebuilds — the gcloud project, the
-// workstation config_name, and the git user email. Unlike the GCE
-// instance name (which is a fresh UUID every create), these are stable
-// for a given (project, config, user) triple, so a rebuilt workstation
-// reuses ONE namespace instead of spawning a new one each time. That is
-// the whole point of #3 in the load-reduction plan: it stops the
-// per-create namespace sprawl that grew the boot-pull cost unbounded.
+// stableWorkstationID derives a deterministic identity token from inputs
+// that survive `ra create` rebuilds — the gcloud project, the workstation
+// config_name, and the git user email. Unlike the GCE instance name
+// (which is a fresh UUID every create), these are stable for a given
+// (project, config, user) triple, so a plugin keyed on this token reuses
+// ONE per-workstation identity across rebuilds instead of accumulating a
+// fresh one each time. Plugins opt in via `stable_id:` in plugin.yaml.
 //
 // The output is lowercased, restricted to [a-z0-9_-], slash-free, and
 // suffixed with an 8-hex digest of the raw triple so two triples that
 // collapse to the same sanitized stem (e.g. emails differing only in
-// punctuation) still get distinct namespaces. Returns "" if all three
-// inputs are empty, so the caller can fall back to the script-side
-// resolve_ws_id() rather than push to a degenerate "ws-<digest>".
-func stableNamespace(project, configName, userEmail string) string {
+// punctuation) still get distinct ids. Returns "" if all three inputs are
+// empty, so the caller can skip injection and let the plugin fall back to
+// its own default.
+func stableWorkstationID(project, configName, userEmail string) string {
 	p := strings.ToLower(strings.TrimSpace(project))
 	c := strings.ToLower(strings.TrimSpace(configName))
 	e := strings.ToLower(strings.TrimSpace(userEmail))
@@ -78,13 +77,13 @@ func stableNamespace(project, configName, userEmail string) string {
 	// components so re-cased / space-padded inputs produce the identical
 	// stem (not just the identical digest).
 	stem := p + "-" + c
-	stem = nsSafeRe.ReplaceAllString(stem, "-")
+	stem = idSafeRe.ReplaceAllString(stem, "-")
 	stem = strings.Trim(stem, "-_")
 	if stem == "" {
 		stem = "ws"
 	}
-	// Keep the human-readable stem short so the full namespace stays a
-	// tidy path segment; the digest carries the uniqueness guarantee.
+	// Keep the human-readable stem short so the full id stays a tidy path
+	// segment; the digest carries the uniqueness guarantee.
 	if len(stem) > 40 {
 		stem = strings.Trim(stem[:40], "-_")
 	}
@@ -221,21 +220,31 @@ func buildContainerEnv(cfg *config.Config) string {
 			addProp(b.Spec.EnvVar, b.Name)
 		}
 	}
-	// Stable claude-sync namespace (load-reduction plan #3). The boot
-	// pull/push scripts default to the GCE instance name as their GCS
-	// namespace, which is a fresh UUID on every `ra create` — so each
-	// rebuild leaked a new ~85 MB namespace that nothing ever pruned.
-	// Inject a deterministic id derived from (project, config_name,
-	// user_email) so a rebuilt workstation reuses ONE namespace; the
-	// scripts prefer this over resolve_ws_id() when set. This is the one
-	// place core knows the claude-sync env-var name by string — gated on
-	// the plugin being enabled so it's a no-op for everyone else — because
-	// the value depends on create-time inputs (like the plugin buckets
-	// above) that the generic plugin-config path cannot express.
-	if pc := cfg.Plugins["claude-sync"]; pc != nil {
-		if en, _ := pc["enabled"].(bool); en {
-			if ns := stableNamespace(cfg.Gcloud.Project, cfg.Gcloud.Workstation.ConfigName, cfg.Git.UserEmail); ns != "" {
-				addProp("RA_PLUGIN_CLAUDE_SYNC_NAMESPACE", ns)
+	// Stable workstation-identity injection. A plugin may declare
+	// `stable_id: { env_var: ... }` in plugin.yaml to receive a
+	// deterministic token (see stableWorkstationID) that survives `ra
+	// create` rebuilds, unlike the GCE instance name. Generic, like the
+	// bucket env injection above: core hard-codes no plugin name; the
+	// env-var name comes from the plugin's own declaration. Gated on
+	// `enabled: true` and added to the propagate allowlist so login shells
+	// see it. The token depends on create-time inputs (project, config,
+	// user) that the static plugin-config path cannot express, which is why
+	// it is computed here rather than flowing through reg.AllContainerEnvPairs.
+	if reg != nil {
+		if id := stableWorkstationID(cfg.Gcloud.Project, cfg.Gcloud.Workstation.ConfigName, cfg.Git.UserEmail); id != "" {
+			for _, p := range reg.All() {
+				spec := p.Schema().StableID
+				if spec == nil || spec.EnvVar == "" {
+					continue
+				}
+				pc := cfg.Plugins[p.Name()]
+				if pc == nil {
+					continue
+				}
+				if en, _ := pc["enabled"].(bool); !en {
+					continue
+				}
+				addProp(spec.EnvVar, id)
 			}
 		}
 	}
@@ -502,10 +511,10 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 				return fmt.Errorf("ensuring bucket %s (plugin %s): %w", name, firstPlugin[name], err)
 			}
 		}
-		// Apply accumulated Object Lifecycle Management rules (load-reduction
-		// plan #4) once per bucket. GCS replaces the whole lifecycle config
-		// each call, so this re-asserts the policy idempotently on every
-		// `ra create`. No-op for buckets whose plugins declare none.
+		// Apply accumulated Object Lifecycle Management rules once per
+		// bucket. GCS replaces the whole lifecycle config each call, so this
+		// re-asserts the policy idempotently on every `ra create`. No-op for
+		// buckets whose plugins declare none.
 		for _, name := range bucketOrder {
 			rules := lifecycleByBucket[name]
 			if len(rules) == 0 {

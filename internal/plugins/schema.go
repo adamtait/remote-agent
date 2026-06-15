@@ -24,6 +24,25 @@ type PluginSchema struct {
 	// name is hard-coded — mirroring how `iam_roles:` on auth_providers
 	// and `port-for-tunnel:` work.
 	Buckets []BucketSpec `yaml:"buckets"`
+	// StableID, when set, asks `ra create` to inject a deterministic
+	// workstation-identity token into the named env var. The token is
+	// derived from (gcloud project, workstation config_name, git user
+	// email), so it is stable across `ra create` rebuilds — unlike the GCE
+	// instance name, which is a fresh UUID each create. Generic, like
+	// `buckets:` and `port-for-tunnel:`: core hard-codes no plugin name;
+	// the env-var name comes from this declaration, and injection is gated
+	// on the plugin being `enabled: true`. A plugin keyed on this token
+	// reuses one per-workstation identity across rebuilds instead of
+	// accumulating a fresh one each time.
+	StableID *StableIDSpec `yaml:"stable_id"`
+}
+
+// StableIDSpec declares that the plugin wants a deterministic,
+// rebuild-stable workstation-identity token exposed to the container.
+// EnvVar is the env var name the token is injected under. See
+// PluginSchema.StableID.
+type StableIDSpec struct {
+	EnvVar string `yaml:"env_var"`
 }
 
 // BucketSpec declares one GCS bucket the plugin needs at workstation
@@ -41,8 +60,9 @@ type BucketSpec struct {
 	// rules `ra create` applies to the bucket after ensuring it exists.
 	// Generic, like the rest of BucketSpec — core builds the lifecycle
 	// JSON and shells out; the policy (ages, classes, prefixes) lives in
-	// plugin.yaml. Used by claude-sync to age stale sync data into
-	// Coldline so the bucket cost stays bounded (load-reduction plan #4).
+	// plugin.yaml. A plugin can scope rules to its own object-name prefix
+	// so they never touch another plugin's data in a shared bucket, and
+	// thereby keep the bucket's at-rest cost bounded.
 	Lifecycle []LifecycleRule `yaml:"lifecycle"`
 }
 
