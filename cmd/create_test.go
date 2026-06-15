@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -529,5 +530,182 @@ func TestBuildContainerEnv_OmitsPluginBucketsWhenDisabled(t *testing.T) {
 		if k == "RA_PLUGIN_TEST_BUCKET_PLUGIN_BUCKET" {
 			t.Errorf("expected no plugin bucket env when disabled; key present in %q", got)
 		}
+	}
+}
+
+// envMap parses a buildContainerEnv result into a key→value map for the
+// stable-id tests below.
+func envMap(s string) map[string]string {
+	m := map[string]string{}
+	for _, p := range strings.Split(s, ",") {
+		if kv := strings.SplitN(p, "=", 2); len(kv) == 2 {
+			m[kv[0]] = kv[1]
+		}
+	}
+	return m
+}
+
+func TestStableWorkstationID_DeterministicAndStableAcrossRebuilds(t *testing.T) {
+	a := stableWorkstationID("my-proj", "ra-default", "Adam@Example.com")
+	b := stableWorkstationID("my-proj", "ra-default", "Adam@Example.com")
+	if a != b {
+		t.Fatalf("stableWorkstationID not deterministic: %q vs %q", a, b)
+	}
+	// Case/whitespace in inputs must not change the result — a rebuild
+	// reading the same config (possibly re-cased) must reuse the id.
+	c := stableWorkstationID("  MY-PROJ ", "RA-DEFAULT", "adam@example.com")
+	if a != c {
+		t.Errorf("stableWorkstationID not normalization-stable: %q vs %q", a, c)
+	}
+	// GCS/path safety: lowercase, single segment, allowed charset only.
+	if a != strings.ToLower(a) {
+		t.Errorf("id not lowercase: %q", a)
+	}
+	if strings.ContainsAny(a, "/ .") {
+		t.Errorf("id contains unsafe char: %q", a)
+	}
+	if !regexp.MustCompile(`^[a-z0-9_-]+$`).MatchString(a) {
+		t.Errorf("id has out-of-charset chars: %q", a)
+	}
+}
+
+func TestStableWorkstationID_DistinctInputsDistinctIDs(t *testing.T) {
+	cases := [][3]string{
+		{"proj-a", "cfg", "u@x.com"},
+		{"proj-b", "cfg", "u@x.com"},
+		{"proj-a", "cfg2", "u@x.com"},
+		{"proj-a", "cfg", "v@x.com"},
+	}
+	seen := map[string]bool{}
+	for _, c := range cases {
+		id := stableWorkstationID(c[0], c[1], c[2])
+		if seen[id] {
+			t.Errorf("collision for %v -> %q", c, id)
+		}
+		seen[id] = true
+	}
+}
+
+func TestStableWorkstationID_EmptyInputsYieldEmpty(t *testing.T) {
+	if id := stableWorkstationID("", "", ""); id != "" {
+		t.Errorf("expected empty id for empty inputs, got %q", id)
+	}
+}
+
+// testStableIDPluginYAML is a fixture plugin that opts into stable-id
+// injection via the generic `stable_id:` declaration — exercising the
+// mechanism without naming any production plugin.
+const testStableIDPluginYAML = `
+name: test-stable-plugin
+version: "1.0.0"
+description: "fixture for stable_id injection tests"
+stable_id:
+  env_var: RA_PLUGIN_TEST_STABLE_PLUGIN_ID
+config:
+  - name: enabled
+    type: bool
+    default: false
+`
+
+func TestBuildContainerEnv_InjectsStableIDWhenPluginEnabled(t *testing.T) {
+	withRegistry(t, testStableIDPluginYAML)
+	cfg := &config.Config{
+		Git: config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
+		Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{
+			ConfigName: "ra-default",
+		}},
+		Plugins: map[string]map[string]interface{}{
+			"test-stable-plugin": {"enabled": true},
+		},
+	}
+	m := envMap(buildContainerEnv(cfg))
+	want := stableWorkstationID("p", "ra-default", "a@x.com")
+	// The env-var name comes from the plugin's own `stable_id.env_var`
+	// declaration — core hard-codes nothing.
+	if m["RA_PLUGIN_TEST_STABLE_PLUGIN_ID"] != want {
+		t.Errorf("RA_PLUGIN_TEST_STABLE_PLUGIN_ID = %q, want %q", m["RA_PLUGIN_TEST_STABLE_PLUGIN_ID"], want)
+	}
+	// Must be propagated so 200_remote-agent-setup.sh re-exports it to
+	// /run/ra/env where the plugin's startup scripts read it.
+	if !strings.Contains(m["RA_PROPAGATE_KEYS"], "RA_PLUGIN_TEST_STABLE_PLUGIN_ID") {
+		t.Errorf("stable id missing from RA_PROPAGATE_KEYS=%q", m["RA_PROPAGATE_KEYS"])
+	}
+}
+
+func TestBuildContainerEnv_OmitsStableIDWhenPluginDisabled(t *testing.T) {
+	withRegistry(t, testStableIDPluginYAML)
+	cfg := &config.Config{
+		Git:    config.GitConfig{UserName: "Alice", UserEmail: "a@x.com"},
+		Gcloud: config.GcloudConfig{Project: "p"},
+		Plugins: map[string]map[string]interface{}{
+			"test-stable-plugin": {"enabled": false},
+		},
+	}
+	m := envMap(buildContainerEnv(cfg))
+	if _, ok := m["RA_PLUGIN_TEST_STABLE_PLUGIN_ID"]; ok {
+		t.Errorf("stable id must not be injected when plugin disabled")
+	}
+}
+
+func TestUniqueBucketsWithLifecycle_UnionsSharedBucketRulesInOrder(t *testing.T) {
+	coldline := plugins.BucketSpec{Lifecycle: []plugins.LifecycleRule{
+		{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"a/"}},
+	}}
+	del := plugins.BucketSpec{Lifecycle: []plugins.LifecycleRule{
+		{Action: "Delete", AgeDays: 365, Prefixes: []string{"b/"}},
+	}}
+	buckets := []resolvedBucket{
+		{Plugin: "p1", Name: "shared", Spec: coldline},
+		{Plugin: "p2", Name: "solo", Spec: del},
+		{Plugin: "p3", Name: "shared", Spec: del}, // same bucket as p1
+	}
+	order, lifecycle := uniqueBucketsWithLifecycle(buckets)
+
+	// Unique names, first-seen order — "shared" before "solo", listed once.
+	if got := strings.Join(order, ","); got != "shared,solo" {
+		t.Fatalf("order = %q, want %q", got, "shared,solo")
+	}
+	// Rules for the shared bucket must be the UNION of p1 and p3 (not
+	// clobbered), in plugin order.
+	if rs := lifecycle["shared"]; len(rs) != 2 ||
+		rs[0].Action != "SetStorageClass" || rs[1].Action != "Delete" {
+		t.Errorf("shared lifecycle not unioned in order: %+v", rs)
+	}
+	if rs := lifecycle["solo"]; len(rs) != 1 || rs[0].Action != "Delete" {
+		t.Errorf("solo lifecycle wrong: %+v", rs)
+	}
+}
+
+func TestUniqueBucketsWithLifecycle_NoLifecycleStillListsBucket(t *testing.T) {
+	buckets := []resolvedBucket{{Plugin: "p", Name: "b", Spec: plugins.BucketSpec{}}}
+	order, lifecycle := uniqueBucketsWithLifecycle(buckets)
+	if len(order) != 1 || order[0] != "b" {
+		t.Fatalf("order = %v, want [b]", order)
+	}
+	if len(lifecycle["b"]) != 0 {
+		t.Errorf("expected no lifecycle rules for b, got %+v", lifecycle["b"])
+	}
+}
+
+func TestLifecycleRulesFor_ConvertsSpec(t *testing.T) {
+	spec := plugins.BucketSpec{
+		Lifecycle: []plugins.LifecycleRule{
+			{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"plugin-data/"}},
+			{Action: "Delete", AgeDays: 365},
+		},
+	}
+	got := lifecycleRulesFor(spec)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(got))
+	}
+	if got[0].Action != "SetStorageClass" || got[0].StorageClass != "COLDLINE" || got[0].AgeDays != 90 ||
+		len(got[0].Prefixes) != 1 || got[0].Prefixes[0] != "plugin-data/" {
+		t.Errorf("rule 0 not converted faithfully: %+v", got[0])
+	}
+	if got[1].Action != "Delete" || got[1].AgeDays != 365 {
+		t.Errorf("rule 1 not converted faithfully: %+v", got[1])
+	}
+	if lifecycleRulesFor(plugins.BucketSpec{}) != nil {
+		t.Errorf("expected nil for spec with no lifecycle rules")
 	}
 }

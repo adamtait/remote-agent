@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"io"
 	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +42,52 @@ const (
 
 func logicalNameToEnvToken(logical string) string {
 	return strings.ToUpper(logical)
+}
+
+// idSafeRe matches one run of characters that are NOT safe in a GCS
+// object-prefix / filesystem path component. Everything outside
+// [a-z0-9_-] is collapsed to a single hyphen by stableWorkstationID so
+// the id stays a single, slash-free, lowercase path segment.
+var idSafeRe = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+// stableWorkstationID derives a deterministic identity token from inputs
+// that survive `ra create` rebuilds — the gcloud project, the workstation
+// config_name, and the git user email. Unlike the GCE instance name
+// (which is a fresh UUID every create), these are stable for a given
+// (project, config, user) triple, so a plugin keyed on this token reuses
+// ONE per-workstation identity across rebuilds instead of accumulating a
+// fresh one each time. Plugins opt in via `stable_id:` in plugin.yaml.
+//
+// The output is lowercased, restricted to [a-z0-9_-], slash-free, and
+// suffixed with an 8-hex digest of the raw triple so two triples that
+// collapse to the same sanitized stem (e.g. emails differing only in
+// punctuation) still get distinct ids. Returns "" if all three inputs are
+// empty, so the caller can skip injection and let the plugin fall back to
+// its own default.
+func stableWorkstationID(project, configName, userEmail string) string {
+	p := strings.ToLower(strings.TrimSpace(project))
+	c := strings.ToLower(strings.TrimSpace(configName))
+	e := strings.ToLower(strings.TrimSpace(userEmail))
+	raw := p + "/" + c + "/" + e
+	if raw == "//" {
+		return ""
+	}
+	sum := sha1.Sum([]byte(raw))
+	// Build the human-readable stem from the already-normalized
+	// components so re-cased / space-padded inputs produce the identical
+	// stem (not just the identical digest).
+	stem := p + "-" + c
+	stem = idSafeRe.ReplaceAllString(stem, "-")
+	stem = strings.Trim(stem, "-_")
+	if stem == "" {
+		stem = "ws"
+	}
+	// Keep the human-readable stem short so the full id stays a tidy path
+	// segment; the digest carries the uniqueness guarantee.
+	if len(stem) > 40 {
+		stem = strings.Trim(stem[:40], "-_")
+	}
+	return fmt.Sprintf("%s-%x", stem, sum[:4])
 }
 
 // resolvedBucket pairs a plugin's BucketSpec declaration with the
@@ -102,6 +150,46 @@ func pluginBuckets(reg *plugins.Registry, cfg *config.Config) ([]resolvedBucket,
 	return out, nil
 }
 
+// lifecycleRulesFor converts a plugin's declared lifecycle rules
+// (plugins.LifecycleRule, parsed from plugin.yaml) into the gcs package's
+// rule type. The two are kept as separate types so internal/gcs need not
+// import internal/plugins; this is the single conversion seam.
+func lifecycleRulesFor(spec plugins.BucketSpec) []gcs.LifecycleRule {
+	if len(spec.Lifecycle) == 0 {
+		return nil
+	}
+	out := make([]gcs.LifecycleRule, 0, len(spec.Lifecycle))
+	for _, lr := range spec.Lifecycle {
+		out = append(out, gcs.LifecycleRule{
+			Action:       lr.Action,
+			StorageClass: lr.StorageClass,
+			AgeDays:      lr.AgeDays,
+			Prefixes:     lr.Prefixes,
+		})
+	}
+	return out
+}
+
+// uniqueBucketsWithLifecycle collapses resolved buckets to their unique
+// names in first-seen order and unions each name's declared lifecycle
+// rules. Because two plugins can share a bucket and ApplyLifecycle
+// replaces the whole lifecycle config per call, the rules must be unioned
+// and applied once per bucket rather than per plugin (which would let the
+// last plugin clobber the others). EnsureBucket likewise only needs
+// calling once per unique name.
+func uniqueBucketsWithLifecycle(buckets []resolvedBucket) (order []string, lifecycle map[string][]gcs.LifecycleRule) {
+	lifecycle = map[string][]gcs.LifecycleRule{}
+	seen := map[string]bool{}
+	for _, b := range buckets {
+		if !seen[b.Name] {
+			seen[b.Name] = true
+			order = append(order, b.Name)
+		}
+		lifecycle[b.Name] = append(lifecycle[b.Name], lifecycleRulesFor(b.Spec)...)
+	}
+	return order, lifecycle
+}
+
 func buildContainerEnv(cfg *config.Config) string {
 	var pairs []string
 	// propagate is the explicit allowlist of keys that 200_remote-agent-setup.sh
@@ -130,6 +218,34 @@ func buildContainerEnv(cfg *config.Config) string {
 	if buckets, err := pluginBuckets(reg, cfg); err == nil {
 		for _, b := range buckets {
 			addProp(b.Spec.EnvVar, b.Name)
+		}
+	}
+	// Stable workstation-identity injection. A plugin may declare
+	// `stable_id: { env_var: ... }` in plugin.yaml to receive a
+	// deterministic token (see stableWorkstationID) that survives `ra
+	// create` rebuilds, unlike the GCE instance name. Generic, like the
+	// bucket env injection above: core hard-codes no plugin name; the
+	// env-var name comes from the plugin's own declaration. Gated on
+	// `enabled: true` and added to the propagate allowlist so login shells
+	// see it. The token depends on create-time inputs (project, config,
+	// user) that the static plugin-config path cannot express, which is why
+	// it is computed here rather than flowing through reg.AllContainerEnvPairs.
+	if reg != nil {
+		if id := stableWorkstationID(cfg.Gcloud.Project, cfg.Gcloud.Workstation.ConfigName, cfg.Git.UserEmail); id != "" {
+			for _, p := range reg.All() {
+				spec := p.Schema().StableID
+				if spec == nil || spec.EnvVar == "" {
+					continue
+				}
+				pc := cfg.Plugins[p.Name()]
+				if pc == nil {
+					continue
+				}
+				if en, _ := pc["enabled"].(bool); !en {
+					continue
+				}
+				addProp(spec.EnvVar, id)
+			}
 		}
 	}
 	for _, pair := range reg.AllContainerEnvPairs(cfg) {
@@ -376,10 +492,37 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 			names = append(names, b.Name)
 		}
 		done = logging.Step("ensure_plugin_buckets", 3, totalCreateSteps, fmt.Sprintf("Ensuring %d plugin-declared GCS bucket(s): %s...", len(pluginBucketList), strings.Join(names, ", ")), cmd.OutOrStdout())
+		// Two plugins may resolve to the SAME bucket (the override_field
+		// mechanism exists precisely so they can share one). Ensure each
+		// unique bucket once, then apply the UNION of every plugin's
+		// declared lifecycle rules per bucket — ApplyLifecycle replaces the
+		// bucket's whole lifecycle config per call, so applying per-plugin
+		// would let the last plugin silently clobber the others' rules.
+		bucketOrder, lifecycleByBucket := uniqueBucketsWithLifecycle(pluginBucketList)
+		firstPlugin := map[string]string{}
 		for _, b := range pluginBucketList {
-			if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, b.Name, ws.Region); err != nil {
+			if _, ok := firstPlugin[b.Name]; !ok {
+				firstPlugin[b.Name] = b.Plugin
+			}
+		}
+		for _, name := range bucketOrder {
+			if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, name, ws.Region); err != nil {
 				done(err)
-				return fmt.Errorf("ensuring bucket %s (plugin %s): %w", b.Name, b.Plugin, err)
+				return fmt.Errorf("ensuring bucket %s (plugin %s): %w", name, firstPlugin[name], err)
+			}
+		}
+		// Apply accumulated Object Lifecycle Management rules once per
+		// bucket. GCS replaces the whole lifecycle config each call, so this
+		// re-asserts the policy idempotently on every `ra create`. No-op for
+		// buckets whose plugins declare none.
+		for _, name := range bucketOrder {
+			rules := lifecycleByBucket[name]
+			if len(rules) == 0 {
+				continue
+			}
+			if err := gcs.ApplyLifecycle(r, cfg.Gcloud.Project, name, rules); err != nil {
+				done(err)
+				return fmt.Errorf("applying lifecycle to bucket %s: %w", name, err)
 			}
 		}
 		done(nil)

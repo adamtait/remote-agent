@@ -1,6 +1,7 @@
 package gcs_test
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -247,5 +248,100 @@ func TestGrantRole_RetriesOnSANotFound(t *testing.T) {
 	}
 	if len(f.calls) != 2 {
 		t.Errorf("expected 2 attempts, got %d", len(f.calls))
+	}
+}
+
+func TestBuildLifecycleJSON_RendersGcsShape(t *testing.T) {
+	data, err := gcs.BuildLifecycleJSON([]gcs.LifecycleRule{
+		{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"plugin-data/"}},
+		{Action: "Delete", AgeDays: 365},
+	})
+	if err != nil {
+		t.Fatalf("BuildLifecycleJSON: %v", err)
+	}
+	// Parse back into the gcloud --lifecycle-file shape and assert fields.
+	var parsed struct {
+		Rule []struct {
+			Action struct {
+				Type         string `json:"type"`
+				StorageClass string `json:"storageClass"`
+			} `json:"action"`
+			Condition struct {
+				Age           *int     `json:"age"`
+				MatchesPrefix []string `json:"matchesPrefix"`
+			} `json:"condition"`
+		} `json:"rule"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, data)
+	}
+	if len(parsed.Rule) != 2 {
+		t.Fatalf("expected 2 rules, got %d: %s", len(parsed.Rule), data)
+	}
+	r0 := parsed.Rule[0]
+	if r0.Action.Type != "SetStorageClass" || r0.Action.StorageClass != "COLDLINE" {
+		t.Errorf("rule 0 action wrong: %+v", r0.Action)
+	}
+	if r0.Condition.Age == nil || *r0.Condition.Age != 90 {
+		t.Errorf("rule 0 age wrong: %+v", r0.Condition.Age)
+	}
+	if len(r0.Condition.MatchesPrefix) != 1 || r0.Condition.MatchesPrefix[0] != "plugin-data/" {
+		t.Errorf("rule 0 prefix wrong: %+v", r0.Condition.MatchesPrefix)
+	}
+	r1 := parsed.Rule[1]
+	if r1.Action.Type != "Delete" || r1.Action.StorageClass != "" {
+		t.Errorf("rule 1 action wrong: %+v", r1.Action)
+	}
+	if len(r1.Condition.MatchesPrefix) != 0 {
+		t.Errorf("rule 1 should have no prefix condition: %+v", r1.Condition.MatchesPrefix)
+	}
+}
+
+func TestBuildLifecycleJSON_Validation(t *testing.T) {
+	cases := []struct {
+		name  string
+		rules []gcs.LifecycleRule
+	}{
+		{"empty", nil},
+		{"unknown action", []gcs.LifecycleRule{{Action: "Archive", AgeDays: 10}}},
+		{"setclass without class", []gcs.LifecycleRule{{Action: "SetStorageClass", AgeDays: 10}}},
+		{"delete with class", []gcs.LifecycleRule{{Action: "Delete", StorageClass: "COLDLINE", AgeDays: 10}}},
+		{"negative age", []gcs.LifecycleRule{{Action: "Delete", AgeDays: -1}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := gcs.BuildLifecycleJSON(c.rules); err == nil {
+				t.Errorf("expected error for %s, got nil", c.name)
+			}
+		})
+	}
+}
+
+func TestApplyLifecycle_NoRulesIsNoop(t *testing.T) {
+	f := &fakeRunner{}
+	if err := gcs.ApplyLifecycle(f, "p", "b", nil); err != nil {
+		t.Fatalf("ApplyLifecycle with no rules should be a no-op, got %v", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("expected no gcloud calls for empty rules, got %v", f.calls)
+	}
+}
+
+func TestApplyLifecycle_RunsUpdateWithLifecycleFile(t *testing.T) {
+	f := &fakeRunner{}
+	err := gcs.ApplyLifecycle(f, "my-proj", "my-bucket", []gcs.LifecycleRule{
+		{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"plugin-data/"}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyLifecycle: %v", err)
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("expected 1 gcloud call, got %d: %v", len(f.calls), f.calls)
+	}
+	got := strings.Join(f.calls[0], " ")
+	for _, want := range []string{"storage", "buckets", "update", "gs://my-bucket", "--project", "my-proj", "--lifecycle-file="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("update call missing %q: %v", want, f.calls[0])
+		}
 	}
 }

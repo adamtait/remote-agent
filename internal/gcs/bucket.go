@@ -10,8 +10,10 @@ package gcs
 
 import (
 	"crypto/sha1"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -103,4 +105,113 @@ func GrantRole(r gcloud.Runner, attempts int, delay time.Duration, notice io.Wri
 		"--member=serviceAccount:"+saEmail,
 		"--role="+role,
 		"--condition=None")
+}
+
+// LifecycleRule is one GCS Object Lifecycle Management rule in the
+// vocabulary ra supports. It is the gcs-package mirror of
+// plugins.LifecycleRule (kept separate so internal/gcs need not import
+// internal/plugins); cmd/create.go converts between the two. Action is
+// "Delete" or "SetStorageClass". AgeDays and Prefixes are the conditions:
+// age in days, and an optional set of object-name prefixes the rule is
+// scoped to (so a rule can target just one plugin's prefix in a shared
+// bucket).
+type LifecycleRule struct {
+	Action       string
+	StorageClass string
+	AgeDays      int
+	Prefixes     []string
+}
+
+// lifecyclePayload is the on-disk JSON shape `gcloud storage buckets
+// update --lifecycle-file` expects: {"rule": [{"action": {...},
+// "condition": {...}}, ...]}. Marshaled with omitempty so a Delete rule
+// doesn't emit an empty storageClass and an unscoped rule doesn't emit an
+// empty matchesPrefix (GCS rejects empty arrays in some fields).
+type lifecyclePayload struct {
+	Rule []lifecycleEntry `json:"rule"`
+}
+
+type lifecycleEntry struct {
+	Action    lifecycleAction    `json:"action"`
+	Condition lifecycleCondition `json:"condition"`
+}
+
+type lifecycleAction struct {
+	Type         string `json:"type"`
+	StorageClass string `json:"storageClass,omitempty"`
+}
+
+type lifecycleCondition struct {
+	Age           *int     `json:"age,omitempty"`
+	MatchesPrefix []string `json:"matchesPrefix,omitempty"`
+}
+
+// BuildLifecycleJSON renders rules into the GCS lifecycle-file JSON. It
+// validates each rule (known action, storageClass present for
+// SetStorageClass, non-negative age) so a typo in plugin.yaml fails fast
+// at `ra create` rather than silently shipping a no-op or malformed
+// config to GCS. Exposed (not just used by ApplyLifecycle) so it is unit
+// testable without a gcloud shell-out.
+func BuildLifecycleJSON(rules []LifecycleRule) ([]byte, error) {
+	if len(rules) == 0 {
+		return nil, fmt.Errorf("no lifecycle rules to apply")
+	}
+	payload := lifecyclePayload{Rule: make([]lifecycleEntry, 0, len(rules))}
+	for i, rule := range rules {
+		switch rule.Action {
+		case "Delete":
+			if rule.StorageClass != "" {
+				return nil, fmt.Errorf("lifecycle rule %d: storage_class is meaningless for a Delete action", i)
+			}
+		case "SetStorageClass":
+			if rule.StorageClass == "" {
+				return nil, fmt.Errorf("lifecycle rule %d: SetStorageClass requires a storage_class", i)
+			}
+		default:
+			return nil, fmt.Errorf("lifecycle rule %d: unknown action %q (want Delete or SetStorageClass)", i, rule.Action)
+		}
+		if rule.AgeDays < 0 {
+			return nil, fmt.Errorf("lifecycle rule %d: age_days must be >= 0, got %d", i, rule.AgeDays)
+		}
+		age := rule.AgeDays
+		payload.Rule = append(payload.Rule, lifecycleEntry{
+			Action: lifecycleAction{Type: rule.Action, StorageClass: rule.StorageClass},
+			Condition: lifecycleCondition{
+				Age:           &age,
+				MatchesPrefix: rule.Prefixes,
+			},
+		})
+	}
+	return json.MarshalIndent(payload, "", "  ")
+}
+
+// ApplyLifecycle writes the rules to a temp lifecycle-file and runs
+// `gcloud storage buckets update gs://<name> --lifecycle-file=<path>`.
+// Idempotent: GCS replaces the whole lifecycle config with whatever the
+// file contains, so re-running `ra create` re-asserts the same policy. A
+// no-op when rules is empty (most plugins declare none) so the caller can
+// invoke it unconditionally.
+func ApplyLifecycle(r gcloud.Runner, project, name string, rules []LifecycleRule) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	data, err := BuildLifecycleJSON(rules)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp("", "ra-lifecycle-*.json")
+	if err != nil {
+		return fmt.Errorf("creating lifecycle temp file: %w", err)
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("writing lifecycle temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing lifecycle temp file: %w", err)
+	}
+	return r.Run("storage", "buckets", "update", "gs://"+name,
+		"--project", project,
+		"--lifecycle-file="+f.Name())
 }

@@ -24,6 +24,25 @@ type PluginSchema struct {
 	// name is hard-coded — mirroring how `iam_roles:` on auth_providers
 	// and `port-for-tunnel:` work.
 	Buckets []BucketSpec `yaml:"buckets"`
+	// StableID, when set, asks `ra create` to inject a deterministic
+	// workstation-identity token into the named env var. The token is
+	// derived from (gcloud project, workstation config_name, git user
+	// email), so it is stable across `ra create` rebuilds — unlike the GCE
+	// instance name, which is a fresh UUID each create. Generic, like
+	// `buckets:` and `port-for-tunnel:`: core hard-codes no plugin name;
+	// the env-var name comes from this declaration, and injection is gated
+	// on the plugin being `enabled: true`. A plugin keyed on this token
+	// reuses one per-workstation identity across rebuilds instead of
+	// accumulating a fresh one each time.
+	StableID *StableIDSpec `yaml:"stable_id"`
+}
+
+// StableIDSpec declares that the plugin wants a deterministic,
+// rebuild-stable workstation-identity token exposed to the container.
+// EnvVar is the env var name the token is injected under. See
+// PluginSchema.StableID.
+type StableIDSpec struct {
+	EnvVar string `yaml:"env_var"`
 }
 
 // BucketSpec declares one GCS bucket the plugin needs at workstation
@@ -37,6 +56,27 @@ type BucketSpec struct {
 	OverrideField string `yaml:"override_field"` // optional plugin-config field that, if non-empty, replaces the template
 	Role          string `yaml:"role"`           // IAM role to grant on the bucket to the workstation SA
 	EnvVar        string `yaml:"env_var"`        // env var name exposed to the workstation container
+	// Lifecycle, when non-empty, declares GCS Object Lifecycle Management
+	// rules `ra create` applies to the bucket after ensuring it exists.
+	// Generic, like the rest of BucketSpec — core builds the lifecycle
+	// JSON and shells out; the policy (ages, classes, prefixes) lives in
+	// plugin.yaml. A plugin can scope rules to its own object-name prefix
+	// so they never touch another plugin's data in a shared bucket, and
+	// thereby keep the bucket's at-rest cost bounded.
+	Lifecycle []LifecycleRule `yaml:"lifecycle"`
+}
+
+// LifecycleRule is one GCS Object Lifecycle Management rule, mapped 1:1
+// onto the JSON `gcloud storage buckets update --lifecycle-file` consumes.
+// Action is "Delete" or "SetStorageClass"; StorageClass is required only
+// for "SetStorageClass". The condition fields cover the subset ra needs:
+// age in days plus an object-name prefix match, so a rule can be scoped to
+// just the plugin's own prefix inside a bucket shared by several plugins.
+type LifecycleRule struct {
+	Action       string   `yaml:"action"`        // "Delete" | "SetStorageClass"
+	StorageClass string   `yaml:"storage_class"` // e.g. "COLDLINE" (required for SetStorageClass)
+	AgeDays      int      `yaml:"age_days"`      // condition: object age in days
+	Prefixes     []string `yaml:"prefixes"`      // condition: matchesPrefix (empty = whole bucket)
 }
 
 // ConfigField declares one user-facing config field.
