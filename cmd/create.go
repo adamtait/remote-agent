@@ -171,6 +171,26 @@ func lifecycleRulesFor(spec plugins.BucketSpec) []gcs.LifecycleRule {
 	return out
 }
 
+// uniqueBucketsWithLifecycle collapses resolved buckets to their unique
+// names in first-seen order and unions each name's declared lifecycle
+// rules. Because two plugins can share a bucket and ApplyLifecycle
+// replaces the whole lifecycle config per call, the rules must be unioned
+// and applied once per bucket rather than per plugin (which would let the
+// last plugin clobber the others). EnsureBucket likewise only needs
+// calling once per unique name.
+func uniqueBucketsWithLifecycle(buckets []resolvedBucket) (order []string, lifecycle map[string][]gcs.LifecycleRule) {
+	lifecycle = map[string][]gcs.LifecycleRule{}
+	seen := map[string]bool{}
+	for _, b := range buckets {
+		if !seen[b.Name] {
+			seen[b.Name] = true
+			order = append(order, b.Name)
+		}
+		lifecycle[b.Name] = append(lifecycle[b.Name], lifecycleRulesFor(b.Spec)...)
+	}
+	return order, lifecycle
+}
+
 func buildContainerEnv(cfg *config.Config) string {
 	var pairs []string
 	// propagate is the explicit allowlist of keys that 200_remote-agent-setup.sh
@@ -463,20 +483,37 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 			names = append(names, b.Name)
 		}
 		done = logging.Step("ensure_plugin_buckets", 3, totalCreateSteps, fmt.Sprintf("Ensuring %d plugin-declared GCS bucket(s): %s...", len(pluginBucketList), strings.Join(names, ", ")), cmd.OutOrStdout())
+		// Two plugins may resolve to the SAME bucket (the override_field
+		// mechanism exists precisely so they can share one). Ensure each
+		// unique bucket once, then apply the UNION of every plugin's
+		// declared lifecycle rules per bucket — ApplyLifecycle replaces the
+		// bucket's whole lifecycle config per call, so applying per-plugin
+		// would let the last plugin silently clobber the others' rules.
+		bucketOrder, lifecycleByBucket := uniqueBucketsWithLifecycle(pluginBucketList)
+		firstPlugin := map[string]string{}
 		for _, b := range pluginBucketList {
-			if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, b.Name, ws.Region); err != nil {
-				done(err)
-				return fmt.Errorf("ensuring bucket %s (plugin %s): %w", b.Name, b.Plugin, err)
+			if _, ok := firstPlugin[b.Name]; !ok {
+				firstPlugin[b.Name] = b.Plugin
 			}
-			// Apply any declared Object Lifecycle Management rules
-			// (load-reduction plan #4). GCS replaces the whole lifecycle
-			// config each call, so this re-asserts the policy idempotently
-			// on every `ra create`. No-op for plugins that declare none.
-			if rules := lifecycleRulesFor(b.Spec); len(rules) > 0 {
-				if err := gcs.ApplyLifecycle(r, cfg.Gcloud.Project, b.Name, rules); err != nil {
-					done(err)
-					return fmt.Errorf("applying lifecycle to bucket %s (plugin %s): %w", b.Name, b.Plugin, err)
-				}
+		}
+		for _, name := range bucketOrder {
+			if err := gcs.EnsureBucket(r, cfg.Gcloud.Project, name, ws.Region); err != nil {
+				done(err)
+				return fmt.Errorf("ensuring bucket %s (plugin %s): %w", name, firstPlugin[name], err)
+			}
+		}
+		// Apply accumulated Object Lifecycle Management rules (load-reduction
+		// plan #4) once per bucket. GCS replaces the whole lifecycle config
+		// each call, so this re-asserts the policy idempotently on every
+		// `ra create`. No-op for buckets whose plugins declare none.
+		for _, name := range bucketOrder {
+			rules := lifecycleByBucket[name]
+			if len(rules) == 0 {
+				continue
+			}
+			if err := gcs.ApplyLifecycle(r, cfg.Gcloud.Project, name, rules); err != nil {
+				done(err)
+				return fmt.Errorf("applying lifecycle to bucket %s: %w", name, err)
 			}
 		}
 		done(nil)

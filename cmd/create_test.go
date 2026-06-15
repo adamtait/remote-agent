@@ -630,6 +630,46 @@ func TestBuildContainerEnv_OmitsNamespaceWhenClaudeSyncDisabled(t *testing.T) {
 	}
 }
 
+func TestUniqueBucketsWithLifecycle_UnionsSharedBucketRulesInOrder(t *testing.T) {
+	coldline := plugins.BucketSpec{Lifecycle: []plugins.LifecycleRule{
+		{Action: "SetStorageClass", StorageClass: "COLDLINE", AgeDays: 90, Prefixes: []string{"a/"}},
+	}}
+	del := plugins.BucketSpec{Lifecycle: []plugins.LifecycleRule{
+		{Action: "Delete", AgeDays: 365, Prefixes: []string{"b/"}},
+	}}
+	buckets := []resolvedBucket{
+		{Plugin: "p1", Name: "shared", Spec: coldline},
+		{Plugin: "p2", Name: "solo", Spec: del},
+		{Plugin: "p3", Name: "shared", Spec: del}, // same bucket as p1
+	}
+	order, lifecycle := uniqueBucketsWithLifecycle(buckets)
+
+	// Unique names, first-seen order — "shared" before "solo", listed once.
+	if got := strings.Join(order, ","); got != "shared,solo" {
+		t.Fatalf("order = %q, want %q", got, "shared,solo")
+	}
+	// Rules for the shared bucket must be the UNION of p1 and p3 (not
+	// clobbered), in plugin order.
+	if rs := lifecycle["shared"]; len(rs) != 2 ||
+		rs[0].Action != "SetStorageClass" || rs[1].Action != "Delete" {
+		t.Errorf("shared lifecycle not unioned in order: %+v", rs)
+	}
+	if rs := lifecycle["solo"]; len(rs) != 1 || rs[0].Action != "Delete" {
+		t.Errorf("solo lifecycle wrong: %+v", rs)
+	}
+}
+
+func TestUniqueBucketsWithLifecycle_NoLifecycleStillListsBucket(t *testing.T) {
+	buckets := []resolvedBucket{{Plugin: "p", Name: "b", Spec: plugins.BucketSpec{}}}
+	order, lifecycle := uniqueBucketsWithLifecycle(buckets)
+	if len(order) != 1 || order[0] != "b" {
+		t.Fatalf("order = %v, want [b]", order)
+	}
+	if len(lifecycle["b"]) != 0 {
+		t.Errorf("expected no lifecycle rules for b, got %+v", lifecycle["b"])
+	}
+}
+
 func TestLifecycleRulesFor_ConvertsSpec(t *testing.T) {
 	spec := plugins.BucketSpec{
 		Lifecycle: []plugins.LifecycleRule{
