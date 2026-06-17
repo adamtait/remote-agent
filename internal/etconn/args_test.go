@@ -26,6 +26,29 @@ func TestBuildETArgs_FullOptions(t *testing.T) {
 	}
 }
 
+func TestBuildETArgs_Keepalive(t *testing.T) {
+	got := buildETArgs(ETOptions{
+		Host:          "localhost",
+		DataPort:      2202,
+		BootstrapPort: 2201,
+		User:          "user",
+		KeepaliveSecs: 3,
+	})
+	// -k must precede the host positional (like every other flag), and a value of
+	// 0 must omit it entirely (covered by the other cases, which leave it unset).
+	want := []string{
+		"-k", "3",
+		"--ssh-option", "Port=2201",
+		"--ssh-option", "StrictHostKeyChecking=no",
+		"--ssh-option", "UserKnownHostsFile=/dev/null",
+		"-p", "2202",
+		"user@localhost",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildETArgs mismatch\n got: %q\nwant: %q", got, want)
+	}
+}
+
 func TestBuildETArgs_NoIdentityNoUser(t *testing.T) {
 	got := buildETArgs(ETOptions{
 		Host:          "localhost",

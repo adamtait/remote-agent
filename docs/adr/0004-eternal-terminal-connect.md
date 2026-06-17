@@ -96,3 +96,26 @@ who don't install them.
 - The `et` invocation depends on gcloud's managed SSH identity/user; if those
   change, only `buildETArgs` / the `etIdentityFile`/`etWorkstationUser` helpers
   in `cmd/connect.go` need updating.
+
+## Follow-up: prompt exit on remote `exit` (client keepalive)
+
+`ra` runs `et` in the foreground, so `ra`'s lifetime equals `et`'s. When the
+remote shell/tmux ends (the user types `exit`), `et` was slow to follow — `ra`
+appeared hung for ~12-15s until the user pressed Ctrl-C.
+
+Root cause (verified live): gcloud's `start-tcp-tunnel` keeps the **local**
+socket open after the remote etserver session goes away, so `et` never sees a
+socket close on `exit`. It discovers the dead session only when a **keepalive**
+goes unanswered — then it reconnects, etserver reports the session is gone
+("invalid key … assume server terminated session"), and `et` terminates, at
+which point `ra` cancels the context and the tunnels die in ~10ms. The delay is
+entirely `et`'s keepalive timeout; teardown was never the problem.
+
+The fix passes `et -k <secs>` (default `etKeepaliveSecs = 3`, down from et's
+~6s), which proportionally shortens detection — measured live, `-k 2` yields a
+~3s cadence and stays stable on the IAP relay (sub-second RTT) — and as a bonus
+speeds recovery from genuine mid-session drops. ET's resend buffer keeps the
+extra reconnects seamless. An out-of-band session-liveness watchdog (polling the
+box over the IAP ssh path) was considered and rejected: it would add a gcloud
+round-trip every few seconds for the whole session — the load this project has
+been working to reduce — for a marginally faster exit.

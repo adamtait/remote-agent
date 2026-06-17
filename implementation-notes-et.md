@@ -12,6 +12,44 @@ Newest entries at the top of each section.
 
 ---
 
+## Follow-up fix: prompt exit on remote `exit` (`fix/et-prompt-exit`)
+
+**Symptom:** after the remote tmux/shell `exit`s, `ra connect --et` kept running
+(`[exited]` / `Session terminated` then nothing) until the user pressed Ctrl-C.
+
+**Root cause (verified live against `personal`, not guessed):**
+- `ra` runs `et` in the foreground; `ra`'s lifetime == `et`'s. So the question
+  is "why is `et` slow to exit," and the teardown after `et` returns.
+- **Teardown is fine.** Reproduced `StartTCPTunnelContext`'s exact wiring
+  (`exec.CommandContext` + `io.MultiWriter` stderr + `os.Stdin`) in a standalone
+  Go program: ctx-cancel kills the gcloud tunnel in **~10ms** with **zero**
+  orphaned processes. Once `et` returns, `ra` exits immediately.
+- **`et` is slow to return.** From the real et client log: on session end `et`
+  logs `Missed a keepalive, killing connection` → `starting new reconnect
+  thread` → `Got invalid key on reconnect, assume that server has terminated the
+  session` → `Shutting down connection`. It learns the session ended **via a
+  keepalive timeout**, not a socket close, because gcloud's `start-tcp-tunnel`
+  keeps the **local** socket open after the remote etserver session goes away.
+  An interactive `expect` repro measured **~18s** wall (≈12-14s of real `et`
+  delay) to exit on a *healthy* tunnel — exactly reproducing the user's output.
+
+**Fix:** pass `et -k <secs>` to lower the client keepalive (new
+`ETOptions.KeepaliveSecs`, emitted by `buildETArgs`; default
+`etKeepaliveSecs = 3` in `cmd/connect.go`, down from et's ~6s). Detection time
+scales with the keepalive interval, so this roughly halves the perceived hang
+(~15s → ~3-6s) and additionally speeds recovery from genuine mid-session drops.
+Measured live: `-k 2` produces a stable ~3s keepalive cadence with no spurious
+reconnects on the IAP relay (sub-second RTT); picked 3 for a small safety
+margin.
+
+**Considered and rejected:** an out-of-band watchdog that polls the box (e.g.
+`pgrep etterminal`) over the independent IAP ssh path and cancels when the
+session is gone. It would exit ~instantly but adds a gcloud round-trip every few
+seconds for the *entire* session — exactly the workstation load this project has
+been reducing — so the cheap, native keepalive knob wins. Recorded in ADR 0004.
+
+---
+
 ## Follow-up fix: cold-start race (`fix/et-server-readiness`)
 
 First live run of `ra connect --et` (workstation freshly started) failed with
