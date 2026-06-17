@@ -109,6 +109,25 @@ Validated live against the `personal` workstation (config `email-agent-config`).
 - **Two extra gcloud processes** run per `--et` session (one tunnel per remote
   port). Acceptable for the resilience gained; both are torn down on exit.
 
+## Code review outcome (/code-review, high effort)
+
+Ran the multi-angle review on PR #137. **No confirmed correctness bugs.** The
+candidates surfaced were verified against the code and refuted:
+- "allBound connection leak" — false: each dial is `Close()`d inside the loop
+  before the next iteration.
+- "redundant cancel() before wg.Wait()" — false: the explicit cancel is required
+  to unblock the supervise goroutines (which block in `t.Tunnel(ctx)`); without
+  it wg.Wait() deadlocks since `defer cancel()` hasn't fired yet.
+- "concurrent Fprintf garbling" — `*os.File.Write` is goroutine-safe and atomic
+  per call; `-race` is clean.
+- "stderr should be os.Stderr not errOut" — errOut *is* os.Stderr; et drives the
+  tty via stdin/stdout.
+- "hardcoded user/identity" — deliberate, documented spike findings with a safe
+  fallback; not a defect.
+
+No code changes applied (fabricating fixes against refuted findings would churn
+correct code).
+
 ## Open / needs follow-up
 
 - **Live end-to-end verification of auto-resume** (kill the data tunnel
