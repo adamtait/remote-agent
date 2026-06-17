@@ -2,6 +2,7 @@ package gcloud
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"strings"
@@ -22,6 +23,7 @@ type retryResult struct {
 }
 
 func (f *retryFakeRunner) Run(args ...string) error                           { return nil }
+func (f *retryFakeRunner) RunContext(_ context.Context, args ...string) error { return nil }
 func (f *retryFakeRunner) RunWithStdin(stdin io.Reader, args ...string) error { return nil }
 func (f *retryFakeRunner) RunSoft(args ...string) error                       { return nil }
 func (f *retryFakeRunner) Output(args ...string) ([]byte, error)              { return nil, nil }
