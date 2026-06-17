@@ -20,6 +20,18 @@ import (
 // bootstrap ssh uses the same name.
 const etWorkstationUser = "user"
 
+// etKeepaliveSecs is the et client keepalive interval (`et -k`). It governs how
+// quickly the local process exits after the remote shell/tmux ends: gcloud's
+// start-tcp-tunnel keeps the local socket open even once the remote etserver
+// session is gone, so et can only detect the ended session when a keepalive goes
+// unanswered (then it reconnects, learns the session is dead, and terminates —
+// at which point ra tears down the tunnels and exits). et's default (~6s) makes
+// an `exit` look like a ~12-15s hang; 3s roughly halves that while staying well
+// clear of spurious reconnects on the IAP relay (sub-second RTT), measured live
+// against the workstation. It also speeds recovery from genuine mid-session
+// drops. See docs/adr/0004-eternal-terminal-connect.md.
+const etKeepaliveSecs = 3
+
 // sshReadyTimeout/sshReadyInterval bound how long runConnect waits for sshd to
 // start accepting connections after the workstation reports RUNNING. Each probe
 // is itself a real (multi-second) gcloud round-trip, so the interval is small.
@@ -128,6 +140,7 @@ func runConnectET(cfg *config.Config, client *gcloud.Client, name string, overri
 		BootstrapPort: ports.Bootstrap,
 		User:          etWorkstationUser,
 		IdentityFile:  etIdentityFile(),
+		KeepaliveSecs: etKeepaliveSecs,
 	}
 
 	// SIGINT/SIGTERM tear down the tunnels (et grabs the terminal in raw mode,

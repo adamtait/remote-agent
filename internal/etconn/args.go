@@ -37,6 +37,7 @@ type ETOptions struct {
 	BootstrapPort int      // local bootstrap-tunnel port (→ ws:22); becomes `--ssh-option Port=`
 	User          string   // ssh login user inside the workstation (e.g. "user")
 	IdentityFile  string   // ssh private key the workstation authorizes; "" lets ssh resolve a default
+	KeepaliveSecs int      // et client keepalive interval (`-k`); 0 leaves et's default (~6s)
 	Extra         []string // escape hatch for additional et flags
 }
 
@@ -44,9 +45,21 @@ type ETOptions struct {
 // name itself). This is the single place the spike's invocation lives; if the
 // et command line ever needs to change, change it here.
 func buildETArgs(o ETOptions) []string {
+	var args []string
+	// Client keepalive. et only learns the remote session ended by its keepalive
+	// timing out: gcloud's start-tcp-tunnel keeps the local socket open after the
+	// remote etserver session goes away (an `exit`/logout), so et never sees a
+	// socket close — it writes a keepalive, gets no answer, kills the connection,
+	// reconnects, and etserver reports the session is gone. A lower interval makes
+	// that detection (and thus our process exit on remote `exit`) proportionally
+	// faster, and also speeds recovery from real mid-session transport drops. ET's
+	// resend buffer makes the extra reconnects seamless.
+	if o.KeepaliveSecs > 0 {
+		args = append(args, "-k", strconv.Itoa(o.KeepaliveSecs))
+	}
 	// Bootstrap SSH port: et ignores ssh_config's Port directive, but a
 	// command-line `-o Port=` (which is what --ssh-option becomes) is honored.
-	args := []string{"--ssh-option", fmt.Sprintf("Port=%d", o.BootstrapPort)}
+	args = append(args, "--ssh-option", fmt.Sprintf("Port=%d", o.BootstrapPort))
 	if o.IdentityFile != "" {
 		args = append(args, "--ssh-option", "IdentityFile="+o.IdentityFile)
 	}
