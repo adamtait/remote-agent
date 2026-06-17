@@ -353,3 +353,38 @@ func TestClient_SSHReady_FalseWhenOnlyCommandTextEchoed(t *testing.T) {
 		t.Errorf("expected SSHReady false when only the unevaluated command text is present")
 	}
 }
+
+// etReadyProbeKey is the OutputQuiet command ETServerReady runs for port 2022.
+// Kept here so the test breaks loudly if the probe's args (or the sentinel)
+// ever change.
+const etReadyProbeKey = `workstations ssh myws --cluster cl --config cfg --region us-central1 --project proj --command bash -c 'exec 3<>/dev/tcp/127.0.0.1/2022' >/dev/null 2>&1 && echo "ra_et_$((42*2))_ready"`
+
+func TestClient_ETServerReady_TrueWhenSentinelRoundTrips(t *testing.T) {
+	fake := &fakeRunner{outputs: map[string][]byte{etReadyProbeKey: []byte("ra_et_84_ready\n")}}
+	client := gcloud.NewClient(fake)
+	if !client.ETServerReady("proj", "us-central1", "cl", "cfg", "myws", 2022) {
+		t.Errorf("expected ETServerReady true when the sentinel round-trips")
+	}
+}
+
+func TestClient_ETServerReady_FalseWhenSentinelAbsent(t *testing.T) {
+	// etserver not up yet: the /dev/tcp dial fails, so the echo never runs and
+	// stdout carries no sentinel.
+	fake := &fakeRunner{outputs: map[string][]byte{etReadyProbeKey: []byte("")}}
+	client := gcloud.NewClient(fake)
+	if client.ETServerReady("proj", "us-central1", "cl", "cfg", "myws", 2022) {
+		t.Errorf("expected ETServerReady false when the sentinel is absent from stdout")
+	}
+}
+
+func TestClient_ETServerReady_FalseWhenOnlyCommandTextEchoed(t *testing.T) {
+	// Self-match guard: the unevaluated command carries `ra_et_$((42*2))_ready`,
+	// not the computed `ra_et_84_ready`.
+	fake := &fakeRunner{outputs: map[string][]byte{
+		etReadyProbeKey: []byte(`ERROR: bash -c 'exec 3<>/dev/tcp/127.0.0.1/2022' ... ra_et_$((42*2))_ready`),
+	}}
+	client := gcloud.NewClient(fake)
+	if client.ETServerReady("proj", "us-central1", "cl", "cfg", "myws", 2022) {
+		t.Errorf("expected ETServerReady false when only the unevaluated command text is present")
+	}
+}

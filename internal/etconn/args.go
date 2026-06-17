@@ -19,8 +19,11 @@ import (
 // present — it is what `gcloud workstations ssh` uses); the data channel
 // targets etserver, installed and started by the `et` ra-plugin.
 const (
-	etRemoteSSHPort  = 22
-	etRemoteDataPort = 2022
+	etRemoteSSHPort = 22
+	// RemoteDataPort is the in-workstation port etserver listens on (matched by
+	// the `et` plugin's port-for-tunnel). Exported so the connect command can
+	// probe it for readiness before launching the et client.
+	RemoteDataPort = 2022
 )
 
 // ETOptions fully specifies a local `et` invocation. It is built from the

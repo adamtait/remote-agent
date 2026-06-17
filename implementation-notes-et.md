@@ -12,6 +12,35 @@ Newest entries at the top of each section.
 
 ---
 
+## Follow-up fix: cold-start race (`fix/et-server-readiness`)
+
+First live run of `ra connect --et` (workstation freshly started) failed with
+`The workstation does not have a server running on port 2022` → et auth error.
+
+**Root cause:** `runConnectET` waited for sshd (port 22) but not for etserver
+(port 2022). etserver is launched by the plugin's boot script *after*
+`200_remote-agent-setup.sh` fetches secrets, so it comes up tens of seconds
+after the workstation is SSH-ready. The data tunnel raced ahead, gcloud found no
+server on 2022, and `waitForPortsBound` (a *local* bind check) let `et` launch
+into a dead data channel. Confirmed by direct investigation: etserver was
+installed, enabled, and listening on `*:2022` — just not yet at connect time;
+the tunnel worked once it came up.
+
+**Fix (CLI):** added `Client.ETServerReady` (a `/dev/tcp` port probe over the
+existing sshd, sentinel-verified like `SSHReady`) and `waitETServerReady`, called
+in `runConnectET` after `waitSSHReady`. Unlike `waitSSHReady` (warn-and-proceed),
+this one *gates*: if etserver never appears within 120s it returns an actionable
+error instead of handing `et` a doomed connection. Probe validated live against
+the workstation (port 2022 → ready, dead port → not ready).
+
+**Also found:** `ss` is broken in the workstation container (reports no sockets
+despite live listeners), so the plugin's `ss`-based port-collision pre-check was
+a silent no-op. Switched it to a `/dev/tcp` probe in the plugin
+(`fix/et-start-probe`). This is why the readiness probe dials the port directly
+rather than parsing `ss`.
+
+---
+
 ## Spike findings (Phase 1)
 
 **Result: ET is viable through gcloud workstations tunnels. Gating risk cleared.**

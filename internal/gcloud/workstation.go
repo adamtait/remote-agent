@@ -23,6 +23,12 @@ import (
 const (
 	sshReadyProbeCmd = `echo "ra_$((6*7))_ready"`
 	sshReadySentinel = "ra_42_ready"
+
+	// etReadySentinel is printed by the etserver probe only if a TCP connection
+	// to the port succeeds (see ETServerReady). Like sshReadySentinel it is
+	// computed remotely (via arithmetic) so it can't appear from a command-line
+	// echo — only from the remote shell actually reaching a listener.
+	etReadySentinel = "ra_et_84_ready"
 )
 
 // WorkstationRef fully identifies a workstation across projects/regions/configs.
@@ -259,6 +265,30 @@ func (c *Client) SSHReady(project, region, cluster, cfgName, name string) bool {
 		"--command", sshReadyProbeCmd,
 	)
 	return bytes.Contains(out, []byte(sshReadySentinel))
+}
+
+// ETServerReady reports whether something is listening on the given TCP port
+// inside the workstation — i.e. whether the et server (started by the `et`
+// plugin's boot script) is up yet. etserver comes up tens of seconds after
+// sshd, so SSHReady passing does not imply the et data channel is reachable;
+// `ra connect --et` uses this to avoid launching the et client into a port that
+// has no server (which surfaces as "does not have a server running on port N").
+//
+// The probe opens /dev/tcp/127.0.0.1/<port> in bash and echoes the sentinel
+// only on success. Readiness is judged by the sentinel's presence, not the exit
+// code, for the same reason as SSHReady. The sentinel is computed via arithmetic
+// (42*2) so it can't be a command-line echo. `ss` is unreliable in the
+// workstation container (it can report no sockets despite live listeners), so
+// the probe dials the port directly rather than parsing `ss`/`netstat`.
+func (c *Client) ETServerReady(project, region, cluster, cfgName, name string, port int) bool {
+	probe := fmt.Sprintf(`bash -c 'exec 3<>/dev/tcp/127.0.0.1/%d' >/dev/null 2>&1 && echo "ra_et_$((42*2))_ready"`, port)
+	out, _ := c.runner.OutputQuiet(
+		"workstations", "ssh", name,
+		"--cluster", cluster, "--config", cfgName,
+		"--region", region, "--project", project,
+		"--command", probe,
+	)
+	return bytes.Contains(out, []byte(etReadySentinel))
 }
 
 // StartTCPTunnel opens a foreground TCP tunnel from localhost:localPort to
