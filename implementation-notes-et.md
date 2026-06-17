@@ -12,6 +12,41 @@ Newest entries at the top of each section.
 
 ---
 
+## Follow-up fix: cold-start race (`fix/et-server-readiness`)
+
+First live run of `ra connect --et` (workstation freshly started) failed with
+`The workstation does not have a server running on port 2022` → et auth error.
+
+**Root cause:** `runConnectET` waited for sshd (port 22) but not for etserver
+(port 2022). etserver is launched by the plugin's boot script *after*
+`200_remote-agent-setup.sh` fetches secrets, so it comes up tens of seconds
+after the workstation is SSH-ready. The data tunnel raced ahead, gcloud found no
+server on 2022, and `waitForPortsBound` (a *local* bind check) let `et` launch
+into a dead data channel. Confirmed by direct investigation: etserver was
+installed, enabled, and listening on `*:2022` — just not yet at connect time;
+the tunnel worked once it came up.
+
+**Fix (CLI):** added `Client.ETServerReady` (a `/dev/tcp` port probe over the
+existing sshd, sentinel-verified like `SSHReady`) and `waitETServerReady`, called
+in `runConnectET` after `waitSSHReady`. Unlike `waitSSHReady` (warn-and-proceed),
+this one *gates*: if etserver never appears within 120s it returns an actionable
+error instead of handing `et` a doomed connection. Probe validated live against
+the workstation (port 2022 → ready, dead port → not ready).
+
+**Also found (corrected):** `ss` is not "broken" — it is **not installed** in the
+workstation image (`command not found`; `iproute2`/`net-tools` are absent). The
+earlier `2>/dev/null` hid the error and made it look like `ss` returned empty.
+The plugin's original `command -v ss && ss …` guard therefore short-circuited and
+the collision check was a silent no-op. `/proc/net/tcp[6]` *is* present and
+correct, so both the CLI readiness probe and the plugin collision check read the
+kernel's own socket table directly (LISTEN = state `0A`) — passive,
+dependency-free, and exactly what `ss` would read. The et plugin also now installs
+`iproute2` so `ss` exists for interactive debugging (the checks don't depend on
+it). The CLI probe uses awk over `/proc/net/tcp`+`tcp6`, with the sentinel
+computed by awk (`42*2`) to keep the self-match guard.
+
+---
+
 ## Spike findings (Phase 1)
 
 **Result: ET is viable through gcloud workstations tunnels. Gating risk cleared.**

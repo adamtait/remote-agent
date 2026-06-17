@@ -109,6 +109,14 @@ func runConnectET(cfg *config.Config, client *gcloud.Client, name string, overri
 	if !alreadyRunning {
 		waitSSHReady(client, ref, errOut)
 	}
+	// etserver (started by the `et` plugin's boot script) comes up tens of
+	// seconds after sshd, so SSH-readiness does not imply the data channel is
+	// reachable. Without this gate, the data tunnel races ahead and gcloud
+	// reports "does not have a server running on port 2022", and the et client
+	// fails to authenticate. Wait until etserver actually answers.
+	if err := waitETServerReady(client, ref, etconn.RemoteDataPort, errOut); err != nil {
+		return err
+	}
 
 	ports, err := etconn.PickPorts()
 	if err != nil {
@@ -133,6 +141,39 @@ func runConnectET(cfg *config.Config, client *gcloud.Client, name string, overri
 	tunneler := etconn.NewGcloudTunneler(client)
 	etClient := etconn.NewETRunner(os.Stdin, os.Stdout, errOut)
 	return etconn.Connect(ctx, tunneler, etClient, ref, ports, opts, errOut)
+}
+
+// etReadyTimeout/etReadyInterval bound how long runConnectET waits for etserver
+// to start listening after the workstation is SSH-ready. etserver starts later
+// in boot than sshd (after secret-fetch), so this window can be tens of seconds
+// on a cold start. Package-level so tests can shrink them.
+var (
+	etReadyTimeout  = 120 * time.Second
+	etReadyInterval = 3 * time.Second
+)
+
+// waitETServerReady blocks until the et server answers on the given port inside
+// the workstation, or returns a clear error after etReadyTimeout. Unlike
+// waitSSHReady (which warns and proceeds, letting the real ssh report any
+// problem), this gates the connection: launching `et` before etserver is up
+// reproduces the "does not have a server running on port N" failure, so if the
+// server never appears we stop with an actionable message rather than handing a
+// doomed connection to the et client.
+func waitETServerReady(client *gcloud.Client, ref gcloud.WorkstationRef, port int, errOut io.Writer) error {
+	if client.ETServerReady(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name, port) {
+		return nil
+	}
+	fmt.Fprintf(errOut, "Waiting for the et server on %q (port %d) to become ready...\n", ref.Name, port)
+	deadline := time.Now().Add(etReadyTimeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(etReadyInterval)
+		if client.ETServerReady(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name, port) {
+			return nil
+		}
+	}
+	return fmt.Errorf("et server not reachable on port %d of %q after %s; "+
+		"is the `et` plugin installed and enabled (`ra plugin list`) and the image rebuilt (`ra create`)?",
+		port, ref.Name, etReadyTimeout)
 }
 
 // etIdentityFile returns the ssh key gcloud uses for workstation/compute SSH if

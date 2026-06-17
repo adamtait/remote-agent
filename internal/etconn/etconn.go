@@ -73,7 +73,7 @@ func Connect(ctx context.Context, t Tunneler, et ETClient, ref gcloud.Workstatio
 
 	wg.Add(2)
 	go supervise(ports.Bootstrap, etRemoteSSHPort, "bootstrap")
-	go supervise(ports.Data, etRemoteDataPort, "data")
+	go supervise(ports.Data, RemoteDataPort, "data")
 
 	if err := waitForPortsBound(ctx, []int{ports.Bootstrap, ports.Data}, portBoundTimeout); err != nil {
 		cancel()

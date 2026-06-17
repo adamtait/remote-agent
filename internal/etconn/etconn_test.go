@@ -59,7 +59,7 @@ type fakeTunneler struct {
 func (f *fakeTunneler) Tunnel(ctx context.Context, _ gcloud.WorkstationRef, localPort, remotePort int) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, [2]int{localPort, remotePort})
-	isData := remotePort == etRemoteDataPort
+	isData := remotePort == RemoteDataPort
 	if isData {
 		f.dataN++
 	} else {
