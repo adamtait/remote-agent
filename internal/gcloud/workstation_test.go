@@ -354,10 +354,10 @@ func TestClient_SSHReady_FalseWhenOnlyCommandTextEchoed(t *testing.T) {
 	}
 }
 
-// etReadyProbeKey is the OutputQuiet command ETServerReady runs for port 2022.
-// Kept here so the test breaks loudly if the probe's args (or the sentinel)
-// ever change.
-const etReadyProbeKey = `workstations ssh myws --cluster cl --config cfg --region us-central1 --project proj --command bash -c 'exec 3<>/dev/tcp/127.0.0.1/2022' >/dev/null 2>&1 && echo "ra_et_$((42*2))_ready"`
+// etReadyProbeKey is the OutputQuiet command ETServerReady runs for port 2022
+// (0x07E6). Kept here so the test breaks loudly if the probe's args (or the
+// sentinel) ever change.
+const etReadyProbeKey = `workstations ssh myws --cluster cl --config cfg --region us-central1 --project proj --command awk -v p=":07E6" '$2 ~ (p"$") && $4 == "0A" {f=1} END {if (f) print "ra_et_" (42*2) "_ready"}' /proc/net/tcp /proc/net/tcp6 2>/dev/null`
 
 func TestClient_ETServerReady_TrueWhenSentinelRoundTrips(t *testing.T) {
 	fake := &fakeRunner{outputs: map[string][]byte{etReadyProbeKey: []byte("ra_et_84_ready\n")}}
@@ -378,10 +378,11 @@ func TestClient_ETServerReady_FalseWhenSentinelAbsent(t *testing.T) {
 }
 
 func TestClient_ETServerReady_FalseWhenOnlyCommandTextEchoed(t *testing.T) {
-	// Self-match guard: the unevaluated command carries `ra_et_$((42*2))_ready`,
-	// not the computed `ra_et_84_ready`.
+	// Self-match guard: the unevaluated command carries the awk expression
+	// `(42*2)`, not the computed `ra_et_84_ready`, so an echoed command line
+	// must not read as ready.
 	fake := &fakeRunner{outputs: map[string][]byte{
-		etReadyProbeKey: []byte(`ERROR: bash -c 'exec 3<>/dev/tcp/127.0.0.1/2022' ... ra_et_$((42*2))_ready`),
+		etReadyProbeKey: []byte(`ERROR: failed running [awk ... print "ra_et_" (42*2) "_ready" ...]`),
 	}}
 	client := gcloud.NewClient(fake)
 	if client.ETServerReady("proj", "us-central1", "cl", "cfg", "myws", 2022) {

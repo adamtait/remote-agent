@@ -274,14 +274,18 @@ func (c *Client) SSHReady(project, region, cluster, cfgName, name string) bool {
 // `ra connect --et` uses this to avoid launching the et client into a port that
 // has no server (which surfaces as "does not have a server running on port N").
 //
-// The probe opens /dev/tcp/127.0.0.1/<port> in bash and echoes the sentinel
-// only on success. Readiness is judged by the sentinel's presence, not the exit
-// code, for the same reason as SSHReady. The sentinel is computed via arithmetic
-// (42*2) so it can't be a command-line echo. `ss` is unreliable in the
-// workstation container (it can report no sockets despite live listeners), so
-// the probe dials the port directly rather than parsing `ss`/`netstat`.
+// The probe reads the kernel's own socket table (/proc/net/tcp + tcp6) for a
+// LISTEN socket (state 0A) on the port, and prints the sentinel only if one
+// exists. This is passive — unlike a /dev/tcp dial it does not open (and
+// immediately drop) a connection against etserver on every poll. It also needs
+// no `ss`/`netstat`, which the ra workstation image does not ship; /proc/net/tcp
+// is what those tools read anyway. Local addresses there are HEXIP:HEXPORT, so
+// the port is matched as an uppercase 4-digit hex suffix. Readiness is judged by
+// the sentinel's presence, not the exit code (same rationale as SSHReady); the
+// sentinel is computed by awk (42*2) so the literal token never appears in the
+// command line and can't be echoed back as a false positive.
 func (c *Client) ETServerReady(project, region, cluster, cfgName, name string, port int) bool {
-	probe := fmt.Sprintf(`bash -c 'exec 3<>/dev/tcp/127.0.0.1/%d' >/dev/null 2>&1 && echo "ra_et_$((42*2))_ready"`, port)
+	probe := fmt.Sprintf(`awk -v p=":%04X" '$2 ~ (p"$") && $4 == "0A" {f=1} END {if (f) print "ra_et_" (42*2) "_ready"}' /proc/net/tcp /proc/net/tcp6 2>/dev/null`, port)
 	out, _ := c.runner.OutputQuiet(
 		"workstations", "ssh", name,
 		"--cluster", cluster, "--config", cfgName,

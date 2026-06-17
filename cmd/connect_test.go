@@ -33,8 +33,8 @@ func TestRunConnectET_BailsWhenETMissing(t *testing.T) {
 // etReadyRef is the workstation waitETServerReady tests probe.
 var etReadyRef = gcloud.WorkstationRef{Project: "p", Region: "r", Cluster: "cl", Config: "cfg", Name: "w"}
 
-// etReadyProbeCmdKey is the OutputQuiet key ETServerReady runs for port 2022.
-const etReadyProbeCmdKey = `workstations ssh w --cluster cl --config cfg --region r --project p --command bash -c 'exec 3<>/dev/tcp/127.0.0.1/2022' >/dev/null 2>&1 && echo "ra_et_$((42*2))_ready"`
+// etReadyProbeCmdKey is the OutputQuiet key ETServerReady runs for port 2022 (0x07E6).
+const etReadyProbeCmdKey = `workstations ssh w --cluster cl --config cfg --region r --project p --command awk -v p=":07E6" '$2 ~ (p"$") && $4 == "0A" {f=1} END {if (f) print "ra_et_" (42*2) "_ready"}' /proc/net/tcp /proc/net/tcp6 2>/dev/null`
 
 func shrinkETReady(t *testing.T) {
 	t.Helper()

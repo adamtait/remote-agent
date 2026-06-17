@@ -33,11 +33,17 @@ this one *gates*: if etserver never appears within 120s it returns an actionable
 error instead of handing `et` a doomed connection. Probe validated live against
 the workstation (port 2022 → ready, dead port → not ready).
 
-**Also found:** `ss` is broken in the workstation container (reports no sockets
-despite live listeners), so the plugin's `ss`-based port-collision pre-check was
-a silent no-op. Switched it to a `/dev/tcp` probe in the plugin
-(`fix/et-start-probe`). This is why the readiness probe dials the port directly
-rather than parsing `ss`.
+**Also found (corrected):** `ss` is not "broken" — it is **not installed** in the
+workstation image (`command not found`; `iproute2`/`net-tools` are absent). The
+earlier `2>/dev/null` hid the error and made it look like `ss` returned empty.
+The plugin's original `command -v ss && ss …` guard therefore short-circuited and
+the collision check was a silent no-op. `/proc/net/tcp[6]` *is* present and
+correct, so both the CLI readiness probe and the plugin collision check read the
+kernel's own socket table directly (LISTEN = state `0A`) — passive,
+dependency-free, and exactly what `ss` would read. The et plugin also now installs
+`iproute2` so `ss` exists for interactive debugging (the checks don't depend on
+it). The CLI probe uses awk over `/proc/net/tcp`+`tcp6`, with the sentinel
+computed by awk (`42*2`) to keep the self-match guard.
 
 ---
 
