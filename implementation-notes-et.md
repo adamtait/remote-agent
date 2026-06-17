@@ -1,0 +1,144 @@
+# ET support — implementation notes
+
+Running log of decisions, deviations from the plan, and tradeoffs while
+implementing Eternal Terminal (ET) support.
+Plan: `~/.claude/plans/build-a-plan-for-lucky-micali.md`.
+
+> **Filename note:** the repo already tracks an unrelated `implementation-notes.md`
+> (from the prior open-sourcing effort). To avoid clobbering that committed file,
+> these notes live in `implementation-notes-et.md`.
+
+Newest entries at the top of each section.
+
+---
+
+## Spike findings (Phase 1)
+
+**Result: ET is viable through gcloud workstations tunnels. Gating risk cleared.**
+
+Validated live against the `personal` workstation (config `email-agent-config`).
+
+- **Confirmed working `et` invocation** (this is what `buildETArgs` must produce):
+  ```
+  et --ssh-option Port=<LA> \
+     --ssh-option IdentityFile=$HOME/.ssh/google_compute_engine \
+     --ssh-option StrictHostKeyChecking=no \
+     --ssh-option UserKnownHostsFile=/dev/null \
+     -p <LB> \
+     user@localhost
+  ```
+  where `<LA>` = local bootstrap-tunnel port (→ ws:22), `<LB>` = local data-tunnel
+  port (→ ws:2022). The session connected and even auto-attached the tmux `main`
+  session, confirming the full path works.
+- **Bootstrap-port conveyance:** `--ssh-option Port=<LA>` is sufficient. The
+  ssh_config-`Port`-ignored bug only affects config files; a command-line `-o Port=`
+  (which is what `--ssh-option Port=` becomes) is honored. **No ProxyCommand alias
+  needed** — simpler than the plan's fallback.
+- **Auth:** workstation user is `user`; the key gcloud uses /
+  the workstation authorizes is `~/.ssh/google_compute_engine`. gcloud's own ssh
+  passes no `-i` (relies on default/agent resolution), but passing
+  `IdentityFile=~/.ssh/google_compute_engine` explicitly is reliable and matches the
+  working raw-ssh test. Also pass `StrictHostKeyChecking=no` +
+  `UserKnownHostsFile=/dev/null` (gcloud does the same — host key changes per boot).
+- **Data port:** ET's `-p` is the **local** data-tunnel port (ET connects to
+  `localhost:<LB>`); host is `localhost`.
+- **No systemd in the container:** PID 1 is gcloud's entrypoint, not systemd
+  (`systemctl` → "System has not been booted with systemd"). The apt package installs
+  an `et.service` unit that will **never run**. The plugin therefore must launch
+  `etserver` from `workstation-startup.d/` directly (marimo pattern), not via systemd.
+- **etserver telemetry:** prints a telemetry notice; set `ET_NO_TELEMETRY=1` in the
+  plugin startup to disable it cleanly.
+- **Versions:** local client `et` 6.2.11 (brew formula is `et`, *not*
+  `eternalterminal`); box `et` 6.2.10 (PPA `ppa:jgmath2000/et`).
+- **Resilience (BackedReader/Writer) not separately stress-tested** in the spike
+  (requires an interactive session + mid-session tunnel kill). Core connectivity is
+  proven; auto-resume relies on ET's documented resend buffer + the supervised LB
+  tunnel loop, and is covered by the end-to-end manual verification step.
+
+## Decisions not in the spec
+
+- **`implementation-notes-et.md`, not `implementation-notes.md`.** The repo
+  already tracks a committed `implementation-notes.md` from the prior
+  open-sourcing work; I kept these notes in a separate file rather than clobber
+  it.
+- **`RunContext` on the `Runner` interface (not a bypass).** Implemented in
+  `RealRunner` + `LoggingRunner` and added to all five test fakes
+  (testRunner, two `fakeRunner`s, retryFakeRunner, secrets fakeRunner). For the
+  LoggingRunner a ctx-driven kill logs at Debug ("gcloud run-context ended"),
+  not Error — a supervised-tunnel teardown is normal, not a failure.
+- **`et` invocation (from the spike).** `--ssh-option Port=<LA>` conveys the
+  bootstrap port (the simpler of the plan's two candidates; no ProxyCommand
+  alias needed). Identity = `~/.ssh/google_compute_engine` if present (else let
+  ssh resolve), user = `user`, plus `StrictHostKeyChecking=no` +
+  `UserKnownHostsFile=/dev/null`. All centralized in `buildETArgs`.
+- **Wrote ADR 0004** documenting the decision (the repo documents connection
+  decisions as ADRs — 0001 tunnel, 0003 keepalive).
+- **et plugin port flag.** `etserver` defaults to port 0, so the startup script
+  passes `--port` explicitly (verified `etserver --help` on the box). Telemetry
+  disabled via `ET_NO_TELEMETRY=1`.
+- **Dropped the apt-installed systemd unit** in the plugin's install script —
+  the workstation container has no systemd (PID 1 is the gcloud entrypoint), so
+  the unit would never run and only invites confusion. etserver is launched from
+  `workstation-startup.d/250_et-start.sh` (marimo `setsid` pattern), as root
+  (it owns the port and spawns per-user shells via the sshd-authed handshake).
+
+## Deviations from the plan
+
+- **`--ssh-option Port=` was sufficient** — the plan hedged with a ProxyCommand
+  fallback in case ET ignored the port. The spike proved the command-line `-o`
+  is honored, so the fallback is unused. Recorded for posterity in the ADR.
+- **No `etUser` config plumbing.** The plan floated deriving the SSH user from
+  config; the image user is a fixed `user`, so it's a const (`etWorkstationUser`)
+  with a comment, not a config field.
+- **LA (bootstrap) tunnel is persistent**, per the plan's v1 choice — kept up
+  for the whole session via the same supervised loop as the data tunnel, rather
+  than torn down after the handshake. Simpler; one extra idle gcloud process.
+
+## Tradeoffs
+
+- **Fixed local ports across respawns.** ET only knows the one data-port number,
+  so the supervised loop reuses the same `localhost:<port>` on respawn rather
+  than picking a fresh one. The `backoffInterval` (500 ms) doubles as the
+  port-release window before re-bind; `waitForPortsBound` surfaces a clean error
+  if the port is stolen in between.
+- **SIGINT handling is best-effort.** `signal.NotifyContext(os.Interrupt)` is
+  installed for teardown/orphan-cleanup, but during an active session `et` holds
+  the terminal in raw mode, so an in-session Ctrl-C is forwarded to the remote
+  shell and never reaches us — which is the desired behavior. The handler mainly
+  matters for aborting before connect and cleaning up child tunnels on signal.
+- **Two extra gcloud processes** run per `--et` session (one tunnel per remote
+  port). Acceptable for the resilience gained; both are torn down on exit.
+
+## Code review outcome (/code-review, high effort)
+
+Ran the multi-angle review on PR #137. **No confirmed correctness bugs.** The
+candidates surfaced were verified against the code and refuted:
+- "allBound connection leak" — false: each dial is `Close()`d inside the loop
+  before the next iteration.
+- "redundant cancel() before wg.Wait()" — false: the explicit cancel is required
+  to unblock the supervise goroutines (which block in `t.Tunnel(ctx)`); without
+  it wg.Wait() deadlocks since `defer cancel()` hasn't fired yet.
+- "concurrent Fprintf garbling" — `*os.File.Write` is goroutine-safe and atomic
+  per call; `-race` is clean.
+- "stderr should be os.Stderr not errOut" — errOut *is* os.Stderr; et drives the
+  tty via stdin/stdout.
+- "hardcoded user/identity" — deliberate, documented spike findings with a safe
+  fallback; not a defect.
+
+No code changes applied (fabricating fixes against refuted findings would churn
+correct code).
+
+## Open / needs follow-up
+
+- **Live end-to-end verification of auto-resume** (kill the data tunnel
+  mid-session, confirm ET resyncs) is a manual step — covered by the plan's
+  verification section but not by automated tests (it needs a real interactive
+  session + real `et`/etserver). Core connectivity was proven in the spike.
+- **Spike left a manual etserver + apt install on the `personal` box.** Harmless
+  (it vanishes on the next image rebuild), and superseded once the `et` plugin
+  is installed and `ra create` reruns.
+- **Two PRs** (remote-agent CLI + ra-plugins server) must merge together for the
+  feature to be usable end to end; the plugin must be installed and `ra create`
+  rerun to bake etserver into the image.
+- Consider also lowering `ClientAliveCountMax` (ADR 0003) so plain `ra connect`
+  freezes resolve faster — independent of ET, noted in the ADR.

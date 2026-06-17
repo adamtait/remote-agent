@@ -2,6 +2,7 @@ package gcloud
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -265,6 +266,20 @@ func (c *Client) SSHReady(project, region, cluster, cfgName, name string) bool {
 // process exits (typically on Ctrl-C).
 func (c *Client) StartTCPTunnel(project, region, cluster, cfgName, name string, localPort, remotePort int) error {
 	return c.runner.Run(
+		"workstations", "start-tcp-tunnel",
+		"--cluster", cluster, "--config", cfgName,
+		"--region", region, "--project", project,
+		"--local-host-port", fmt.Sprintf("localhost:%d", localPort),
+		name, strconv.Itoa(remotePort),
+	)
+}
+
+// StartTCPTunnelContext is StartTCPTunnel that also returns (killing the
+// underlying gcloud process) when ctx is cancelled. Used by the ET connect
+// path, which supervises a long-lived tunnel and must tear it down — or
+// respawn it — on demand.
+func (c *Client) StartTCPTunnelContext(ctx context.Context, project, region, cluster, cfgName, name string, localPort, remotePort int) error {
+	return c.runner.RunContext(ctx,
 		"workstations", "start-tcp-tunnel",
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,

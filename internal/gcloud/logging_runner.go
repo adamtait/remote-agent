@@ -59,10 +59,11 @@ func gcloudSubcmd(args []string) string {
 // what Run uses: stdout to terminal, stdin from terminal, Error-level
 // failure log with "gcloud failed" message.
 type execOpts struct {
-	op         string    // op name attached to every slog record (e.g. "gcloud.Run")
-	stdout     io.Writer // nil → os.Stdout
-	stderrTerm io.Writer // terminal sink for stderr; nil → os.Stderr (always also captured for slog)
-	stdin      io.Reader // nil → os.Stdin
+	op         string          // op name attached to every slog record (e.g. "gcloud.Run")
+	ctx        context.Context // nil → context.Background(); when set, cancellation kills the process
+	stdout     io.Writer       // nil → os.Stdout
+	stderrTerm io.Writer       // terminal sink for stderr; nil → os.Stderr (always also captured for slog)
+	stdin      io.Reader       // nil → os.Stdin
 	failLvl    slog.Level
 	failMsg    string
 	args       []string
@@ -96,6 +97,9 @@ func (r LoggingRunner) execAndLog(opts execOpts) (string, error) {
 
 	var stderrBuf bytes.Buffer
 	cmd := exec.Command("gcloud", opts.args...)
+	if opts.ctx != nil {
+		cmd = exec.CommandContext(opts.ctx, "gcloud", opts.args...)
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = io.MultiWriter(stderrTerm, &stderrBuf)
 	cmd.Stdin = stdin
@@ -123,6 +127,14 @@ func (r LoggingRunner) execAndLog(opts execOpts) (string, error) {
 // capturing stderr for logging.
 func (r LoggingRunner) Run(args ...string) error {
 	_, err := r.execAndLog(execOpts{op: "gcloud.Run", failLvl: slog.LevelError, args: args})
+	return err
+}
+
+// RunContext executes gcloud like Run, but kills the gcloud process when ctx
+// is cancelled. Used for long-lived foreground commands (e.g. a TCP tunnel)
+// that the caller tears down on demand.
+func (r LoggingRunner) RunContext(ctx context.Context, args ...string) error {
+	_, err := r.execAndLog(execOpts{op: "gcloud.RunContext", ctx: ctx, failLvl: slog.LevelDebug, failMsg: "gcloud run-context ended", args: args})
 	return err
 }
 

@@ -2,6 +2,7 @@ package gcloud
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -11,6 +12,11 @@ import (
 type Runner interface {
 	// Run executes gcloud with args, streaming stdout/stderr to the terminal.
 	Run(args ...string) error
+	// RunContext executes gcloud like Run, but kills the gcloud process when
+	// ctx is cancelled. Used for long-lived foreground commands (e.g. a TCP
+	// tunnel) that must be torn down on demand. A ctx-driven kill surfaces as
+	// a non-nil error, same as any other early exit.
+	RunContext(ctx context.Context, args ...string) error
 	// RunWithStdin executes gcloud with args, piping stdin into the process.
 	// stdout/stderr stream to the terminal.
 	RunWithStdin(stdin io.Reader, args ...string) error
@@ -42,6 +48,14 @@ type RealRunner struct{}
 
 func (r RealRunner) Run(args ...string) error {
 	cmd := exec.Command("gcloud", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+func (r RealRunner) RunContext(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "gcloud", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

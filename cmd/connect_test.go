@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,24 @@ import (
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
 )
+
+// TestRunConnectET_BailsWhenETMissing verifies the ET preflight runs first: if
+// the local `et` client is absent, runConnectET returns an actionable error
+// and never touches gcloud (no cold-start latency before the failure).
+func TestRunConnectET_BailsWhenETMissing(t *testing.T) {
+	// Empty PATH → exec.LookPath("et") fails.
+	t.Setenv("PATH", t.TempDir())
+	runner := &testRunner{}
+	client := gcloud.NewClient(runner)
+
+	err := runConnectET(newConnectCfg(), client, "", wsOverride{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "Eternal Terminal") {
+		t.Fatalf("expected ET-missing error, got %v", err)
+	}
+	if len(runner.runs) != 0 || len(runner.quietRuns) != 0 {
+		t.Fatalf("expected no gcloud calls when preflight fails; runs=%v quiet=%v", runner.runs, runner.quietRuns)
+	}
+}
 
 func newConnectCfg() *config.Config {
 	return &config.Config{

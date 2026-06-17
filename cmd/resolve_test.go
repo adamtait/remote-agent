@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -38,7 +39,8 @@ func (f *testRunner) Run(args ...string) error {
 	}
 	return nil
 }
-func (f *testRunner) RunWithStdin(_ io.Reader, _ ...string) error { return nil }
+func (f *testRunner) RunContext(_ context.Context, args ...string) error { return f.Run(args...) }
+func (f *testRunner) RunWithStdin(_ io.Reader, _ ...string) error        { return nil }
 func (f *testRunner) Check(args ...string) bool {
 	if v, ok := f.checks[f.key(args)]; ok {
 		return v

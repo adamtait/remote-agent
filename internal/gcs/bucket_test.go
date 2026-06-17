@@ -1,6 +1,7 @@
 package gcs_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,6 +23,10 @@ type fakeRunner struct {
 func (f *fakeRunner) key(args []string) string { return strings.Join(args, " ") }
 
 func (f *fakeRunner) Run(args ...string) error {
+	f.calls = append(f.calls, args)
+	return f.runErr
+}
+func (f *fakeRunner) RunContext(_ context.Context, args ...string) error {
 	f.calls = append(f.calls, args)
 	return f.runErr
 }
