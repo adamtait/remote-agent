@@ -50,7 +50,12 @@ _ra_export_env() {
     umask 077
     if [[ ! -f "${RA_ENV_FILE}" ]]; then
         : > "${RA_ENV_FILE}"
-        chmod 0644 "${RA_ENV_FILE}"
+        # This file holds fetched secret values (OAuth tokens, API keys). The
+        # workstation `user` login shell sources it via profile.d/00-ra-wait.sh,
+        # so it must be readable by `user` but NOT world-readable. Own it by
+        # `user` at 0600 (root, the writer, can read it regardless).
+        chown user:user "${RA_ENV_FILE}"
+        chmod 0600 "${RA_ENV_FILE}"
     fi
     sed -i "/^${key}=/d" "${RA_ENV_FILE}"
     # /run/ra/env is bash-sourced via `set -a; . FILE`. Single-quote-wrap (with
