@@ -36,11 +36,23 @@ log() {
     echo "${msg}" >> "${RA_SETUP_LOG_PATH}" 2>/dev/null || true
 }
 
-# _ra_export_env writes a key=value pair to both /etc/environment and
-# /run/ra/env (creating the latter lazily). Both files are deduped per-key
-# so repeat calls (or repeat boots) don't accumulate stale entries.
-# Keys are valid env var names ([A-Za-z_][A-Za-z0-9_]*), so the sed regex
-# is safe without escaping.
+# Install the shared ra-env helper library, then source it. Plugin scripts
+# (workstation-startup.d/ at numbers >= 250) run as SEPARATE processes and
+# source this same file, so env-var persistence — per-key dedup, the dual write
+# to /etc/environment and /run/ra/env, and the single-quote escaping — lives in
+# exactly one place. Emitted with a single-quoted heredoc (<<'RA_ENV_LIB') so
+# the escaping expressions below are written to the file literally, not expanded
+# here. This script sources its own emitted lib so there is no duplicated body.
+install -d -m 0755 /usr/local/lib/ra
+cat > /usr/local/lib/ra/ra-env.sh <<'RA_ENV_LIB'
+#!/bin/bash
+# ra-env helper library — installed by 200_remote-agent-setup.sh; sourced by the
+# core setup script and by plugin workstation-startup.d scripts.
+#
+#   ra_env_set KEY VALUE  — dedup + write KEY to BOTH /etc/environment and
+#                           /run/ra/env, single-quote escaped. Creates
+#                           /run/ra/env lazily, owned user:user 0600.
+#   ra_env_unset KEY      — remove KEY from BOTH files. Idempotent; set -e safe.
 #
 # Both files are single-quote-wrapped (with embedded-quote escaping `'\''`) so a
 # value containing spaces or shell metacharacters can't be re-parsed as extra
@@ -53,28 +65,45 @@ log() {
 #     executed as a pipeline, failing the trigger and breaking apt for any package
 #     that ships info files (emacs, etc.). pam_env strips the surrounding quotes,
 #     so login shells still receive the clean value.
-_ra_export_env() {
+#
+# Keys are valid env var names ([A-Za-z_][A-Za-z0-9_]*), so the sed regexes are
+# safe without escaping. Plugins don't set RA_ENV_FILE, so default it here.
+: "${RA_ENV_FILE:=/run/ra/env}"
+
+ra_env_set() {
     local key="$1"
     local val="$2"
     local quoted="${val//\'/\'\\\'\'}"
 
-    [[ -f /etc/environment ]] || : > /etc/environment
+    [ -f /etc/environment ] || : > /etc/environment
     sed -i "/^${key}=/d" /etc/environment
     printf "%s='%s'\n" "${key}" "${quoted}" >> /etc/environment
 
-    umask 077
-    if [[ ! -f "${RA_ENV_FILE}" ]]; then
-        : > "${RA_ENV_FILE}"
-        # This file holds fetched secret values (OAuth tokens, API keys). The
-        # workstation `user` login shell sources it via profile.d/00-ra-wait.sh,
-        # so it must be readable by `user` but NOT world-readable. Own it by
-        # `user` at 0600 (root, the writer, can read it regardless).
+    if [ ! -f "${RA_ENV_FILE}" ]; then
+        # Create 0600 from the start. The umask is scoped to a subshell so it
+        # can't leak into a sourcing plugin's shell and tighten files that
+        # plugin creates afterward. Holds fetched secret values (OAuth tokens,
+        # API keys); the `user` login shell sources it via
+        # profile.d/00-ra-wait.sh, so own it by `user` (root, the writer, can
+        # read it regardless).
+        ( umask 077; : > "${RA_ENV_FILE}" )
         chown user:user "${RA_ENV_FILE}"
         chmod 0600 "${RA_ENV_FILE}"
     fi
     sed -i "/^${key}=/d" "${RA_ENV_FILE}"
     printf "%s='%s'\n" "${key}" "${quoted}" >> "${RA_ENV_FILE}"
 }
+
+ra_env_unset() {
+    local key="$1"
+    [ -f /etc/environment ] && sed -i "/^${key}=/d" /etc/environment
+    [ -f "${RA_ENV_FILE}" ] && sed -i "/^${key}=/d" "${RA_ENV_FILE}"
+    return 0
+}
+RA_ENV_LIB
+chmod 0644 /usr/local/lib/ra/ra-env.sh
+# shellcheck source=/dev/null
+. /usr/local/lib/ra/ra-env.sh
 
 
 : > "${RA_SETUP_LOG_PATH}" 2>/dev/null || true
@@ -117,7 +146,7 @@ for logical in "${ra_secret_names[@]}"; do
         --secret="${secret_name}" --project="${GCP_PROJECT_ID}" \
         2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
     if [[ -n "${val}" ]]; then
-        _ra_export_env "${target_env_var}" "${val}"
+        ra_env_set "${target_env_var}" "${val}"
         log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
     else
         log "WARNING: ${secret_name} fetch returned empty."
@@ -146,7 +175,7 @@ if [[ -n "${RA_PROPAGATE_KEYS:-}" ]]; then
     for _key in "${_ra_propagate_keys[@]}"; do
         [[ -z "${_key}" ]] && continue
         _val="${!_key:-}"
-        _ra_export_env "${_key}" "${_val}"
+        ra_env_set "${_key}" "${_val}"
         log "Propagated ${_key} via /etc/environment and ${RA_ENV_FILE}."
     done
     unset _ra_propagate_keys _key _val
