@@ -41,12 +41,27 @@ log() {
 # so repeat calls (or repeat boots) don't accumulate stale entries.
 # Keys are valid env var names ([A-Za-z_][A-Za-z0-9_]*), so the sed regex
 # is safe without escaping.
+#
+# Both files are single-quote-wrapped (with embedded-quote escaping `'\''`) so a
+# value containing spaces or shell metacharacters can't be re-parsed as extra
+# commands when the file is sourced:
+#   - /run/ra/env is bash-sourced via `set -a; . FILE`.
+#   - /etc/environment is read by pam_env as plain KEY=VAL, BUT some system tools
+#     also `. /etc/environment` (e.g. Debian's /usr/sbin/update-info-dir, run by
+#     the install-info dpkg trigger under `set -e`). An unquoted value with a `|`
+#     — like RA_PLUGIN_GITHUB_REPO_URLS's pipe-separated list — would otherwise be
+#     executed as a pipeline, failing the trigger and breaking apt for any package
+#     that ships info files (emacs, etc.). pam_env strips the surrounding quotes,
+#     so login shells still receive the clean value.
 _ra_export_env() {
     local key="$1"
     local val="$2"
+    local quoted="${val//\'/\'\\\'\'}"
+
     [[ -f /etc/environment ]] || : > /etc/environment
     sed -i "/^${key}=/d" /etc/environment
-    echo "${key}=${val}" >> /etc/environment
+    printf "%s='%s'\n" "${key}" "${quoted}" >> /etc/environment
+
     umask 077
     if [[ ! -f "${RA_ENV_FILE}" ]]; then
         : > "${RA_ENV_FILE}"
@@ -58,10 +73,6 @@ _ra_export_env() {
         chmod 0600 "${RA_ENV_FILE}"
     fi
     sed -i "/^${key}=/d" "${RA_ENV_FILE}"
-    # /run/ra/env is bash-sourced via `set -a; . FILE`. Single-quote-wrap (with
-    # embedded-quote escaping `'\''`) so values containing spaces or shell
-    # metacharacters can't be re-parsed as extra commands during sourcing.
-    local quoted="${val//\'/\'\\\'\'}"
     printf "%s='%s'\n" "${key}" "${quoted}" >> "${RA_ENV_FILE}"
 }
 
