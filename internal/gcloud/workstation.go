@@ -235,6 +235,29 @@ func (c *Client) Delete(project, region, cluster, cfgName, name string) error {
 	)
 }
 
+// DeleteConfig deletes a workstations config (caller must confirm first, and
+// must delete the config's workstation instances first). The reverse of the
+// `configs create` step in `ra create`.
+func (c *Client) DeleteConfig(project, region, cluster, cfgName string) error {
+	return c.runner.Run(
+		"workstations", "configs", "delete", cfgName,
+		"--cluster", cluster,
+		"--region", region, "--project", project,
+		"--quiet",
+	)
+}
+
+// DeleteCluster deletes a workstations cluster (caller must confirm first, and
+// must delete the cluster's configs first). This is the resource that accrues
+// the fixed control-plane fee, so it is the primary target of `ra teardown`.
+func (c *Client) DeleteCluster(project, region, cluster string) error {
+	return c.runner.Run(
+		"workstations", "clusters", "delete", cluster,
+		"--region", region, "--project", project,
+		"--quiet",
+	)
+}
+
 // SSH opens an interactive SSH session to the workstation.
 //
 // Note: idle sessions are kept alive from the server side (sshd

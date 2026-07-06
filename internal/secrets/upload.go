@@ -46,6 +46,16 @@ func CreateFromValue(r gcloud.Runner, projectID, name string, value []byte) erro
 	return nil
 }
 
+// Delete removes a secret (all versions) from GCP Secret Manager. Used by
+// `ra teardown`. Idempotency is the caller's concern: deleting a missing
+// secret returns a non-nil error, which teardown treats as best-effort.
+func Delete(r gcloud.Runner, projectID, name string) error {
+	if err := r.Run("secrets", "delete", name, "--project", projectID, "--quiet"); err != nil {
+		return fmt.Errorf("deleting secret %s: %w", name, err)
+	}
+	return nil
+}
+
 // EnsureSecret checks if a secret exists in GCP Secret Manager; if not,
 // reads a value from the user (hidden input) and creates the secret.
 // Caller is responsible for IAM bindings (done in `ra create`).

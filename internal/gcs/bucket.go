@@ -107,6 +107,25 @@ func GrantRole(r gcloud.Runner, attempts int, delay time.Duration, notice io.Wri
 		"--condition=None")
 }
 
+// DeleteBucket removes a GCS bucket and its contents (caller must confirm
+// first). `gcloud storage buckets delete` refuses a non-empty bucket, so the
+// objects are cleared first via a best-effort recursive remove (RunSoft, since
+// an already-empty bucket makes `storage rm` exit non-zero with "no URLs
+// matched"). The reverse of EnsureBucket in `ra create`. Used by `ra teardown`
+// only when the user opts in with --delete-buckets, because bucket contents
+// (e.g. synced work artifacts) are not recoverable.
+func DeleteBucket(r gcloud.Runner, project, name string) error {
+	uri := "gs://" + name
+	// Best-effort empty: ignore the error so an already-empty bucket (or a
+	// missing one) doesn't block the bucket delete, which reports the real
+	// outcome.
+	_ = r.RunSoft("storage", "rm", "--recursive", uri+"/**", "--project", project)
+	if err := r.Run("storage", "buckets", "delete", uri, "--project", project, "--quiet"); err != nil {
+		return fmt.Errorf("deleting bucket %s: %w", name, err)
+	}
+	return nil
+}
+
 // LifecycleRule is one GCS Object Lifecycle Management rule in the
 // vocabulary ra supports. It is the gcs-package mirror of
 // plugins.LifecycleRule (kept separate so internal/gcs need not import
