@@ -140,6 +140,62 @@ func TestRunTeardown_DeletesInDependencyOrder(t *testing.T) {
 	}
 }
 
+func TestRunTeardown_PreservesSharedResourcesWhenOtherConfigsExist(t *testing.T) {
+	r := teardownRunner()
+	// The cluster still hosts another project's config → shared resources must
+	// be preserved; only this config + its instances are deleted.
+	r.outputs["workstations configs list --cluster clus --region us-central1 --project proj --format value(name)"] =
+		[]byte("conf\nother-project-conf\n")
+	client := gcloud.NewClient(r)
+
+	err := runTeardown(client, r, teardownTestCfg(), plugins.NewRegistry(nil), teardownRef(),
+		teardownOpts{Force: true}, io.Discard)
+	if err != nil {
+		t.Fatalf("runTeardown returned error: %v", err)
+	}
+
+	// Per-project resources still deleted.
+	if countInstanceDeletes(r.runs) != 2 {
+		t.Errorf("instance deletes = %d, want 2", countInstanceDeletes(r.runs))
+	}
+	if findRun(r.runs, "workstations", "configs", "delete", "conf") < 0 {
+		t.Error("this project's config should still be deleted")
+	}
+
+	// Shared resources must NOT be touched.
+	for _, shared := range [][]string{
+		{"workstations", "clusters", "delete"},
+		{"iam", "service-accounts", "delete"},
+		{"secrets", "delete"},
+		{"artifacts", "repositories", "delete"},
+		{"remove-iam-policy-binding"},
+	} {
+		if idx := findRun(r.runs, shared...); idx >= 0 {
+			t.Errorf("shared resource must be preserved, but found run: %v", r.runs[idx])
+		}
+	}
+}
+
+func TestRunTeardown_DeleteSharedForcesSharedDeletion(t *testing.T) {
+	r := teardownRunner()
+	// Other configs exist, but --delete-shared overrides the guard.
+	r.outputs["workstations configs list --cluster clus --region us-central1 --project proj --format value(name)"] =
+		[]byte("conf\nother-project-conf\n")
+	client := gcloud.NewClient(r)
+
+	err := runTeardown(client, r, teardownTestCfg(), plugins.NewRegistry(nil), teardownRef(),
+		teardownOpts{Force: true, DeleteShared: true}, io.Discard)
+	if err != nil {
+		t.Fatalf("runTeardown returned error: %v", err)
+	}
+	if findRun(r.runs, "workstations", "clusters", "delete", "clus") < 0 {
+		t.Error("--delete-shared should delete the cluster despite other configs")
+	}
+	if findRun(r.runs, "iam", "service-accounts", "delete", teardownSA) < 0 {
+		t.Error("--delete-shared should delete the service account")
+	}
+}
+
 func TestRunTeardown_KeepSecrets(t *testing.T) {
 	r := teardownRunner()
 	client := gcloud.NewClient(r)

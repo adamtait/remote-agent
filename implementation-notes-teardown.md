@@ -68,6 +68,61 @@ removals land in `runs` too — tests account for this (they match on `delete`, 
 every recorded call).
 
 ### 9. Notes filename
-Kept these notes in `implementation-notes-teardown.md` because a gitignored
-`implementation-notes.md` from a prior task already exists; overwriting it would have
-destroyed unrelated content.
+Kept these notes in `implementation-notes-teardown.md` because a tracked
+`implementation-notes.md` (and `-et.md`) from prior tasks already exist; the repo
+convention is one notes file per feature, so a per-feature name fits and avoids
+clobbering unrelated content.
+
+## Changes made after code review (`/review`)
+
+### 10. **Critical: shared-infrastructure guard** (the big review finding)
+The original teardown assumed a 1:1 project↔stack and deleted the cluster, service
+account, Artifact Registry repo, and secrets unconditionally. But `ra create` names
+all of those from **user-level defaults** (`ra-dev-cluster`, `ra-workstation-sa`,
+`ra-workstation-images`) shared across projects — only the workstations *config* +
+its instances are per-project. `create` provisions shared resources skip-if-exists
+(safe to share); a delete-if-exists teardown from one project would therefore destroy
+sibling projects' workstations/SA/repo/secrets.
+
+**Fix:** teardown now splits **per-project** resources (config + instances, always
+deleted) from **shared** resources (cluster, SA, project IAM, secrets, buckets, repo).
+Shared resources are deleted only when this is the **last config on the cluster**
+(detected via the new `Client.ListConfigs`) or when `--delete-shared` is passed. The
+plan output and step markers clearly label per-project vs shared and show why shared
+resources were preserved. This keeps the cost goal intact (tearing down your last
+project deletes the cluster and stops the fee) while making teardown safe by default.
+Added `--delete-shared`; added tests for the preserve and force paths.
+
+**Tradeoff:** teardown now issues one extra read (`workstations configs list`) to make
+the decision. If that list call fails, teardown errs on the side of *preserving*
+shared infra and tells the user to pass `--delete-shared`.
+
+### 11. De-duplicated create/teardown state (drift risk)
+- `baseProjectRoles` (the always-on `logging.logWriter` + `monitoring.metricWriter`)
+  is now a single package-level var in `create.go`; both create and teardown consume
+  it (each copies before `appendUniqueRoles` to avoid mutating the shared slice). A new
+  always-on role added to create is now automatically removed by teardown.
+- Extracted `serviceAccountEmailFor(saName, project)` — create and teardown had the
+  same `fmt.Sprintf` SA-email formula inlined.
+- Extracted `confirmYes(prompt)` into `resolve.go` (returns `errStdinNotTerminal`) and
+  routed both `ra delete` and `ra teardown` through it, collapsing the duplicated
+  terminal-check + `[y/N]` scanner logic. Behavior/messages preserved per command.
+
+### 12. Smaller review fixes
+- Guarded empty `ServiceAccountName` before IAM removal / SA delete (was producing a
+  malformed `serviceAccount:@project…` member string, silently swallowed by RunSoft).
+- Each step now passes its own error to `logging.Step`'s `done()`, so a failed delete
+  logs as `step_failed` instead of a misleading green marker.
+- Corrected the Step-5 comment: deleting the SA leaves a harmless dangling
+  `deleted:serviceAccount:` binding on any secret/bucket intentionally preserved
+  (`--keep-secrets` / kept buckets); acknowledged rather than silently implied.
+
+### 13. Review findings deliberately NOT changed
+- **Transient `client.List` failure treated as "nothing to list"** — kept. It only
+  affects a rare transient-error window; best-effort + re-run recovers, and reliably
+  distinguishing NOT_FOUND from transient errors needs brittle stderr parsing.
+- **`gcs.DeleteBucket` empty-step is best-effort (RunSoft)** — kept by design; a real
+  `storage rm` permission failure re-surfaces as the `buckets delete` error, which is
+  acceptable given buckets are an explicit opt-in.
+- **Double resource-name in some error strings** (wrapper + `fail()` prefix) — cosmetic
+  only; left as-is.

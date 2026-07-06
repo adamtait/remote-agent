@@ -40,6 +40,19 @@ const (
 	saBindingDelay    = 5 * time.Second
 )
 
+// baseProjectRoles are the always-on project-level IAM roles `ra create` grants
+// the workstation service account (in addition to any plugin auth-provider
+// roles). This is the single source of truth; `ra teardown` removes the same
+// set, so keeping it here prevents the two from drifting.
+var baseProjectRoles = []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"}
+
+// serviceAccountEmailFor returns the email of the workstation service account
+// for the given short name and project. Shared by create and teardown so both
+// compute the same address.
+func serviceAccountEmailFor(saName, project string) string {
+	return fmt.Sprintf("%s@%s.iam.gserviceaccount.com", saName, project)
+}
+
 func logicalNameToEnvToken(logical string) string {
 	return strings.ToUpper(logical)
 }
@@ -364,8 +377,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 
 	imageURI := fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
 		ws.Region, cfg.Gcloud.Project, ws.RepoName, ws.ImageName, ws.ImageTag)
-	serviceAccountEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com",
-		ws.ServiceAccountName, cfg.Gcloud.Project)
+	serviceAccountEmail := serviceAccountEmailFor(ws.ServiceAccountName, cfg.Gcloud.Project)
 
 	// Stable order for secret iteration — used by pre-flight, step 4, and step 5.
 	secretLogicalOrder := make([]string, 0, len(cfg.Secrets))
@@ -657,8 +669,7 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 	// plus any project IAM roles declared on each installed plugin's
 	// selected auth_provider (e.g. roles/aiplatform.user when a plugin
 	// authenticates via Vertex AI using this same service account).
-	projectRoles := []string{"roles/logging.logWriter", "roles/monitoring.metricWriter"}
-	projectRoles = appendUniqueRoles(projectRoles, pluginAuthIAMRoles(reg.All(), cfg))
+	projectRoles := appendUniqueRoles(append([]string{}, baseProjectRoles...), pluginAuthIAMRoles(reg.All(), cfg))
 	done = logging.Step("bind_project_iam", 8, totalCreateSteps, fmt.Sprintf("Granting %d project-level IAM role(s)...", len(projectRoles)), cmd.OutOrStdout())
 	for _, role := range projectRoles {
 		if err := gcloud.RetryOnSANotFound(r, saBindingAttempts, saBindingDelay, cmd.OutOrStdout(),

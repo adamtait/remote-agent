@@ -64,11 +64,14 @@ VM/management fees are $0 while asleep.
   for zero usage. Consolidate to one shared cluster (a cluster holds many configs and
   workstations), and delete the cluster entirely during long idle stretches (`ra` recreates
   it in a few minutes).
-- **Use `ra teardown` to stop the fee.** `ra teardown` deletes all ra-provisioned
-  resources (workstations → config → **cluster** → service account/IAM → secrets →
-  Artifact Registry repo) in one command; removing the cluster is what actually ends the
+- **Use `ra teardown` to stop the fee.** `ra teardown` deletes ra-provisioned resources
+  (workstations → config → **cluster** → service account/IAM → secrets → Artifact
+  Registry repo) in one command; removing the cluster is what actually ends the
   control-plane charge. Run `ra teardown --dry-run` first to preview, then `ra teardown`.
-  GCS buckets (synced data) are preserved unless you pass `--delete-buckets`.
+  Because the cluster (and SA/repo/secrets) are shared across projects, teardown deletes
+  them only when the project you run it from is the **last config on the cluster**; pass
+  `--delete-shared` to force removal while other projects still use it. GCS buckets
+  (synced data) are preserved unless you pass `--delete-buckets`.
 
 ## Caveats
 

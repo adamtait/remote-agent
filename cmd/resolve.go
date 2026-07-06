@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -10,7 +13,28 @@ import (
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
+
+// errStdinNotTerminal is returned by confirmYes when stdin is not a terminal,
+// so interactive callers can advise the user to pass --force instead.
+var errStdinNotTerminal = errors.New("stdin is not a terminal")
+
+// confirmYes writes prompt to stderr and returns true only if the user types
+// "y" (case-insensitive). It returns errStdinNotTerminal when stdin is not a
+// terminal. Shared by the destructive commands (`ra delete`, `ra teardown`) so
+// their confirmation behavior stays identical.
+func confirmYes(prompt string) (bool, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return false, errStdinNotTerminal
+	}
+	fmt.Fprint(os.Stderr, prompt)
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return false, fmt.Errorf("no input received")
+	}
+	return strings.ToLower(strings.TrimSpace(scanner.Text())) == "y", nil
+}
 
 // waitRunningTimeout/waitRunningInterval bound how long ensureRunning polls for
 // a workstation to reach STATE_RUNNING. Cloud Workstations cold starts (image
