@@ -27,3 +27,4 @@ supersession note pointing forward.
 | [0007](0007-file-based-plugin-system.md) | File-based plugins replacing the compiled-Go plugin interface | Accepted (defaults/hooks superseded by 0008) | 2026-04-26 |
 | [0008](0008-zero-builtin-plugin-image-mirror-architecture.md) | Zero built-in plugins — image-mirror layout and an ephemeral build-context assembler | Accepted | 2026-04-27 |
 | [0009](0009-github-and-claude-as-external-plugins.md) | GitHub (and Claude) as external plugins; core ships plugin-agnostic | Accepted | 2026-04-27 |
+| [0010](0010-ra-teardown-shared-safe-resource-removal.md) | `ra teardown` — reverse-order resource removal with a shared-vs-per-project split | Accepted | 2026-07-07 |
