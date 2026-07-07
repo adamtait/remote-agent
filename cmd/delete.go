@@ -1,13 +1,11 @@
 package cmd
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var deleteForce bool
@@ -27,15 +25,15 @@ var deleteCmd = &cobra.Command{
 		}
 
 		if !deleteForce {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
+			prompt := fmt.Sprintf("Delete workstation %q (%s/%s/%s)? [y/N]: ", ref.Name, ref.Project, ref.Cluster, ref.Config)
+			ok, err := confirmYes(prompt)
+			if errors.Is(err, errStdinNotTerminal) {
 				return fmt.Errorf("stdin is not a terminal; use --force to delete non-interactively")
 			}
-			fmt.Fprintf(os.Stderr, "Delete workstation %q (%s/%s/%s)? [y/N]: ", ref.Name, ref.Project, ref.Cluster, ref.Config)
-			scanner := bufio.NewScanner(os.Stdin)
-			if !scanner.Scan() {
-				return fmt.Errorf("no input received")
+			if err != nil {
+				return err
 			}
-			if strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
+			if !ok {
 				fmt.Fprintln(os.Stderr, "Aborted.")
 				return nil
 			}
