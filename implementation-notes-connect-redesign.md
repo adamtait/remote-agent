@@ -82,3 +82,22 @@ probe (the old core `ETServerReady`, now living in the plugin).
 
 Not runtime-verified end-to-end (needs image rebuild with the new plugins + a live
 workstation): the actual `ra plugin et connect` session. Planned on `op`.
+
+## Review round (independent code-reviewer) → fixes
+- **Important (real bug, fixed):** `connect.sh` passed `RA_LOGIN_COMMAND` as a
+  trailing positional to `et` — but `et` takes a remote command via `-c/--command`
+  (verified via `et --help`: only `[user@]host[:port]` is positional). A trailing
+  positional would be dropped or error. This was inherited from PR #144's
+  never-live-verified `buildETArgs` trailing-token. Fixed: `args+=(--command "$RA_LOGIN_COMMAND")`.
+- **Important (fixed):** `runPluginCommand` mapped *any* `sub.Run()` error to
+  `errSilent` — including failed-to-start (EACCES/ENOEXEC), which would exit 1 with
+  a blank screen. Now: `errors.As(&exec.ExitError)` ⇒ script ran, silence; otherwise
+  return a real error.
+- **Suggestion (applied):** `supervise()` could busy-loop if `ra tunnel` fast-fails
+  (e.g. `ra` not on PATH). Added capped backoff (1→2→…→30s on fast-fail, reset to 1s
+  after a real drop).
+- **Noted, no change:** `RA_WORKSTATION_USER` hardcoded "user" (correct for GCP
+  Workstations; `ref` has no user field to wire). Reviewer confirmed init ordering,
+  `PersistentPreRunE` population of cfg/client, process-group teardown (`set -m` +
+  `kill %1 %2`), the /proc/net/tcp probe, config merge precedence, and no
+  shell-injection — all sound.

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -136,9 +137,15 @@ func runPluginCommand(cmd *cobra.Command, p *plugins.FilePlugin, spec plugins.Co
 	sub.Stdout = cmd.OutOrStdout()
 	sub.Stderr = cmd.ErrOrStderr()
 	if err := sub.Run(); err != nil {
-		// The script already reported its own failure to the terminal; exit
-		// non-zero without ra printing a Go error over it.
-		return errSilent
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			// The script ran and exited non-zero — it already reported its own
+			// failure to the terminal; exit non-zero without ra printing over it.
+			return errSilent
+		}
+		// The script could not be started at all (not executable, bad
+		// interpreter, …) — surface a real error, since nothing was printed.
+		return fmt.Errorf("plugin %q command %q: %w", p.Name(), spec.Name, err)
 	}
 	return nil
 }
