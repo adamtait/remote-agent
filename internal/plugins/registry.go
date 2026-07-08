@@ -65,15 +65,15 @@ func (r *Registry) PortByName(name string, cfg *config.Config) (int, bool) {
 }
 
 // LoginCommand returns the connect-time command declared by the single enabled
-// plugin that provides one, rendered against cfg. `ra connect` runs it on the
-// workstation in place of an interactive login shell.
+// plugin that provides one. `ra connect` runs it on the workstation in place of
+// an interactive login shell. The command is used verbatim — config-value
+// interpolation is deferred (see docs/adr/0013-generic-plugin-value-templating.md).
 //
 // Returns ("", false, nil) when no enabled plugin declares a `login-command:`.
 // Returns an error when more than one enabled plugin declares one — two plugins
 // cannot both own the login shell, so this is a real conflict the user must
 // resolve rather than something core silently picks a winner for. Mirrors
-// PortByName: the `enabled` gate matches cmd/create.go, and rendering reads the
-// plugin's config with the schema default as fallback.
+// PortByName: the `enabled` gate matches cmd/create.go.
 func (r *Registry) LoginCommand(cfg *config.Config) (string, bool, error) {
 	if r == nil {
 		return "", false, nil
@@ -81,7 +81,8 @@ func (r *Registry) LoginCommand(cfg *config.Config) (string, bool, error) {
 	var cmd string
 	var owners []string
 	for _, p := range r.plugins {
-		if p.Schema().LoginCommand == "" {
+		lc := p.Schema().LoginCommand
+		if lc == "" {
 			continue
 		}
 		var pluginCfg map[string]interface{}
@@ -91,12 +92,8 @@ func (r *Registry) LoginCommand(cfg *config.Config) (string, bool, error) {
 		if en, _ := pluginCfg["enabled"].(bool); !en {
 			continue
 		}
-		rendered, err := p.RenderLoginCommand(cfg)
-		if err != nil {
-			return "", false, err
-		}
 		owners = append(owners, p.Name())
-		cmd = rendered
+		cmd = lc
 	}
 	switch len(owners) {
 	case 0:

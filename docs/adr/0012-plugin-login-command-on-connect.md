@@ -52,38 +52,29 @@ field for *whichever* single enabled plugin declares it; it never names a plugin
 ```yaml
 # plugin.yaml (tmux plugin, in the ra-plugins repo)
 name: tmux
-login-command: "tmux new-session -A -s {session_name}"
-config:
-  - name: session_name
-    type: string
-    default: main
+login-command: "tmux new-session -A -s main"
 ```
 
-`login-command:` supports `{config-field}` placeholders, resolved against that
-plugin's config values with the schema default as fallback — the same
-`{placeholder}` convention as `BucketSpec.NameTemplate` (`ResolveBucketName`).
-`ra connect` renders `{session_name}` → `main`, yielding
-`tmux new-session -A -s main`.
+`login-command:` is run **verbatim** — there is no config-value interpolation in
+this ADR. The command therefore hard-codes its own literals (the tmux plugin uses
+the session name `main`, matching that plugin's `session_name` default). Making the
+command reference plugin config generically (so a customized `session_name` flows
+through) is a real want, but it is a broader, generic-templating decision deferred
+to **[ADR 0013](0013-generic-plugin-value-templating.md)** and its tracking issue —
+not something to bolt onto this field piecemeal. The only load-time check is that
+the command is a single line.
 
-### Why render a literal command (the shell-agnostic crux)
+### Why a verbatim command is shell-agnostic
 
-Rendering client-side to a **metacharacter-free argv** is what makes this
-shell-agnostic. `gcloud/ssh` and `et` run the remote command via the login
-shell's `-c`. A command containing `${VAR:-x}` or `||` would be parsed
-differently by bash/zsh vs fish/nu. `tmux new-session -A -s main` is just a
-command with arguments, so every shell's `-c` runs it identically. The session
-name therefore comes from config at render time, not from a remote `${…}`
-expansion.
-
-To keep that invariant true rather than merely intended, each substituted value
-is validated at render time against `^[A-Za-z0-9._:@/+=-]+$` (non-empty, no
-whitespace, no shell metacharacters). A malformed config value — e.g.
-`session_name: "a; rm -rf /"` or `"two words"` — fails `ra connect` with a clear
-error instead of being baked into a command that only *looks* safe. This is a
-robustness guard within the user's own trust domain (a plugin can already run
-arbitrary code via `value_command`/boot scripts), not a privilege boundary. The
-template itself is authored by the plugin and trusted; only the interpolated
-config values are validated.
+`gcloud/ssh` and `et` run the remote command via the login shell's `-c`. A command
+that is a plain argv — `tmux new-session -A -s main` — is parsed identically by
+every shell's `-c`; the shell-specific divergences (`${VAR:-x}`, `||`, brace
+expansion, fish's non-POSIX operators) only bite when the *command string itself*
+uses them, which is the plugin author's choice. Because the command is authored in
+`plugin.yaml` (trusted, like any plugin script) and no user-config value is
+interpolated, there is no injection surface and nothing to validate beyond
+"single line". (Value validation *would* be needed once templating lands — that is
+part of what ADR 0013 must specify.)
 
 ### CLI plumbing
 
@@ -160,11 +151,12 @@ point; retiring the hooks is a separate, later decision.
   and stays shell-agnostic by wrapping in `sh -c` (the login shell just execs `sh`):
 
   ```yaml
-  login-command: "sh -c 'infocmp -- \"$TERM\" >/dev/null 2>&1 || export TERM=xterm-256color; exec tmux new-session -A -s {session_name}'"
+  login-command: "sh -c 'infocmp -- \"$TERM\" >/dev/null 2>&1 || export TERM=xterm-256color; exec tmux new-session -A -s main'"
   ```
 
-  Only the substituted `{session_name}` is validated for shell-safety; the `sh -c`
-  template is plugin-authored and trusted, so this remains within the design.
+  The whole string is plugin-authored and trusted, and runs verbatim; the `sh -c`
+  wrapper keeps it shell-agnostic because the login shell only has to pass a
+  single-quoted literal to `sh`.
 
 ### Neutral
 
@@ -175,10 +167,10 @@ point; retiring the hooks is a separate, later decision.
 ## Verification
 
 1. `go build ./...` and `go test ./...` pass.
-2. `Registry.LoginCommand` returns none / the single rendered command / an error
-   on multiple; `RenderLoginCommand` uses the config value and falls back to the
-   schema default. (`internal/plugins/login_command_test.go`.)
-3. `runConnect` with a login-command emits `--command <rendered>` and
+2. `Registry.LoginCommand` returns none / the single (verbatim) command / an error
+   on multiple, and skips disabled plugins; a multi-line `login-command` is rejected
+   at load. (`internal/plugins/login_command_test.go`.)
+3. `runConnect` with a login-command emits `--command <cmd>` and
    `--ssh-flag=-t`; with none, the SSH argv is unchanged.
    (`cmd/connect_test.go`.) The `--et` path appends the command after the host.
    (`internal/etconn/args_test.go`.)

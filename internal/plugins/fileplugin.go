@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/adamtait/remote-agent/internal/config"
@@ -40,20 +39,8 @@ func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
 	if s.PortForTunnel < 0 || s.PortForTunnel > 65535 {
 		return nil, fmt.Errorf("plugin.yaml: port-for-tunnel %d is out of range (0-65535)", s.PortForTunnel)
 	}
-	if s.LoginCommand != "" {
-		if strings.ContainsAny(s.LoginCommand, "\n\r") {
-			return nil, fmt.Errorf("plugin.yaml: login-command must be a single line")
-		}
-		declared := map[string]bool{}
-		for _, f := range s.Config {
-			declared[f.Name] = true
-		}
-		for _, ph := range loginCommandPlaceholderRe.FindAllString(s.LoginCommand, -1) {
-			key := strings.TrimSuffix(strings.TrimPrefix(ph, "{"), "}")
-			if !declared[key] {
-				return nil, fmt.Errorf("plugin.yaml: login-command references unknown config field %q", ph)
-			}
-		}
+	if s.LoginCommand != "" && strings.ContainsAny(s.LoginCommand, "\n\r") {
+		return nil, fmt.Errorf("plugin.yaml: login-command must be a single line")
 	}
 	seenBucketNames := map[string]bool{}
 	seenBucketEnvVars := map[string]bool{}
@@ -105,74 +92,6 @@ func (p *FilePlugin) DefaultConfigFragments() (configBlock string, secretsBlock 
 		}
 	}
 	return buildPluginsConfigBlock(p.schema.Name, defaults), ""
-}
-
-// loginCommandPlaceholderRe matches `{placeholder}` tokens in a login-command.
-var loginCommandPlaceholderRe = regexp.MustCompile(`\{[^{}]+\}`)
-
-// loginValueRe is the set of characters allowed in a substituted login-command
-// value: non-empty, no whitespace, and no shell metacharacters. Enforcing it is
-// what actually keeps a rendered login-command a metacharacter-free argv that
-// every shell's `-c` runs identically (the feature's shell-agnostic invariant).
-// Values come from user config, so this is checked at render time (ra connect),
-// not at plugin load. `/`, `:`, `@`, `+`, `=` are allowed as shell-safe so
-// path/url-ish values still work; whitespace and `;|&$()<>*?[]{}~#!\"'` are not.
-// Anchored with \A…\z (absolute start/end), not ^…$, so a trailing newline can
-// never slip past the end anchor.
-var loginValueRe = regexp.MustCompile(`\A[A-Za-z0-9._:@/+=-]+\z`)
-
-// RenderLoginCommand returns the plugin's login-command with each
-// `{config-field}` placeholder replaced by that field's configured value
-// (cfg.Plugins[name][field]) or, absent that, the field's schema default.
-// Returns "" (nil error) when the plugin declares no login-command.
-//
-// Placeholders are validated against declared config fields at load time
-// (LoadPlugin), so every `{…}` here resolves to a known field. Each substituted
-// value is then checked against loginValueRe: a value with whitespace or shell
-// metacharacters is returned as an error rather than baked into a command that
-// only looks safe (e.g. session_name "a; rm -rf /" or "two words"). The shipped
-// default like "main" passes; a malformed config value fails `ra connect` with a
-// clear message instead of silently misbehaving.
-func (p *FilePlugin) RenderLoginCommand(cfg *config.Config) (string, error) {
-	if p.schema.LoginCommand == "" {
-		return "", nil
-	}
-	var pluginCfg map[string]interface{}
-	if cfg != nil && cfg.Plugins != nil {
-		pluginCfg = cfg.Plugins[p.schema.Name]
-	}
-	out := p.schema.LoginCommand
-	for _, f := range p.schema.Config {
-		placeholder := "{" + f.Name + "}"
-		if !strings.Contains(out, placeholder) {
-			continue
-		}
-		val := loginValueString(pluginCfg, f)
-		if !loginValueRe.MatchString(val) {
-			return "", fmt.Errorf(
-				"plugin %s: login-command value for {%s} is %q; it must be non-empty and contain only [A-Za-z0-9._:@/+=-] so the rendered command stays shell-safe",
-				p.schema.Name, f.Name, val)
-		}
-		out = strings.ReplaceAll(out, placeholder, val)
-	}
-	return out, nil
-}
-
-// loginValueString stringifies a config field's value for login-command
-// substitution: the configured value when present, else the schema default,
-// else empty. Scalars use fmt's default format; a list/[]interface{} value
-// renders with Go's `[a b c]` form and so fails RenderLoginCommand's charset
-// check — list-valued placeholders in a login-command are unsupported by design.
-func loginValueString(pluginCfg map[string]interface{}, f ConfigField) string {
-	if pluginCfg != nil {
-		if v, ok := pluginCfg[f.Name]; ok {
-			return fmt.Sprintf("%v", v)
-		}
-	}
-	if f.Default != nil {
-		return fmt.Sprintf("%v", f.Default)
-	}
-	return ""
 }
 
 // containerEnvPairsFrom generates RA_PLUGIN_<NAME>_<FIELD>=<value> pairs from pluginCfg.

@@ -16,14 +16,12 @@ type PluginSchema struct {
 	// LoginCommand, when set, is the command `ra connect` runs on the
 	// workstation in place of an interactive login shell — so the session
 	// lands directly in whatever the plugin provides (e.g. a persistent tmux
-	// session) regardless of which login shell the image uses. It is rendered
-	// by substituting `{<config-field>}` placeholders with that plugin's
-	// configured values (schema default as fallback), yielding a
-	// metacharacter-free command that runs the same under any shell's `-c`.
-	// Generic, like `port-for-tunnel:`/`buckets:`/`stable_id:`: core hard-codes
-	// no plugin name; `ra connect` runs the command for whichever single
-	// enabled plugin declares one. Empty means the plugin contributes no
-	// connect-time command.
+	// session) regardless of which login shell the image uses. It is run
+	// verbatim (no config-value interpolation; generic templating is deferred —
+	// see docs/adr/0013-generic-plugin-value-templating.md). Generic, like
+	// `port-for-tunnel:`/`buckets:`/`stable_id:`: core hard-codes no plugin
+	// name; `ra connect` runs the command for whichever single enabled plugin
+	// declares one. Empty means the plugin contributes no connect-time command.
 	LoginCommand  string         `yaml:"login-command"`
 	Config        []ConfigField  `yaml:"config"`
 	Secrets       []SecretDef    `yaml:"secrets"`
