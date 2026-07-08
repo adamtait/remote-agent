@@ -26,6 +26,9 @@ func Merge(u *UserConfig, project *ProjectConfig) (*Config, error) {
 		Gcloud: GcloudConfig{
 			Project: pick(project.Gcloud.Project, u.Gcloud.Project),
 		},
+		Connect: ConnectConfig{
+			LoginCommand: pick(project.Connect.LoginCommand, u.Connect.LoginCommand),
+		},
 	}
 
 	// workstation: user is the baseline, project overrides per field.

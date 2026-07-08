@@ -1,8 +1,13 @@
 # ADR 0012: plugin `login-command:` run by `ra connect`
 
-- **Status:** Accepted
+- **Status:** Superseded by [0014](0014-connection-config-and-plugin-commands.md)
 - **Date:** 2026-07-08
 - **Deciders:** @adamtait
+
+> **Superseded.** The connect command moved from the plugin manifest to
+> client-side config (`connect.login_command`), and the Eternal Terminal
+> transport moved out of core into the `et` plugin via a plugin-command
+> framework. See ADR 0014. This document is kept for history.
 
 ## Context
 

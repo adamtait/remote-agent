@@ -56,18 +56,20 @@ It writes:
 ## Day-to-day
 
 ```bash
-ra list           # list workstations
-ra url            # print the browser IDE URL
-ra connect        # SSH into the workstation
-ra connect --et   # connect via Eternal Terminal (auto-reconnecting; needs the `et` plugin + local `et`)
-ra logs           # tail workstation logs
-ra stop           # stop (save $)
-ra delete         # delete the workstation
+ra list             # list workstations
+ra url              # print the browser IDE URL
+ra connect          # SSH into the workstation
+ra plugin et connect # connect via Eternal Terminal (needs the `et` plugin + local `et`)
+ra logs             # tail workstation logs
+ra stop             # stop (save $)
+ra delete           # delete the workstation
 ```
 
 Each targeted command accepts an optional name argument; otherwise the default workstation is used.
 
-`ra connect --et` connects through the local [Eternal Terminal](https://eternalterminal.dev/) client instead of plain SSH, so a dropped connection auto-reconnects and resumes the session rather than freezing. It requires the `et` client locally (`brew install et`) and the [`et` ra-plugin](https://github.com/adamtait/ra-plugins) installed on the workstation (which runs `etserver`). See [ADR 0004](docs/adr/0004-eternal-terminal-connect.md).
+**`ra connect`** runs `connect.login_command` from your config in place of the login shell when set (e.g. to attach tmux); unset, it opens a plain interactive login shell. `ra setup` scaffolds it with a commented example.
+
+**Plugin-defined commands.** A plugin can contribute CLI commands, invoked as `ra plugin <name> <command>`. The [`et` ra-plugin](https://github.com/adamtait/ra-plugins) provides `ra plugin et connect`, which connects through the local [Eternal Terminal](https://eternalterminal.dev/) client instead of plain SSH so a dropped connection auto-reconnects and resumes the session. It requires the `et` client locally (`brew install et`) and the `et` plugin installed on the workstation (which runs `etserver`). See [ADR 0014](docs/adr/0014-connection-config-and-plugin-commands.md).
 
 
 ## Troubleshooting

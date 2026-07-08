@@ -5,6 +5,16 @@ type GitConfig struct {
 	UserEmail string `yaml:"user_email"`
 }
 
+// ConnectConfig holds client-side connection settings for `ra connect`.
+type ConnectConfig struct {
+	// LoginCommand, when set, is run on the workstation in place of an
+	// interactive login shell (via `gcloud workstations ssh --command … -t`),
+	// so the session lands directly in e.g. a tmux attach regardless of which
+	// login shell the image uses. Empty (the default) opens a plain interactive
+	// login shell. Purely client-side — never propagated to the workstation.
+	LoginCommand string `yaml:"login_command"`
+}
+
 type WorkstationConfig struct {
 	Region             string `yaml:"region"`
 	MachineType        string `yaml:"machine_type"`
@@ -32,6 +42,7 @@ type GcloudConfig struct {
 type UserConfig struct {
 	Git     GitConfig                         `yaml:"git"`
 	Gcloud  GcloudConfig                      `yaml:"gcloud"`
+	Connect ConnectConfig                     `yaml:"connect"`
 	Plugins map[string]map[string]interface{} `yaml:"plugins,omitempty"`
 	Secrets map[string]SecretEntry            `yaml:"secrets"`
 	Env     map[string]string                 `yaml:"env"`
@@ -40,14 +51,16 @@ type UserConfig struct {
 type ProjectConfig struct {
 	Git     GitConfig                         `yaml:"git"`
 	Gcloud  GcloudConfig                      `yaml:"gcloud"`
+	Connect ConnectConfig                     `yaml:"connect"`
 	Plugins map[string]map[string]interface{} `yaml:"plugins,omitempty"`
 	Secrets map[string]SecretEntry            `yaml:"secrets"`
 	Env     map[string]string                 `yaml:"env"`
 }
 
 type Config struct {
-	Git    GitConfig
-	Gcloud GcloudConfig
+	Git     GitConfig
+	Gcloud  GcloudConfig
+	Connect ConnectConfig
 
 	Plugins map[string]map[string]interface{}
 

@@ -1,9 +1,15 @@
 # ADR 0013: generic templating for plugin manifest values
 
-- **Status:** Proposed
+- **Status:** Withdrawn (see [0014](0014-connection-config-and-plugin-commands.md))
 - **Date:** 2026-07-08
 - **Deciders:** @adamtait
 - **Tracking:** [#147](https://github.com/adamtait/remote-agent/issues/147)
+
+> **Withdrawn.** This templating was motivated by interpolating config values
+> into the plugin `login-command:`. ADR 0014 moved the connect command to
+> user-authored config and made plugin commands run verbatim scripts, so there
+> is nothing to interpolate. Revisit generically (issue #147) only if a concrete
+> need reappears.
 
 ## Context
 

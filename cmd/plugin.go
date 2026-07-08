@@ -264,6 +264,9 @@ directory) that holds several plugins — useful for a plugins monorepo:
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Installed plugin %q to %s\n", p.Name(), dest)
+		if msg := strings.TrimSpace(p.Schema().PostInstallMessage); msg != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", msg)
+		}
 		return nil
 	},
 }
