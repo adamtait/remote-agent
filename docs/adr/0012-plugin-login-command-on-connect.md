@@ -152,8 +152,11 @@ point; retiring the hooks is a separate, later decision.
   || export TERM=xterm-256color` guard has no equivalent — a bare
   `tmux new-session -A` fails to attach ("missing or unsuitable terminal") when the
   client's `$TERM` (e.g. `xterm-ghostty`/`xterm-kitty`) has no terminfo on the
-  workstation. Verified live: a workstation was missing ghostty/kitty terminfo even
-  with `ncurses-term` installed. The fix belongs in the *plugin's* login-command,
+  workstation. **Reproduced live** on workstation `op` (missing ghostty/kitty terminfo
+  even with `ncurses-term` installed): over a real PTY, a `TERM=xterm-256color` attach
+  succeeded (session created) while the propagated `TERM=xterm-ghostty` attach exited
+  at once with `missing or unsuitable terminal: xterm-ghostty`. The fix belongs in the
+  *plugin's* login-command,
   and stays shell-agnostic by wrapping in `sh -c` (the login shell just execs `sh`):
 
   ```yaml
@@ -180,8 +183,9 @@ point; retiring the hooks is a separate, later decision.
    (`cmd/connect_test.go`.) The `--et` path appends the command after the host.
    (`internal/etconn/args_test.go`.)
 4. **Live (workstation `op`):** `--command … --ssh-flag=-t` under an interactive
-   tty allocates a remote PTY (`/dev/pts/0`); without `-t` there is none. tmux is
-   present and its boot `main` session exists. Confirmed the terminfo gap above
-   (ghostty/kitty missing). Full `ra connect` end-to-end (both transports, multiple
-   login shells) remains a post-merge check once the ra-plugins `login-command`
-   ships with the `TERM`-fallback wrapper.
+   tty allocates a remote PTY (`/dev/pts/0`); without `-t` there is none. Over that
+   PTY, `tmux new-session -A` with a valid `TERM` **attaches** and creates the
+   session; with the propagated `xterm-ghostty` (no terminfo on `op`) it exits with
+   `missing or unsuitable terminal` — motivating the `TERM`-fallback wrapper above.
+   Full `ra connect --et` end-to-end and a real multi-shell run remain a post-merge
+   check once the ra-plugins `login-command` ships.
