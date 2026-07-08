@@ -300,4 +300,4 @@ to report a vulnerability.
 
 ## License
 
-[MIT](LICENSE) © Adam Tait
+[MIT](LICENSE) © adamtait
