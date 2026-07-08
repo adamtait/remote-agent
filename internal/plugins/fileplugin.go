@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/adamtait/remote-agent/internal/config"
@@ -38,6 +39,21 @@ func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
 	}
 	if s.PortForTunnel < 0 || s.PortForTunnel > 65535 {
 		return nil, fmt.Errorf("plugin.yaml: port-for-tunnel %d is out of range (0-65535)", s.PortForTunnel)
+	}
+	if s.LoginCommand != "" {
+		if strings.ContainsAny(s.LoginCommand, "\n\r") {
+			return nil, fmt.Errorf("plugin.yaml: login-command must be a single line")
+		}
+		declared := map[string]bool{}
+		for _, f := range s.Config {
+			declared[f.Name] = true
+		}
+		for _, ph := range loginCommandPlaceholderRe.FindAllString(s.LoginCommand, -1) {
+			key := strings.TrimSuffix(strings.TrimPrefix(ph, "{"), "}")
+			if !declared[key] {
+				return nil, fmt.Errorf("plugin.yaml: login-command references unknown config field %q", ph)
+			}
+		}
 	}
 	seenBucketNames := map[string]bool{}
 	seenBucketEnvVars := map[string]bool{}
@@ -89,6 +105,54 @@ func (p *FilePlugin) DefaultConfigFragments() (configBlock string, secretsBlock 
 		}
 	}
 	return buildPluginsConfigBlock(p.schema.Name, defaults), ""
+}
+
+// loginCommandPlaceholderRe matches `{placeholder}` tokens in a login-command.
+var loginCommandPlaceholderRe = regexp.MustCompile(`\{[^{}]+\}`)
+
+// LoginCommand returns the plugin's raw (unrendered) login-command template,
+// or "" if it declares none.
+func (p *FilePlugin) LoginCommand() string { return p.schema.LoginCommand }
+
+// RenderLoginCommand returns the plugin's login-command with each
+// `{config-field}` placeholder replaced by that field's configured value
+// (cfg.Plugins[name][field]) or, absent that, the field's schema default.
+// Returns "" when the plugin declares no login-command. Placeholders are
+// validated against declared config fields at load time (LoadPlugin), so every
+// `{…}` here resolves to a known field. Values are stringified the same way as
+// containerEnvPairsFrom, keeping a single stringification convention.
+func (p *FilePlugin) RenderLoginCommand(cfg *config.Config) string {
+	if p.schema.LoginCommand == "" {
+		return ""
+	}
+	var pluginCfg map[string]interface{}
+	if cfg != nil && cfg.Plugins != nil {
+		pluginCfg = cfg.Plugins[p.schema.Name]
+	}
+	out := p.schema.LoginCommand
+	for _, f := range p.schema.Config {
+		placeholder := "{" + f.Name + "}"
+		if !strings.Contains(out, placeholder) {
+			continue
+		}
+		out = strings.ReplaceAll(out, placeholder, loginValueString(pluginCfg, f))
+	}
+	return out
+}
+
+// loginValueString stringifies a config field's value for login-command
+// substitution: the configured value when present, else the schema default,
+// else empty. Mirrors containerEnvPairsFrom's fmt-based stringification.
+func loginValueString(pluginCfg map[string]interface{}, f ConfigField) string {
+	if pluginCfg != nil {
+		if v, ok := pluginCfg[f.Name]; ok {
+			return fmt.Sprintf("%v", v)
+		}
+	}
+	if f.Default != nil {
+		return fmt.Sprintf("%v", f.Default)
+	}
+	return ""
 }
 
 // containerEnvPairsFrom generates RA_PLUGIN_<NAME>_<FIELD>=<value> pairs from pluginCfg.

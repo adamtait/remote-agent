@@ -29,7 +29,7 @@ const etWorkstationUser = "user"
 // an `exit` look like a ~12-15s hang; 3s roughly halves that while staying well
 // clear of spurious reconnects on the IAP relay (sub-second RTT), measured live
 // against the workstation. It also speeds recovery from genuine mid-session
-// drops. See docs/adr/0004-eternal-terminal-connect.md.
+// drops. See docs/adr/0011-eternal-terminal-connect.md.
 const etKeepaliveSecs = 3
 
 // sshReadyTimeout/sshReadyInterval bound how long runConnect waits for sshd to
@@ -50,14 +50,23 @@ var connectCmd = &cobra.Command{
 		if len(args) == 1 {
 			name = args[0]
 		}
-		if et, _ := cmd.Flags().GetBool("et"); et {
-			return runConnectET(cfg, client, name, readLocationOverrides(cmd), cmd.ErrOrStderr())
+		// A plugin may declare a `login-command:` (e.g. the tmux plugin's
+		// `tmux new-session -A -s main`) that ra runs in place of the login
+		// shell — shell-agnostic, unlike per-shell login hooks in the image.
+		// Core stays plugin-agnostic: the registry returns whichever single
+		// enabled plugin declares one (error if more than one).
+		loginCmd, _, err := reg.LoginCommand(cfg)
+		if err != nil {
+			return err
 		}
-		return runConnect(cfg, client, name, readLocationOverrides(cmd), cmd.ErrOrStderr())
+		if et, _ := cmd.Flags().GetBool("et"); et {
+			return runConnectET(cfg, client, name, readLocationOverrides(cmd), loginCmd, cmd.ErrOrStderr())
+		}
+		return runConnect(cfg, client, name, readLocationOverrides(cmd), loginCmd, cmd.ErrOrStderr())
 	},
 }
 
-func runConnect(cfg *config.Config, client *gcloud.Client, name string, override wsOverride, errOut io.Writer) error {
+func runConnect(cfg *config.Config, client *gcloud.Client, name string, override wsOverride, loginCmd string, errOut io.Writer) error {
 	ref, err := resolveWorkstationRef(cfg, client, name, override)
 	if err != nil {
 		return err
@@ -73,7 +82,7 @@ func runConnect(cfg *config.Config, client *gcloud.Client, name string, override
 	if !alreadyRunning {
 		waitSSHReady(client, ref, errOut)
 	}
-	return client.SSH(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name)
+	return client.SSH(ref.Project, ref.Region, ref.Cluster, ref.Config, ref.Name, loginCmd)
 }
 
 // waitSSHReady blocks until the workstation's sshd answers a sentinel probe,
@@ -106,7 +115,7 @@ func waitSSHReady(client *gcloud.Client, ref gcloud.WorkstationRef, errOut io.Wr
 // resumes the session. It reuses the same resolve/start/wait front-half as
 // runConnect, then hands off to the etconn orchestrator (two supervised
 // tunnels + the foreground et client).
-func runConnectET(cfg *config.Config, client *gcloud.Client, name string, override wsOverride, errOut io.Writer) error {
+func runConnectET(cfg *config.Config, client *gcloud.Client, name string, override wsOverride, loginCmd string, errOut io.Writer) error {
 	if err := etconn.EnsureETInstalled(); err != nil {
 		return err
 	}
@@ -141,6 +150,7 @@ func runConnectET(cfg *config.Config, client *gcloud.Client, name string, overri
 		User:          etWorkstationUser,
 		IdentityFile:  etIdentityFile(),
 		KeepaliveSecs: etKeepaliveSecs,
+		Command:       loginCmd,
 	}
 
 	// SIGINT/SIGTERM tear down the tunnels (et grabs the terminal in raw mode,

@@ -26,6 +26,29 @@ func TestBuildETArgs_FullOptions(t *testing.T) {
 	}
 }
 
+func TestBuildETArgs_Command(t *testing.T) {
+	got := buildETArgs(ETOptions{
+		Host:          "localhost",
+		DataPort:      2202,
+		BootstrapPort: 2201,
+		User:          "user",
+		Command:       "tmux new-session -A -s main",
+	})
+	// The remote command must be the final token, after the host positional, so
+	// et forwards it to the remote shell.
+	want := []string{
+		"--ssh-option", "Port=2201",
+		"--ssh-option", "StrictHostKeyChecking=no",
+		"--ssh-option", "UserKnownHostsFile=/dev/null",
+		"-p", "2202",
+		"user@localhost",
+		"tmux new-session -A -s main",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildETArgs mismatch\n got: %q\nwant: %q", got, want)
+	}
+}
+
 func TestBuildETArgs_Keepalive(t *testing.T) {
 	got := buildETArgs(ETOptions{
 		Host:          "localhost",

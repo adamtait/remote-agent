@@ -1,7 +1,9 @@
 package plugins
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/adamtait/remote-agent/internal/config"
 )
@@ -60,6 +62,49 @@ func (r *Registry) PortByName(name string, cfg *config.Config) (int, bool) {
 		return portForTunnelFromCfg(pluginCfg, schemaDefault), true
 	}
 	return 0, false
+}
+
+// LoginCommand returns the connect-time command declared by the single enabled
+// plugin that provides one, rendered against cfg. `ra connect` runs it on the
+// workstation in place of an interactive login shell.
+//
+// Returns ("", false, nil) when no enabled plugin declares a `login-command:`.
+// Returns an error when more than one enabled plugin declares one — two plugins
+// cannot both own the login shell, so this is a real conflict the user must
+// resolve rather than something core silently picks a winner for. Mirrors
+// PortByName: the `enabled` gate matches cmd/create.go, and rendering reads the
+// plugin's config with the schema default as fallback.
+func (r *Registry) LoginCommand(cfg *config.Config) (string, bool, error) {
+	if r == nil {
+		return "", false, nil
+	}
+	var cmd string
+	var owners []string
+	for _, p := range r.plugins {
+		if p.Schema().LoginCommand == "" {
+			continue
+		}
+		var pluginCfg map[string]interface{}
+		if cfg != nil && cfg.Plugins != nil {
+			pluginCfg = cfg.Plugins[p.Name()]
+		}
+		if en, _ := pluginCfg["enabled"].(bool); !en {
+			continue
+		}
+		owners = append(owners, p.Name())
+		cmd = p.RenderLoginCommand(cfg)
+	}
+	switch len(owners) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return cmd, true, nil
+	default:
+		sort.Strings(owners)
+		return "", false, fmt.Errorf(
+			"multiple enabled plugins declare a login-command (%s); at most one may — disable all but one",
+			strings.Join(owners, ", "))
+	}
 }
 
 // TunnelablePlugins returns the names of installed plugins that declare a

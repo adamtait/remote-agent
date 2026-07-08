@@ -21,7 +21,7 @@ func TestRunConnectET_BailsWhenETMissing(t *testing.T) {
 	runner := &testRunner{}
 	client := gcloud.NewClient(runner)
 
-	err := runConnectET(newConnectCfg(), client, "", wsOverride{}, io.Discard)
+	err := runConnectET(newConnectCfg(), client, "", wsOverride{}, "", io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "Eternal Terminal") {
 		t.Fatalf("expected ET-missing error, got %v", err)
 	}
@@ -89,7 +89,7 @@ func TestRunConnect_Running_SkipsStart(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	for _, call := range runner.runs {
@@ -115,6 +115,63 @@ func TestRunConnect_Running_SkipsStart(t *testing.T) {
 	}
 	if errOut.Len() != 0 {
 		t.Errorf("expected no stderr output when already running, got %q", errOut.String())
+	}
+}
+
+// runningRunner returns a testRunner whose describe reports p-user RUNNING, so
+// runConnect proceeds straight to the SSH call (warm path).
+func runningRunner() *testRunner {
+	return &testRunner{
+		checks: map[string]bool{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
+		},
+		outputs: map[string][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_RUNNING\thost\n"),
+		},
+	}
+}
+
+func sshCall(t *testing.T, runs [][]string) string {
+	t.Helper()
+	for _, call := range runs {
+		if j := strings.Join(call, " "); strings.HasPrefix(j, "workstations ssh p-user ") {
+			return j
+		}
+	}
+	t.Fatalf("no ssh call found in runs=%v", runs)
+	return ""
+}
+
+// A plugin login-command is threaded into the SSH invocation as `--command`
+// plus a forced-PTY flag, so `ra connect` lands directly in (e.g.) tmux.
+func TestRunConnect_LoginCommand_PassesCommandAndPTY(t *testing.T) {
+	runner := runningRunner()
+	client := gcloud.NewClient(runner)
+	var errOut bytes.Buffer
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "tmux new-session -A -s main", &errOut); err != nil {
+		t.Fatalf("runConnect: %v", err)
+	}
+	ssh := sshCall(t, runner.runs)
+	if !strings.Contains(ssh, "--command tmux new-session -A -s main") {
+		t.Errorf("ssh call missing rendered --command: %s", ssh)
+	}
+	if !strings.Contains(ssh, "--ssh-flag=-t") {
+		t.Errorf("ssh call missing forced-PTY flag: %s", ssh)
+	}
+}
+
+// With no login-command the SSH call is exactly today's: no --command, no PTY
+// flag, so plain interactive-shell behavior is preserved.
+func TestRunConnect_NoLoginCommand_PlainSSH(t *testing.T) {
+	runner := runningRunner()
+	client := gcloud.NewClient(runner)
+	var errOut bytes.Buffer
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
+		t.Fatalf("runConnect: %v", err)
+	}
+	ssh := sshCall(t, runner.runs)
+	if strings.Contains(ssh, "--command") || strings.Contains(ssh, "--ssh-flag") {
+		t.Errorf("expected a plain ssh call with no command/PTY flag, got: %s", ssh)
 	}
 }
 
@@ -163,7 +220,7 @@ func TestRunConnect_Stopped_StartsThenSSH(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 
@@ -211,7 +268,7 @@ func TestRunConnect_Starting_WaitsThenSSH(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	foundSSH := false
@@ -327,7 +384,7 @@ func TestRunConnect_WaitsForSSHReadyThenSSH(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	foundSSH := false
@@ -368,7 +425,7 @@ func TestRunConnect_SSHReadyTimeout_ConnectsAnyway(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	foundSSH := false
@@ -399,7 +456,7 @@ func TestRunConnect_StartError_Propagates(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut)
+	err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

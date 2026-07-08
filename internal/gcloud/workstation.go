@@ -281,19 +281,36 @@ func (c *Client) DeleteCluster(project, region, cluster string) error {
 	)
 }
 
-// SSH opens an interactive SSH session to the workstation.
+// sshForcePTYFlag forces ssh to allocate a PTY. A remote command
+// (`--command`) otherwise suppresses PTY allocation, which would leave an
+// interactive program like tmux without a terminal. A single `-t` suffices
+// because `ra connect` runs with a real local tty on stdin (`-tt` is only
+// needed when local stdin is not a tty). Passed as one `--ssh-flag=-t` token so
+// gcloud's arg parser doesn't mistake the `-t` for a gcloud flag. Kept as a
+// const so switching to `-tt` (if a live test ever shows gcloud's wrapper needs
+// it) is a one-line change.
+const sshForcePTYFlag = "--ssh-flag=-t"
+
+// SSH opens an SSH session to the workstation. When command is non-empty it is
+// run on the workstation in place of an interactive login shell (with a forced
+// PTY so an interactive program like tmux still gets a terminal); an empty
+// command opens a normal interactive login shell.
 //
 // Note: idle sessions are kept alive from the server side (sshd
 // ClientAliveInterval, baked into the workstation image) — NOT here. gcloud
 // hard-codes the client-side "-o ServerAliveInterval=0" ahead of any
 // --ssh-flag we pass, and ssh honors the first value, so a client-side
 // keepalive flag would be silently ignored. See the Dockerfile.
-func (c *Client) SSH(project, region, cluster, cfgName, name string) error {
-	return c.runner.Run(
+func (c *Client) SSH(project, region, cluster, cfgName, name, command string) error {
+	args := []string{
 		"workstations", "ssh", name,
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,
-	)
+	}
+	if command != "" {
+		args = append(args, "--command", command, sshForcePTYFlag)
+	}
+	return c.runner.Run(args...)
 }
 
 // SSHReady reports whether the workstation's sshd is accepting connections, by

@@ -28,8 +28,8 @@ const (
 
 // ETOptions fully specifies a local `et` invocation. It is built from the
 // resolved workstation plus the chosen local ports. The exact flag set was
-// validated by the Phase-1 spike (see implementation-notes-et.md): `et`
-// bootstraps over ssh, so the bootstrap port is conveyed as an ssh `-o Port=`
+// validated by a Phase-1 spike (see docs/adr/0011-eternal-terminal-connect.md):
+// `et` bootstraps over ssh, so the bootstrap port is conveyed as an ssh `-o Port=`
 // option, and the data channel is selected with `-p`.
 type ETOptions struct {
 	Host          string   // host both the ssh bootstrap and et data channel dial; always "localhost" here
@@ -39,6 +39,12 @@ type ETOptions struct {
 	IdentityFile  string   // ssh private key the workstation authorizes; "" lets ssh resolve a default
 	KeepaliveSecs int      // et client keepalive interval (`-k`); 0 leaves et's default (~6s)
 	Extra         []string // escape hatch for additional et flags
+	// Command, when non-empty, is run on the workstation in place of the login
+	// shell — the et client forwards a token after the host to the remote
+	// shell. Used to attach directly to a plugin's session (e.g. tmux). et
+	// always drives a raw-mode PTY, so no TTY flag is needed. Empty opens a
+	// normal login shell.
+	Command string
 }
 
 // buildETArgs returns the argv for the local `et` client (excluding the binary
@@ -76,5 +82,12 @@ func buildETArgs(o ETOptions) []string {
 	if o.User != "" {
 		host = o.User + "@" + host
 	}
-	return append(args, host)
+	args = append(args, host)
+
+	// A token after the host is forwarded by et to the remote shell as the
+	// command to run in place of the login shell.
+	if o.Command != "" {
+		args = append(args, o.Command)
+	}
+	return args
 }
