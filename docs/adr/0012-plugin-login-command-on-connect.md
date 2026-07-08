@@ -142,10 +142,26 @@ point; retiring the hooks is a separate, later decision.
 - No fallback in v1: if the rendered program (tmux) exits non-zero, the
   connection closes rather than dropping to a shell. A fallback would reintroduce
   shell-specific syntax, defeating the point; revisit if it bites.
-- Adds a `--command` + forced-PTY invocation to the SSH path. The single-`-t`
-  choice was **not verified against a live workstation** (none existed when this
-  landed); `-t` is the standard-correct choice for an interactive local tty, with
-  `-tt` a one-line fallback if a live test shows gcloud's wrapper needs it.
+- Adds a `--command` + forced-PTY invocation to the SSH path. Single `-t`
+  **verified** on a live workstation: `gcloud workstations ssh <ws> --command …
+  --ssh-flag=-t` under an interactive local tty allocates a real remote PTY
+  (`tty` → `/dev/pts/0`); `-tt` is not needed. (Const `sshForcePTYFlag` if it ever
+  is.)
+- **A login-command that drives a terminal program must carry its own `TERM`
+  fallback.** It runs *before* any shell, so the per-shell hooks' `infocmp -- "$TERM"
+  || export TERM=xterm-256color` guard has no equivalent — a bare
+  `tmux new-session -A` fails to attach ("missing or unsuitable terminal") when the
+  client's `$TERM` (e.g. `xterm-ghostty`/`xterm-kitty`) has no terminfo on the
+  workstation. Verified live: a workstation was missing ghostty/kitty terminfo even
+  with `ncurses-term` installed. The fix belongs in the *plugin's* login-command,
+  and stays shell-agnostic by wrapping in `sh -c` (the login shell just execs `sh`):
+
+  ```yaml
+  login-command: "sh -c 'infocmp -- \"$TERM\" >/dev/null 2>&1 || export TERM=xterm-256color; exec tmux new-session -A -s {session_name}'"
+  ```
+
+  Only the substituted `{session_name}` is validated for shell-safety; the `sh -c`
+  template is plugin-authored and trusted, so this remains within the design.
 
 ### Neutral
 
@@ -163,6 +179,9 @@ point; retiring the hooks is a separate, later decision.
    `--ssh-flag=-t`; with none, the SSH argv is unchanged.
    (`cmd/connect_test.go`.) The `--et` path appends the command after the host.
    (`internal/etconn/args_test.go`.)
-4. **Live (post-merge, needs a workstation + the ra-plugins `login-command`):**
-   `ra connect` and `ra connect --et` land directly in the `main` tmux session
-   from both a bash and a zsh login shell — no dependence on the login shell.
+4. **Live (workstation `op`):** `--command … --ssh-flag=-t` under an interactive
+   tty allocates a remote PTY (`/dev/pts/0`); without `-t` there is none. tmux is
+   present and its boot `main` session exists. Confirmed the terminfo gap above
+   (ghostty/kitty missing). Full `ra connect` end-to-end (both transports, multiple
+   login shells) remains a post-merge check once the ra-plugins `login-command`
+   ships with the `TERM`-fallback wrapper.
