@@ -11,3 +11,6 @@ ra
 
 # ra: ephemeral docker build context assembled by `ra create`
 .ra/.build/
+
+# Local implementation / working notes (kept out of the published repo)
+implementation-notes*.md

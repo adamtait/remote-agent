@@ -28,7 +28,7 @@ const (
 
 // ETOptions fully specifies a local `et` invocation. It is built from the
 // resolved workstation plus the chosen local ports. The exact flag set was
-// validated by the Phase-1 spike (see implementation-notes-et.md): `et`
+// validated against a live workstation (see docs/adr/0011-eternal-terminal-connect.md): `et`
 // bootstraps over ssh, so the bootstrap port is conveyed as an ssh `-o Port=`
 // option, and the data channel is selected with `-p`.
 type ETOptions struct {
