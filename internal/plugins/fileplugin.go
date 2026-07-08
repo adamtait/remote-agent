@@ -117,7 +117,9 @@ var loginCommandPlaceholderRe = regexp.MustCompile(`\{[^{}]+\}`)
 // Values come from user config, so this is checked at render time (ra connect),
 // not at plugin load. `/`, `:`, `@`, `+`, `=` are allowed as shell-safe so
 // path/url-ish values still work; whitespace and `;|&$()<>*?[]{}~#!\"'` are not.
-var loginValueRe = regexp.MustCompile(`^[A-Za-z0-9._:@/+=-]+$`)
+// Anchored with \A…\z (absolute start/end), not ^…$, so a trailing newline can
+// never slip past the end anchor.
+var loginValueRe = regexp.MustCompile(`\A[A-Za-z0-9._:@/+=-]+\z`)
 
 // RenderLoginCommand returns the plugin's login-command with each
 // `{config-field}` placeholder replaced by that field's configured value

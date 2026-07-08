@@ -76,7 +76,9 @@ func TestRenderLoginCommand_NoneDeclared(t *testing.T) {
 // feature rests on.
 func TestRenderLoginCommand_RejectsUnsafeValue(t *testing.T) {
 	p := pluginFromYAML(t, tmuxLikePluginYAML)
-	for _, bad := range []string{"two words", "a; rm -rf /", "a|b", "$(x)", "{b}", ""} {
+	// Includes a trailing newline ("main\n") — the classic bypass of a `$`-anchored
+	// regex; \A…\z anchoring must reject it.
+	for _, bad := range []string{"two words", "a; rm -rf /", "a|b", "$(x)", "{b}", "", "a\nb", "main\n"} {
 		_, err := p.RenderLoginCommand(enabledCfg("tmux", map[string]interface{}{"session_name": bad}))
 		if err == nil {
 			t.Errorf("RenderLoginCommand(session_name=%q) = nil error, want rejection", bad)
