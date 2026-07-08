@@ -67,7 +67,7 @@ ra delete         # delete the workstation
 
 Each targeted command accepts an optional name argument; otherwise the default workstation is used.
 
-`ra connect --et` connects through the local [Eternal Terminal](https://eternalterminal.dev/) client instead of plain SSH, so a dropped connection auto-reconnects and resumes the session rather than freezing. It requires the `et` client locally (`brew install et`) and the [`et` ra-plugin](https://github.com/adamtait/ra-plugins) installed on the workstation (which runs `etserver`). See [ADR 0004](docs/adr/0004-eternal-terminal-connect.md).
+`ra connect --et` connects through the local [Eternal Terminal](https://eternalterminal.dev/) client instead of plain SSH, so a dropped connection auto-reconnects and resumes the session rather than freezing. It requires the `et` client locally (`brew install et`) and the [`et` ra-plugin](https://github.com/adamtait/ra-plugins) installed on the workstation (which runs `etserver`). See [ADR 0011](docs/adr/0011-eternal-terminal-connect.md).
 
 
 ## Troubleshooting
