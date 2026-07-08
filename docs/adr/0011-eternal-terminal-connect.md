@@ -1,4 +1,4 @@
-# ADR 0004: Eternal Terminal connect path (`ra connect --et`)
+# ADR 0011: Eternal Terminal connect path (`ra connect --et`)
 
 - **Status:** Accepted
 - **Date:** 2026-06-16

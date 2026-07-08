@@ -29,7 +29,7 @@ const etWorkstationUser = "user"
 // an `exit` look like a ~12-15s hang; 3s roughly halves that while staying well
 // clear of spurious reconnects on the IAP relay (sub-second RTT), measured live
 // against the workstation. It also speeds recovery from genuine mid-session
-// drops. See docs/adr/0004-eternal-terminal-connect.md.
+// drops. See docs/adr/0011-eternal-terminal-connect.md.
 const etKeepaliveSecs = 3
 
 // sshReadyTimeout/sshReadyInterval bound how long runConnect waits for sshd to
