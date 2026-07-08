@@ -52,8 +52,11 @@ scripts can call `ra tunnel`. Set only after resolve when `needs_workstation: tr
 reads `cfg.Connect.LoginCommand` (no more `reg.LoginCommand`).
 
 ### Docs / ADRs
-New ADR 0014 (this design); ADR 0012 → Superseded, 0013 → Withdrawn (login-command
-is no longer a plugin field, so per-value templating is moot for it).
+New ADR 0014 (this design). The two earlier draft ADRs — a plugin-field
+`login-command` and a generic value-templating proposal — were **removed** (never
+shipped); their still-useful findings (the `-t` PTY decision, the TERM-fallback
+gotcha, the templating design sketch, the ForceCommand alternative) are folded into
+0014's Alternatives/Consequences.
 
 ### `StartTCPTunnelContext` kept though now unused in core
 `internal/etconn` was its only caller. Kept it (plan says keep both tunnel
