@@ -75,6 +75,16 @@ command with arguments, so every shell's `-c` runs it identically. The session
 name therefore comes from config at render time, not from a remote `${…}`
 expansion.
 
+To keep that invariant true rather than merely intended, each substituted value
+is validated at render time against `^[A-Za-z0-9._:@/+=-]+$` (non-empty, no
+whitespace, no shell metacharacters). A malformed config value — e.g.
+`session_name: "a; rm -rf /"` or `"two words"` — fails `ra connect` with a clear
+error instead of being baked into a command that only *looks* safe. This is a
+robustness guard within the user's own trust domain (a plugin can already run
+arbitrary code via `value_command`/boot scripts), not a privilege boundary. The
+template itself is authored by the plugin and trusted; only the interpolated
+config values are validated.
+
 ### CLI plumbing
 
 - Plain SSH: `Client.SSH` gains a `command` argument. When non-empty it appends

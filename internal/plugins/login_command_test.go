@@ -42,7 +42,10 @@ func enabledCfg(name string, extra map[string]interface{}) *config.Config {
 
 func TestRenderLoginCommand_ConfigValueWins(t *testing.T) {
 	p := pluginFromYAML(t, tmuxLikePluginYAML)
-	got := p.RenderLoginCommand(enabledCfg("tmux", map[string]interface{}{"session_name": "work"}))
+	got, err := p.RenderLoginCommand(enabledCfg("tmux", map[string]interface{}{"session_name": "work"}))
+	if err != nil {
+		t.Fatalf("RenderLoginCommand err: %v", err)
+	}
 	if want := "tmux new-session -A -s work"; got != want {
 		t.Errorf("RenderLoginCommand = %q, want %q", got, want)
 	}
@@ -51,20 +54,33 @@ func TestRenderLoginCommand_ConfigValueWins(t *testing.T) {
 func TestRenderLoginCommand_FallsBackToSchemaDefault(t *testing.T) {
 	p := pluginFromYAML(t, tmuxLikePluginYAML)
 	// Enabled but session_name unset in config -> schema default "main".
-	got := p.RenderLoginCommand(enabledCfg("tmux", nil))
-	if want := "tmux new-session -A -s main"; got != want {
-		t.Errorf("RenderLoginCommand = %q, want %q", got, want)
+	got, err := p.RenderLoginCommand(enabledCfg("tmux", nil))
+	if err != nil || got != "tmux new-session -A -s main" {
+		t.Errorf("RenderLoginCommand = (%q,%v), want (tmux new-session -A -s main,nil)", got, err)
 	}
 	// nil config -> also the schema default.
-	if got := p.RenderLoginCommand(nil); got != "tmux new-session -A -s main" {
-		t.Errorf("RenderLoginCommand(nil) = %q, want default-rendered", got)
+	if got, err := p.RenderLoginCommand(nil); err != nil || got != "tmux new-session -A -s main" {
+		t.Errorf("RenderLoginCommand(nil) = (%q,%v), want default-rendered", got, err)
 	}
 }
 
 func TestRenderLoginCommand_NoneDeclared(t *testing.T) {
 	p := makeTestPlugin(t, "alpha") // no login-command
-	if got := p.RenderLoginCommand(nil); got != "" {
-		t.Errorf("RenderLoginCommand with no declaration = %q, want empty", got)
+	if got, err := p.RenderLoginCommand(nil); err != nil || got != "" {
+		t.Errorf("RenderLoginCommand with no declaration = (%q,%v), want (\"\",nil)", got, err)
+	}
+}
+
+// A config value with whitespace or shell metacharacters must be rejected, not
+// baked into a command that only looks shell-safe — the invariant the whole
+// feature rests on.
+func TestRenderLoginCommand_RejectsUnsafeValue(t *testing.T) {
+	p := pluginFromYAML(t, tmuxLikePluginYAML)
+	for _, bad := range []string{"two words", "a; rm -rf /", "a|b", "$(x)", "{b}", ""} {
+		_, err := p.RenderLoginCommand(enabledCfg("tmux", map[string]interface{}{"session_name": bad}))
+		if err == nil {
+			t.Errorf("RenderLoginCommand(session_name=%q) = nil error, want rejection", bad)
+		}
 	}
 }
 
@@ -97,6 +113,35 @@ func TestRegistryLoginCommand_NoneDeclared(t *testing.T) {
 	cmd, ok, err := reg.LoginCommand(enabledCfg("alpha", nil))
 	if err != nil || ok || cmd != "" {
 		t.Errorf("LoginCommand(none) = (%q,%v,%v), want (\"\",false,nil)", cmd, ok, err)
+	}
+}
+
+// Only the *enabled* declaring plugin's command is returned when another plugin
+// also declares one but is disabled — guards the enabled-branch bookkeeping.
+func TestRegistryLoginCommand_MixedEnabledDisabled(t *testing.T) {
+	second := strings.Replace(tmuxLikePluginYAML, "name: tmux", "name: screenlike", 1)
+	second = strings.Replace(second, "tmux new-session", "screen-new", 1)
+	reg := NewRegistry([]*FilePlugin{
+		pluginFromYAML(t, tmuxLikePluginYAML),
+		pluginFromYAML(t, second),
+	})
+	cfg := &config.Config{Plugins: map[string]map[string]interface{}{
+		"tmux":       {"enabled": true},
+		"screenlike": {"enabled": false},
+	}}
+	cmd, ok, err := reg.LoginCommand(cfg)
+	if err != nil || !ok || cmd != "tmux new-session -A -s main" {
+		t.Errorf("LoginCommand(mixed) = (%q,%v,%v), want tmux's command", cmd, ok, err)
+	}
+}
+
+// A malformed config value on the enabled plugin surfaces as an error from the
+// registry (so `ra connect` fails cleanly rather than emitting an unsafe command).
+func TestRegistryLoginCommand_UnsafeValueErrors(t *testing.T) {
+	reg := NewRegistry([]*FilePlugin{pluginFromYAML(t, tmuxLikePluginYAML)})
+	cfg := enabledCfg("tmux", map[string]interface{}{"session_name": "a; rm -rf /"})
+	if _, _, err := reg.LoginCommand(cfg); err == nil {
+		t.Fatal("expected error for unsafe session_name, got nil")
 	}
 }
 

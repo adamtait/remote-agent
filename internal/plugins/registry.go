@@ -91,8 +91,12 @@ func (r *Registry) LoginCommand(cfg *config.Config) (string, bool, error) {
 		if en, _ := pluginCfg["enabled"].(bool); !en {
 			continue
 		}
+		rendered, err := p.RenderLoginCommand(cfg)
+		if err != nil {
+			return "", false, err
+		}
 		owners = append(owners, p.Name())
-		cmd = p.RenderLoginCommand(cfg)
+		cmd = rendered
 	}
 	switch len(owners) {
 	case 0:

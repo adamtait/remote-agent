@@ -110,20 +110,30 @@ func (p *FilePlugin) DefaultConfigFragments() (configBlock string, secretsBlock 
 // loginCommandPlaceholderRe matches `{placeholder}` tokens in a login-command.
 var loginCommandPlaceholderRe = regexp.MustCompile(`\{[^{}]+\}`)
 
-// LoginCommand returns the plugin's raw (unrendered) login-command template,
-// or "" if it declares none.
-func (p *FilePlugin) LoginCommand() string { return p.schema.LoginCommand }
+// loginValueRe is the set of characters allowed in a substituted login-command
+// value: non-empty, no whitespace, and no shell metacharacters. Enforcing it is
+// what actually keeps a rendered login-command a metacharacter-free argv that
+// every shell's `-c` runs identically (the feature's shell-agnostic invariant).
+// Values come from user config, so this is checked at render time (ra connect),
+// not at plugin load. `/`, `:`, `@`, `+`, `=` are allowed as shell-safe so
+// path/url-ish values still work; whitespace and `;|&$()<>*?[]{}~#!\"'` are not.
+var loginValueRe = regexp.MustCompile(`^[A-Za-z0-9._:@/+=-]+$`)
 
 // RenderLoginCommand returns the plugin's login-command with each
 // `{config-field}` placeholder replaced by that field's configured value
 // (cfg.Plugins[name][field]) or, absent that, the field's schema default.
-// Returns "" when the plugin declares no login-command. Placeholders are
-// validated against declared config fields at load time (LoadPlugin), so every
-// `{…}` here resolves to a known field. Values are stringified the same way as
-// containerEnvPairsFrom, keeping a single stringification convention.
-func (p *FilePlugin) RenderLoginCommand(cfg *config.Config) string {
+// Returns "" (nil error) when the plugin declares no login-command.
+//
+// Placeholders are validated against declared config fields at load time
+// (LoadPlugin), so every `{…}` here resolves to a known field. Each substituted
+// value is then checked against loginValueRe: a value with whitespace or shell
+// metacharacters is returned as an error rather than baked into a command that
+// only looks safe (e.g. session_name "a; rm -rf /" or "two words"). The shipped
+// default like "main" passes; a malformed config value fails `ra connect` with a
+// clear message instead of silently misbehaving.
+func (p *FilePlugin) RenderLoginCommand(cfg *config.Config) (string, error) {
 	if p.schema.LoginCommand == "" {
-		return ""
+		return "", nil
 	}
 	var pluginCfg map[string]interface{}
 	if cfg != nil && cfg.Plugins != nil {
@@ -135,14 +145,22 @@ func (p *FilePlugin) RenderLoginCommand(cfg *config.Config) string {
 		if !strings.Contains(out, placeholder) {
 			continue
 		}
-		out = strings.ReplaceAll(out, placeholder, loginValueString(pluginCfg, f))
+		val := loginValueString(pluginCfg, f)
+		if !loginValueRe.MatchString(val) {
+			return "", fmt.Errorf(
+				"plugin %s: login-command value for {%s} is %q; it must be non-empty and contain only [A-Za-z0-9._:@/+=-] so the rendered command stays shell-safe",
+				p.schema.Name, f.Name, val)
+		}
+		out = strings.ReplaceAll(out, placeholder, val)
 	}
-	return out
+	return out, nil
 }
 
 // loginValueString stringifies a config field's value for login-command
 // substitution: the configured value when present, else the schema default,
-// else empty. Mirrors containerEnvPairsFrom's fmt-based stringification.
+// else empty. Scalars use fmt's default format; a list/[]interface{} value
+// renders with Go's `[a b c]` form and so fails RenderLoginCommand's charset
+// check — list-valued placeholders in a login-command are unsupported by design.
 func loginValueString(pluginCfg map[string]interface{}, f ConfigField) string {
 	if pluginCfg != nil {
 		if v, ok := pluginCfg[f.Name]; ok {
