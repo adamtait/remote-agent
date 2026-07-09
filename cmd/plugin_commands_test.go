@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/adamtait/remote-agent/internal/config"
+	"github.com/adamtait/remote-agent/internal/gcloud"
 	"github.com/adamtait/remote-agent/internal/plugins"
 	"github.com/spf13/cobra"
 )
@@ -71,6 +71,9 @@ commands:
 	}
 }
 
+// A needs_workstation command resolves the workstation, then execs the script
+// with the env contract — RA_LOGIN_COMMAND (from connect.login_command) and
+// RA_WORKSTATION reach it.
 func TestRunPluginCommand_ExecsScriptWithEnv(t *testing.T) {
 	root := t.TempDir()
 	outFile := filepath.Join(root, "out.txt")
@@ -78,11 +81,14 @@ func TestRunPluginCommand_ExecsScriptWithEnv(t *testing.T) {
 commands:
   - name: hi
     run: hi.sh
-`, "hi.sh", "#!/bin/sh\nprintf '%s' \"$RA_LOGIN_COMMAND\" > "+outFile+"\n")
+    needs_workstation: true
+`, "hi.sh", "#!/bin/sh\nprintf '%s|%s' \"$RA_LOGIN_COMMAND\" \"$RA_WORKSTATION\" > "+outFile+"\n")
 
-	prev := cfg
-	t.Cleanup(func() { cfg = prev })
-	cfg = &config.Config{Connect: config.ConnectConfig{LoginCommand: "LC-VALUE"}}
+	prevCfg, prevClient := cfg, client
+	t.Cleanup(func() { cfg, client = prevCfg, prevClient })
+	cfg = newConnectCfg() // p-user, RUNNING via runningRunner
+	cfg.Connect.LoginCommand = "LC-VALUE"
+	client = gcloud.NewClient(runningRunner())
 
 	parent := &cobra.Command{Use: "plugin"}
 	registerPluginCommands(parent, ps)
@@ -96,7 +102,40 @@ commands:
 		t.Fatalf("RunE: %v", err)
 	}
 	got, _ := os.ReadFile(outFile)
-	if string(got) != "LC-VALUE" {
-		t.Fatalf("script saw RA_LOGIN_COMMAND=%q, want %q", got, "LC-VALUE")
+	if want := "LC-VALUE|p-user"; string(got) != want {
+		t.Fatalf("script env: got %q, want %q", got, want)
+	}
+}
+
+// A command that does NOT need a workstation gets no RA_LOGIN_COMMAND / RA_*
+// workstation vars (and never touches gcloud).
+func TestRunPluginCommand_NoWorkstation_OmitsLoginCommand(t *testing.T) {
+	root := t.TempDir()
+	outFile := filepath.Join(root, "out.txt")
+	ps := writeTestPlugin(t, root, "demo", `name: demo
+commands:
+  - name: hi
+    run: hi.sh
+`, "hi.sh", "#!/bin/sh\nprintf '[%s]' \"${RA_LOGIN_COMMAND-unset}\" > "+outFile+"\n")
+
+	prevCfg := cfg
+	t.Cleanup(func() { cfg = prevCfg })
+	cfg = newConnectCfg()
+	cfg.Connect.LoginCommand = "LC-VALUE"
+
+	parent := &cobra.Command{Use: "plugin"}
+	registerPluginCommands(parent, ps)
+	leaf, _, err := parent.Find([]string{"demo", "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf.SetOut(&bytes.Buffer{})
+	leaf.SetErr(&bytes.Buffer{})
+	if err := leaf.RunE(leaf, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	got, _ := os.ReadFile(outFile)
+	if string(got) != "[unset]" {
+		t.Fatalf("RA_LOGIN_COMMAND should be unset for a no-workstation command, got %q", got)
 	}
 }

@@ -107,7 +107,6 @@ func runPluginCommand(cmd *cobra.Command, p *plugins.FilePlugin, spec plugins.Co
 	if exe, err := os.Executable(); err == nil {
 		env = append(env, "PATH="+filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
-	env = append(env, "RA_LOGIN_COMMAND="+cfg.Connect.LoginCommand)
 
 	if spec.NeedsWorkstation {
 		var name string
@@ -128,6 +127,7 @@ func runPluginCommand(cmd *cobra.Command, p *plugins.FilePlugin, spec plugins.Co
 			"RA_CLUSTER="+ref.Cluster,
 			"RA_CONFIG="+ref.Config,
 			"RA_WORKSTATION_USER=user",
+			"RA_LOGIN_COMMAND="+cfg.Connect.LoginCommand,
 		)
 	}
 

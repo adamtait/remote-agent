@@ -41,9 +41,11 @@ time but read `cfg`/`client` (globals) only when run — they're populated by
 to the script is `cfg.Connect.LoginCommand`.
 
 ### Env contract for plugin command scripts
+Always: the dir of the running `ra` binary prepended to `PATH` (so scripts can call
+`ra tunnel`). Only when `needs_workstation: true` (i.e. after resolve):
 `RA_WORKSTATION, RA_PROJECT, RA_REGION, RA_CLUSTER, RA_CONFIG, RA_WORKSTATION_USER,
-RA_LOGIN_COMMAND`, plus the dir of the running `ra` binary prepended to `PATH` so
-scripts can call `ra tunnel`. Set only after resolve when `needs_workstation: true`.
+RA_LOGIN_COMMAND`. `RA_LOGIN_COMMAND` is grouped with the workstation vars because
+it's only meaningful for a command that connects to a workstation.
 
 ### ET removal is a clean delete
 `internal/etconn/` deleted wholesale; et bits removed from `cmd/connect.go` and
