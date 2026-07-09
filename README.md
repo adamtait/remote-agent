@@ -57,12 +57,15 @@ It writes:
 
 ```bash
 ra list             # list workstations
+ra validate         # Validate ra config files (user, project, and merged)
+ra create           # Provision a Google Cloud Workstation
 ra url              # print the browser IDE URL
 ra connect          # SSH into the workstation
-ra plugin et connect # connect via Eternal Terminal (needs the `et` plugin + local `et`)
+ra tunnel           # Open a local TCP tunnel to a workstation port
 ra logs             # tail workstation logs
 ra stop             # stop (save $)
 ra delete           # delete the workstation
+ra teardown         # delete all gcloud resources
 ```
 
 Each targeted command accepts an optional name argument; otherwise the default workstation is used.
