@@ -29,3 +29,4 @@ supersession note pointing forward.
 | [0009](0009-github-and-claude-as-external-plugins.md) | GitHub (and Claude) as external plugins; core ships plugin-agnostic | Accepted | 2026-04-27 |
 | [0010](0010-ra-teardown-shared-safe-resource-removal.md) | `ra teardown` — reverse-order resource removal with a shared-vs-per-project split | Accepted | 2026-07-07 |
 | [0011](0011-eternal-terminal-connect.md) | Eternal Terminal connect path (`ra connect --et`) | Accepted | 2026-06-16 |
+| [0015](0015-et-connect-local-port-helpers.md) | `et` plugin connect — python3 local-port helpers (avoid a macOS bash SIGABRT) | Accepted | 2026-07-09 |
