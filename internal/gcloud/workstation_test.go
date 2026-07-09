@@ -353,39 +353,3 @@ func TestClient_SSHReady_FalseWhenOnlyCommandTextEchoed(t *testing.T) {
 		t.Errorf("expected SSHReady false when only the unevaluated command text is present")
 	}
 }
-
-// etReadyProbeKey is the OutputQuiet command ETServerReady runs for port 2022
-// (0x07E6). Kept here so the test breaks loudly if the probe's args (or the
-// sentinel) ever change.
-const etReadyProbeKey = `workstations ssh myws --cluster cl --config cfg --region us-central1 --project proj --command awk -v p=":07E6" '$2 ~ (p"$") && $4 == "0A" {f=1} END {if (f) print "ra_et_" (42*2) "_ready"}' /proc/net/tcp /proc/net/tcp6 2>/dev/null`
-
-func TestClient_ETServerReady_TrueWhenSentinelRoundTrips(t *testing.T) {
-	fake := &fakeRunner{outputs: map[string][]byte{etReadyProbeKey: []byte("ra_et_84_ready\n")}}
-	client := gcloud.NewClient(fake)
-	if !client.ETServerReady("proj", "us-central1", "cl", "cfg", "myws", 2022) {
-		t.Errorf("expected ETServerReady true when the sentinel round-trips")
-	}
-}
-
-func TestClient_ETServerReady_FalseWhenSentinelAbsent(t *testing.T) {
-	// etserver not up yet: the /dev/tcp dial fails, so the echo never runs and
-	// stdout carries no sentinel.
-	fake := &fakeRunner{outputs: map[string][]byte{etReadyProbeKey: []byte("")}}
-	client := gcloud.NewClient(fake)
-	if client.ETServerReady("proj", "us-central1", "cl", "cfg", "myws", 2022) {
-		t.Errorf("expected ETServerReady false when the sentinel is absent from stdout")
-	}
-}
-
-func TestClient_ETServerReady_FalseWhenOnlyCommandTextEchoed(t *testing.T) {
-	// Self-match guard: the unevaluated command carries the awk expression
-	// `(42*2)`, not the computed `ra_et_84_ready`, so an echoed command line
-	// must not read as ready.
-	fake := &fakeRunner{outputs: map[string][]byte{
-		etReadyProbeKey: []byte(`ERROR: failed running [awk ... print "ra_et_" (42*2) "_ready" ...]`),
-	}}
-	client := gcloud.NewClient(fake)
-	if client.ETServerReady("proj", "us-central1", "cl", "cfg", "myws", 2022) {
-		t.Errorf("expected ETServerReady false when only the unevaluated command text is present")
-	}
-}

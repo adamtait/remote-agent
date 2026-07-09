@@ -21,7 +21,13 @@ import (
 type FilePlugin struct {
 	fsys   fs.FS
 	schema PluginSchema
+	dir    string // on-disk root; set by loadDir, "" for bare LoadPlugin(fsys)
 }
+
+// Dir returns the plugin's on-disk root directory, or "" if the plugin was
+// loaded from a bare fs.FS (e.g. in tests) rather than via LoadAll. Used to
+// locate a command's `run:` script.
+func (p *FilePlugin) Dir() string { return p.dir }
 
 // LoadPlugin reads plugin.yaml from fsys and returns a FilePlugin.
 func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
@@ -38,6 +44,19 @@ func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
 	}
 	if s.PortForTunnel < 0 || s.PortForTunnel > 65535 {
 		return nil, fmt.Errorf("plugin.yaml: port-for-tunnel %d is out of range (0-65535)", s.PortForTunnel)
+	}
+	seenCommandNames := map[string]bool{}
+	for i, c := range s.Commands {
+		if c.Name == "" {
+			return nil, fmt.Errorf("plugin.yaml: commands[%d].name is required", i)
+		}
+		if c.Run == "" {
+			return nil, fmt.Errorf("plugin.yaml: commands[%d] (%q): run is required", i, c.Name)
+		}
+		if seenCommandNames[c.Name] {
+			return nil, fmt.Errorf("plugin.yaml: duplicate command name %q", c.Name)
+		}
+		seenCommandNames[c.Name] = true
 	}
 	seenBucketNames := map[string]bool{}
 	seenBucketEnvVars := map[string]bool{}

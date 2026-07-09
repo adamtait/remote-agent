@@ -12,10 +12,21 @@ type PluginSchema struct {
 	// startup script can bind to it, and `ra tunnel <plugin-name>` reads
 	// the configured value (falling back to this default) to pick a remote
 	// port. 0 means the plugin opts out of named tunneling.
-	PortForTunnel int            `yaml:"port-for-tunnel"`
-	Config        []ConfigField  `yaml:"config"`
-	Secrets       []SecretDef    `yaml:"secrets"`
-	AuthProviders []AuthProvider `yaml:"auth_providers"`
+	PortForTunnel int `yaml:"port-for-tunnel"`
+	// Commands declares CLI subcommands the plugin contributes, invoked as
+	// `ra plugin <plugin-name> <command-name>`. Each runs a local script
+	// (`run:`, relative to the plugin dir) with a documented RA_* env contract;
+	// ra resolves + ensures the workstation running first when
+	// `needs_workstation: true`. Generic, like `buckets:`/`port-for-tunnel:`:
+	// core hard-codes no plugin name. See docs/adr/0014.
+	Commands []CommandSpec `yaml:"commands"`
+	// PostInstallMessage, when set, is printed by `ra plugin install` after a
+	// successful install — e.g. to recommend a config change the plugin can't
+	// (or shouldn't) make itself. Purely informational.
+	PostInstallMessage string         `yaml:"post_install_message"`
+	Config             []ConfigField  `yaml:"config"`
+	Secrets            []SecretDef    `yaml:"secrets"`
+	AuthProviders      []AuthProvider `yaml:"auth_providers"`
 	// Buckets declares per-plugin GCS bucket needs. When `enabled: true`
 	// for the plugin, `ra create` provisions each bucket (idempotent),
 	// binds the declared IAM role on it to the workstation service
@@ -43,6 +54,18 @@ type PluginSchema struct {
 // PluginSchema.StableID.
 type StableIDSpec struct {
 	EnvVar string `yaml:"env_var"`
+}
+
+// CommandSpec declares one plugin-contributed CLI subcommand, invoked as
+// `ra plugin <plugin-name> <Name>`. Run is a script path relative to the plugin
+// directory, executed locally with the RA_* env contract wired in. When
+// NeedsWorkstation is true, ra resolves the target workstation and ensures it is
+// running before exec, and sets RA_WORKSTATION/RA_PROJECT/etc. accordingly.
+type CommandSpec struct {
+	Name             string `yaml:"name"`
+	Description      string `yaml:"description"`
+	Run              string `yaml:"run"`
+	NeedsWorkstation bool   `yaml:"needs_workstation"`
 }
 
 // BucketSpec declares one GCS bucket the plugin needs at workstation

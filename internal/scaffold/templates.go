@@ -109,6 +109,15 @@ gcloud:
     auto_sleep_hours: %d
     auto_shutdown_hours: %d
 
+# connect — client-side settings for 'ra connect'. login_command, when set, is
+# run in place of the login shell so a session lands directly in it. Empty (the
+# default) opens a plain interactive login shell. Example (attach tmux, with a
+# TERM fallback so it works from any terminal):
+#   connect:
+#     login_command: "sh -c 'infocmp -- \"$TERM\" >/dev/null 2>&1 || export TERM=xterm-256color; exec tmux new-session -A -s main'"
+connect:
+  login_command: ""
+
 # plugins — installed via 'ra plugin install <git-url-or-path>'. Each
 # plugin contributes its own config block under plugins.<name>.*.
 plugins: {}

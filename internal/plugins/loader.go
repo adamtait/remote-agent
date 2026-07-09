@@ -34,11 +34,12 @@ func loadDir(dir string, byName map[string]*FilePlugin) {
 		if !e.IsDir() {
 			continue
 		}
-		sub := os.DirFS(filepath.Join(dir, e.Name()))
-		p, err := LoadPlugin(sub)
+		root := filepath.Join(dir, e.Name())
+		p, err := LoadPlugin(os.DirFS(root))
 		if err != nil {
 			continue
 		}
+		p.dir = root
 		byName[p.Name()] = p
 	}
 }

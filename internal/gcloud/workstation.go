@@ -23,12 +23,6 @@ import (
 const (
 	sshReadyProbeCmd = `echo "ra_$((6*7))_ready"`
 	sshReadySentinel = "ra_42_ready"
-
-	// etReadySentinel is printed by the etserver probe only if a TCP connection
-	// to the port succeeds (see ETServerReady). Like sshReadySentinel it is
-	// computed remotely (via arithmetic) so it can't appear from a command-line
-	// echo — only from the remote shell actually reaching a listener.
-	etReadySentinel = "ra_et_84_ready"
 )
 
 // WorkstationRef fully identifies a workstation across projects/regions/configs.
@@ -281,19 +275,36 @@ func (c *Client) DeleteCluster(project, region, cluster string) error {
 	)
 }
 
-// SSH opens an interactive SSH session to the workstation.
+// sshForcePTYFlag forces ssh to allocate a PTY. A remote command
+// (`--command`) otherwise suppresses PTY allocation, which would leave an
+// interactive program like tmux without a terminal. A single `-t` suffices
+// because `ra connect` runs with a real local tty on stdin (`-tt` is only
+// needed when local stdin is not a tty). Passed as one `--ssh-flag=-t` token so
+// gcloud's arg parser doesn't mistake the `-t` for a gcloud flag. Kept as a
+// const so switching to `-tt` (if a live test ever shows gcloud's wrapper needs
+// it) is a one-line change.
+const sshForcePTYFlag = "--ssh-flag=-t"
+
+// SSH opens an SSH session to the workstation. When command is non-empty it is
+// run on the workstation in place of an interactive login shell (with a forced
+// PTY so an interactive program like tmux still gets a terminal); an empty
+// command opens a normal interactive login shell.
 //
 // Note: idle sessions are kept alive from the server side (sshd
 // ClientAliveInterval, baked into the workstation image) — NOT here. gcloud
 // hard-codes the client-side "-o ServerAliveInterval=0" ahead of any
 // --ssh-flag we pass, and ssh honors the first value, so a client-side
 // keepalive flag would be silently ignored. See the Dockerfile.
-func (c *Client) SSH(project, region, cluster, cfgName, name string) error {
-	return c.runner.Run(
+func (c *Client) SSH(project, region, cluster, cfgName, name, command string) error {
+	args := []string{
 		"workstations", "ssh", name,
 		"--cluster", cluster, "--config", cfgName,
 		"--region", region, "--project", project,
-	)
+	}
+	if command != "" {
+		args = append(args, "--command", command, sshForcePTYFlag)
+	}
+	return c.runner.Run(args...)
 }
 
 // SSHReady reports whether the workstation's sshd is accepting connections, by
@@ -311,34 +322,6 @@ func (c *Client) SSHReady(project, region, cluster, cfgName, name string) bool {
 		"--command", sshReadyProbeCmd,
 	)
 	return bytes.Contains(out, []byte(sshReadySentinel))
-}
-
-// ETServerReady reports whether something is listening on the given TCP port
-// inside the workstation — i.e. whether the et server (started by the `et`
-// plugin's boot script) is up yet. etserver comes up tens of seconds after
-// sshd, so SSHReady passing does not imply the et data channel is reachable;
-// `ra connect --et` uses this to avoid launching the et client into a port that
-// has no server (which surfaces as "does not have a server running on port N").
-//
-// The probe reads the kernel's own socket table (/proc/net/tcp + tcp6) for a
-// LISTEN socket (state 0A) on the port, and prints the sentinel only if one
-// exists. This is passive — unlike a /dev/tcp dial it does not open (and
-// immediately drop) a connection against etserver on every poll. It also needs
-// no `ss`/`netstat`, which the ra workstation image does not ship; /proc/net/tcp
-// is what those tools read anyway. Local addresses there are HEXIP:HEXPORT, so
-// the port is matched as an uppercase 4-digit hex suffix. Readiness is judged by
-// the sentinel's presence, not the exit code (same rationale as SSHReady); the
-// sentinel is computed by awk (42*2) so the literal token never appears in the
-// command line and can't be echoed back as a false positive.
-func (c *Client) ETServerReady(project, region, cluster, cfgName, name string, port int) bool {
-	probe := fmt.Sprintf(`awk -v p=":%04X" '$2 ~ (p"$") && $4 == "0A" {f=1} END {if (f) print "ra_et_" (42*2) "_ready"}' /proc/net/tcp /proc/net/tcp6 2>/dev/null`, port)
-	out, _ := c.runner.OutputQuiet(
-		"workstations", "ssh", name,
-		"--cluster", cluster, "--config", cfgName,
-		"--region", region, "--project", project,
-		"--command", probe,
-	)
-	return bytes.Contains(out, []byte(etReadySentinel))
 }
 
 // StartTCPTunnel opens a foreground TCP tunnel from localhost:localPort to

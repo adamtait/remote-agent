@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -11,58 +10,6 @@ import (
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
 )
-
-// TestRunConnectET_BailsWhenETMissing verifies the ET preflight runs first: if
-// the local `et` client is absent, runConnectET returns an actionable error
-// and never touches gcloud (no cold-start latency before the failure).
-func TestRunConnectET_BailsWhenETMissing(t *testing.T) {
-	// Empty PATH → exec.LookPath("et") fails.
-	t.Setenv("PATH", t.TempDir())
-	runner := &testRunner{}
-	client := gcloud.NewClient(runner)
-
-	err := runConnectET(newConnectCfg(), client, "", wsOverride{}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "Eternal Terminal") {
-		t.Fatalf("expected ET-missing error, got %v", err)
-	}
-	if len(runner.runs) != 0 || len(runner.quietRuns) != 0 {
-		t.Fatalf("expected no gcloud calls when preflight fails; runs=%v quiet=%v", runner.runs, runner.quietRuns)
-	}
-}
-
-// etReadyRef is the workstation waitETServerReady tests probe.
-var etReadyRef = gcloud.WorkstationRef{Project: "p", Region: "r", Cluster: "cl", Config: "cfg", Name: "w"}
-
-// etReadyProbeCmdKey is the OutputQuiet key ETServerReady runs for port 2022 (0x07E6).
-const etReadyProbeCmdKey = `workstations ssh w --cluster cl --config cfg --region r --project p --command awk -v p=":07E6" '$2 ~ (p"$") && $4 == "0A" {f=1} END {if (f) print "ra_et_" (42*2) "_ready"}' /proc/net/tcp /proc/net/tcp6 2>/dev/null`
-
-func shrinkETReady(t *testing.T) {
-	t.Helper()
-	ot, oi := etReadyTimeout, etReadyInterval
-	t.Cleanup(func() { etReadyTimeout, etReadyInterval = ot, oi })
-	etReadyTimeout = 30 * time.Millisecond
-	etReadyInterval = 5 * time.Millisecond
-}
-
-// When etserver never comes up, the gate fails with an actionable error rather
-// than handing a doomed connection to the et client.
-func TestWaitETServerReady_ErrorsWhenNeverReady(t *testing.T) {
-	shrinkETReady(t)
-	runner := &testRunner{} // OutputQuiet returns "" → sentinel never present
-	err := waitETServerReady(gcloud.NewClient(runner), etReadyRef, 2022, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "et server not reachable") {
-		t.Fatalf("expected not-reachable error, got %v", err)
-	}
-}
-
-// When etserver answers, the gate returns nil and lets the connect proceed.
-func TestWaitETServerReady_OKWhenReady(t *testing.T) {
-	shrinkETReady(t)
-	runner := &testRunner{outputs: map[string][]byte{etReadyProbeCmdKey: []byte("ra_et_84_ready\n")}}
-	if err := waitETServerReady(gcloud.NewClient(runner), etReadyRef, 2022, io.Discard); err != nil {
-		t.Fatalf("expected nil when etserver is ready, got %v", err)
-	}
-}
 
 func newConnectCfg() *config.Config {
 	return &config.Config{
@@ -89,7 +36,7 @@ func TestRunConnect_Running_SkipsStart(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	for _, call := range runner.runs {
@@ -115,6 +62,63 @@ func TestRunConnect_Running_SkipsStart(t *testing.T) {
 	}
 	if errOut.Len() != 0 {
 		t.Errorf("expected no stderr output when already running, got %q", errOut.String())
+	}
+}
+
+// runningRunner returns a testRunner whose describe reports p-user RUNNING, so
+// runConnect proceeds straight to the SSH call (warm path).
+func runningRunner() *testRunner {
+	return &testRunner{
+		checks: map[string]bool{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
+		},
+		outputs: map[string][]byte{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p --format value(name,state,host)": []byte("p-user\tSTATE_RUNNING\thost\n"),
+		},
+	}
+}
+
+func sshCall(t *testing.T, runs [][]string) string {
+	t.Helper()
+	for _, call := range runs {
+		if j := strings.Join(call, " "); strings.HasPrefix(j, "workstations ssh p-user ") {
+			return j
+		}
+	}
+	t.Fatalf("no ssh call found in runs=%v", runs)
+	return ""
+}
+
+// A plugin login-command is threaded into the SSH invocation as `--command`
+// plus a forced-PTY flag, so `ra connect` lands directly in (e.g.) tmux.
+func TestRunConnect_LoginCommand_PassesCommandAndPTY(t *testing.T) {
+	runner := runningRunner()
+	client := gcloud.NewClient(runner)
+	var errOut bytes.Buffer
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "tmux new-session -A -s main", &errOut); err != nil {
+		t.Fatalf("runConnect: %v", err)
+	}
+	ssh := sshCall(t, runner.runs)
+	if !strings.Contains(ssh, "--command tmux new-session -A -s main") {
+		t.Errorf("ssh call missing rendered --command: %s", ssh)
+	}
+	if !strings.Contains(ssh, "--ssh-flag=-t") {
+		t.Errorf("ssh call missing forced-PTY flag: %s", ssh)
+	}
+}
+
+// With no login-command the SSH call is exactly today's: no --command, no PTY
+// flag, so plain interactive-shell behavior is preserved.
+func TestRunConnect_NoLoginCommand_PlainSSH(t *testing.T) {
+	runner := runningRunner()
+	client := gcloud.NewClient(runner)
+	var errOut bytes.Buffer
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
+		t.Fatalf("runConnect: %v", err)
+	}
+	ssh := sshCall(t, runner.runs)
+	if strings.Contains(ssh, "--command") || strings.Contains(ssh, "--ssh-flag") {
+		t.Errorf("expected a plain ssh call with no command/PTY flag, got: %s", ssh)
 	}
 }
 
@@ -163,7 +167,7 @@ func TestRunConnect_Stopped_StartsThenSSH(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 
@@ -211,7 +215,7 @@ func TestRunConnect_Starting_WaitsThenSSH(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	foundSSH := false
@@ -327,7 +331,7 @@ func TestRunConnect_WaitsForSSHReadyThenSSH(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	foundSSH := false
@@ -368,7 +372,7 @@ func TestRunConnect_SSHReadyTimeout_ConnectsAnyway(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut); err != nil {
+	if err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut); err != nil {
 		t.Fatalf("runConnect: %v", err)
 	}
 	foundSSH := false
@@ -399,7 +403,7 @@ func TestRunConnect_StartError_Propagates(t *testing.T) {
 	}
 	client := gcloud.NewClient(runner)
 	var errOut bytes.Buffer
-	err := runConnect(newConnectCfg(), client, "", wsOverride{}, &errOut)
+	err := runConnect(newConnectCfg(), client, "", wsOverride{}, "", &errOut)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

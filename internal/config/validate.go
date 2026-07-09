@@ -50,6 +50,10 @@ func Validate(cfg *Config, pluginErrs []string) error {
 		}
 	}
 
+	if strings.ContainsAny(cfg.Connect.LoginCommand, "\n\r") {
+		errs = append(errs, "connect.login_command must be a single line")
+	}
+
 	errs = append(errs, pluginErrs...)
 	errs = append(errs, validateSecretsAndEnv(cfg.Secrets, cfg.Env)...)
 
@@ -82,6 +86,7 @@ func ValidateUser(u *UserConfig, pluginErrs []string) error {
 	cfg := &Config{
 		Git:     u.Git,
 		Gcloud:  u.Gcloud,
+		Connect: u.Connect,
 		Plugins: u.Plugins,
 		Secrets: u.Secrets,
 		Env:     u.Env,
