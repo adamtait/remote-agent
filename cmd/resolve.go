@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/adamtait/remote-agent/internal/config"
@@ -46,37 +47,57 @@ var (
 	waitRunningInterval = 5 * time.Second
 )
 
-// addLocationOverrideFlags registers --project/--cluster/--config on a command.
-// Read them at RunE time via readLocationOverrides(cmd).
+// Interactive-picker seams. Package-level (like waitRunningTimeout above) so
+// tests can drive selection deterministically without a real terminal: override
+// stdinIsTerminal to force the interactive path, and promptIn/promptOut to feed
+// the menu. Mirrors how confirmYes reads os.Stdin / term.IsTerminal directly.
+var (
+	stdinIsTerminal           = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	promptIn        io.Reader = os.Stdin
+	promptOut       io.Writer = os.Stderr
+)
+
+// addLocationOverrideFlags registers --project/--cluster/--config and --select on
+// a command. Read them at RunE time via readLocationOverrides(cmd). Shared by the
+// core workstation commands (connect, tunnel) and every needs_workstation plugin
+// command, so they all get the same selection surface.
 func addLocationOverrideFlags(c *cobra.Command) {
 	c.Flags().String("project", "", "GCP project (overrides config)")
 	c.Flags().String("cluster", "", "Workstation cluster (overrides config)")
 	c.Flags().String("config", "", "Workstation config (overrides config)")
+	c.Flags().BoolP("select", "s", false, "interactively pick the workstation from a menu (requires a terminal)")
 }
 
 // readLocationOverrides extracts the override flag values registered by
-// addLocationOverrideFlags. Unset flags yield empty strings.
+// addLocationOverrideFlags. Unset flags yield empty strings / false.
 func readLocationOverrides(c *cobra.Command) wsOverride {
 	p, _ := c.Flags().GetString("project")
 	cl, _ := c.Flags().GetString("cluster")
 	cf, _ := c.Flags().GetString("config")
-	return wsOverride{Project: p, Cluster: cl, Config: cf}
+	sel, _ := c.Flags().GetBool("select")
+	return wsOverride{Project: p, Cluster: cl, Config: cf, Select: sel}
 }
 
 // wsOverride is the per-command override of the project/cluster/config that
 // would otherwise come from the merged config. Empty fields fall back to the
-// config defaults; explicit values take precedence.
+// config defaults; explicit values take precedence. Select forces the
+// interactive picker for the resolved cluster/config.
 type wsOverride struct {
 	Project string
 	Cluster string
 	Config  string
+	Select  bool
 }
 
 // resolveWorkstationRef returns a fully-qualified WorkstationRef for the given
 // name and overrides.
 //
-//   - When name is empty: try cfg.WorkstationName, then fall back to the most
-//     recently created workstation in the resolved cluster/config.
+//   - When name is empty: on a terminal (or when override.Select is set) list
+//     the resolved cluster/config and interactively pick — auto-using the sole
+//     entry, or prompting when more than one exists. Off a terminal (piped /
+//     scripted) it stays non-interactive: try cfg.WorkstationName, then fall
+//     back to the most recently created workstation in the resolved
+//     cluster/config.
 //
 //   - When name is a full resource URI
 //     (projects/.../workstationClusters/X/workstationConfigs/Y/workstations/Z):
@@ -97,6 +118,11 @@ func resolveWorkstationRef(cfg *config.Config, client *gcloud.Client, name strin
 		Cluster: pickStr(override.Cluster, ws.ClusterName),
 		Config:  pickStr(override.Config, ws.ConfigName),
 		Name:    name,
+	}
+
+	// --select picks from a menu, so a name (positional/URI) is contradictory.
+	if override.Select && name != "" {
+		return gcloud.WorkstationRef{}, fmt.Errorf("--select cannot be combined with an explicit workstation name")
 	}
 
 	if name != "" && strings.Contains(name, "/workstations/") {
@@ -122,6 +148,34 @@ func resolveWorkstationRef(cfg *config.Config, client *gcloud.Client, name strin
 		if ref.Cluster == "" || ref.Config == "" {
 			return gcloud.WorkstationRef{}, fmt.Errorf("workstation name required (cluster/config not set)")
 		}
+		// Interactive selection: forced by --select, or offered automatically
+		// when attached to a terminal. --select without a terminal can't prompt.
+		if override.Select && !stdinIsTerminal() {
+			return gcloud.WorkstationRef{}, fmt.Errorf("--select requires an interactive terminal")
+		}
+		if override.Select || stdinIsTerminal() {
+			listed, err := client.List(ref.Project, ref.Region, ref.Cluster, ref.Config)
+			if err != nil {
+				return gcloud.WorkstationRef{}, fmt.Errorf("listing workstations: %w", err)
+			}
+			switch len(listed) {
+			case 0:
+				return gcloud.WorkstationRef{}, fmt.Errorf("no workstations found in cluster %q config %q", ref.Cluster, ref.Config)
+			case 1:
+				ref.Name = listed[0].Name
+				return ref, nil
+			default:
+				sortCandidates(listed, cfg.WorkstationName)
+				chosen, err := pickWorkstation(promptIn, promptOut, listed)
+				if err != nil {
+					return gcloud.WorkstationRef{}, err
+				}
+				ref.Name = chosen.Name
+				return ref, nil
+			}
+		}
+		// Non-interactive (piped / scripted): prefer the default-named
+		// workstation, else the most recently created one.
 		if client.Exists(ref.Project, ref.Region, ref.Cluster, ref.Config, cfg.WorkstationName) {
 			ref.Name = cfg.WorkstationName
 			return ref, nil
@@ -178,6 +232,49 @@ func resolveWorkstationRef(cfg *config.Config, client *gcloud.Client, name strin
 		}
 		return gcloud.WorkstationRef{}, fmt.Errorf("workstation %q is ambiguous; matches %s — pass --cluster and --config to disambiguate", name, strings.Join(locs, ", "))
 	}
+}
+
+// sortCandidates orders workstations in place so the recommended default comes
+// first: the one named defaultName if present, otherwise the most recently
+// created. This makes pressing Enter at the picker (which defaults to entry 1)
+// equivalent to the non-interactive default pick.
+func sortCandidates(list []gcloud.WorkstationInfo, defaultName string) {
+	sort.SliceStable(list, func(i, j int) bool {
+		if defaultName != "" {
+			if list[i].Name == defaultName {
+				return true
+			}
+			if list[j].Name == defaultName {
+				return false
+			}
+		}
+		return list[i].CreateTime > list[j].CreateTime
+	})
+}
+
+// pickWorkstation renders a numbered menu of candidates (NAME + STATE, aligned)
+// to out, reads one line from in, and returns the chosen entry. Empty or invalid
+// input selects entry 1 (the recommended default); callers pass a list already
+// ordered by sortCandidates. Modeled on promptOptions in internal/plugins.
+func pickWorkstation(in io.Reader, out io.Writer, candidates []gcloud.WorkstationInfo) (gcloud.WorkstationInfo, error) {
+	fmt.Fprintln(out, "Multiple workstations found:")
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	for i, c := range candidates {
+		fmt.Fprintf(tw, "  %d) %s\t%s\n", i+1, c.Name, strings.TrimPrefix(c.State, "STATE_"))
+	}
+	if err := tw.Flush(); err != nil {
+		return gcloud.WorkstationInfo{}, err
+	}
+	fmt.Fprintf(out, "choice [1-%d] [1]: ", len(candidates))
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return gcloud.WorkstationInfo{}, err
+	}
+	var idx int
+	if _, e := fmt.Sscan(strings.TrimSpace(line), &idx); e != nil || idx < 1 || idx > len(candidates) {
+		idx = 1
+	}
+	return candidates[idx-1], nil
 }
 
 // parseWorkstationURI parses a full workstation resource URI of the form

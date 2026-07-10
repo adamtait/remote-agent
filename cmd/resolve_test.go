@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/adamtait/remote-agent/internal/config"
 	"github.com/adamtait/remote-agent/internal/gcloud"
+	"github.com/spf13/cobra"
 )
 
 // testRunner is a minimal fake for resolve tests.
@@ -113,6 +115,148 @@ func TestResolveWorkstationRef_NoNameMostRecent(t *testing.T) {
 	}
 	if ref.Name != "newest" {
 		t.Errorf("got %+v, want Name=newest", ref)
+	}
+}
+
+// listValueKey is the gcloud arg string for List against the test cluster/config.
+const listValueKey = "workstations list --cluster cl --config cfg --region r --project p --format value(name,state,createTime)"
+
+// forceTerminal overrides the interactive-picker seams for a test, wiring stdin
+// to the given input and capturing menu output, and restores them on cleanup.
+func forceTerminal(t *testing.T, input string) *bytes.Buffer {
+	t.Helper()
+	savedTTY, savedIn, savedOut := stdinIsTerminal, promptIn, promptOut
+	out := &bytes.Buffer{}
+	stdinIsTerminal = func() bool { return true }
+	promptIn = strings.NewReader(input)
+	promptOut = out
+	t.Cleanup(func() { stdinIsTerminal, promptIn, promptOut = savedTTY, savedIn, savedOut })
+	return out
+}
+
+func TestPickWorkstation(t *testing.T) {
+	cands := []gcloud.WorkstationInfo{
+		{Name: "alpha", State: "STATE_RUNNING"},
+		{Name: "beta", State: "STATE_STOPPED"},
+	}
+	cases := []struct {
+		name, input, want string
+	}{
+		{"selects second", "2\n", "beta"},
+		{"empty defaults to first", "\n", "alpha"},
+		{"out of range defaults to first", "9\n", "alpha"},
+		{"garbage defaults to first", "xyz\n", "alpha"},
+		{"eof defaults to first", "", "alpha"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			got, err := pickWorkstation(strings.NewReader(tc.input), out, cands)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Name != tc.want {
+				t.Errorf("got %q, want %q", got.Name, tc.want)
+			}
+			// Menu renders NAME + stripped STATE.
+			if !strings.Contains(out.String(), "alpha") || !strings.Contains(out.String(), "RUNNING") {
+				t.Errorf("menu missing name/state: %q", out.String())
+			}
+			if strings.Contains(out.String(), "STATE_") {
+				t.Errorf("menu should strip STATE_ prefix: %q", out.String())
+			}
+		})
+	}
+}
+
+func TestResolveWorkstationRef_InteractivePicksSelection(t *testing.T) {
+	out := forceTerminal(t, "2\n")
+	runner := &testRunner{
+		outputs: map[string][]byte{
+			// Unsorted; sortCandidates orders by CreateTime desc (no default-name
+			// match), so the menu is [newest, older] → choice "2" is "older".
+			listValueKey: []byte("older\tSTATE_STOPPED\t2024-01-10T08:00:00Z\nnewest\tSTATE_RUNNING\t2024-01-15T10:00:00Z\n"),
+		},
+	}
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Name != "older" {
+		t.Errorf("got %q, want older", ref.Name)
+	}
+	if !strings.Contains(out.String(), "Multiple workstations found") {
+		t.Errorf("expected menu output, got %q", out.String())
+	}
+}
+
+func TestResolveWorkstationRef_InteractiveSingleAutoUses(t *testing.T) {
+	forceTerminal(t, "") // no input needed; single candidate is auto-used
+	runner := &testRunner{
+		outputs: map[string][]byte{
+			listValueKey: []byte("only\tSTATE_RUNNING\t2024-01-10T08:00:00Z\n"),
+		},
+	}
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Name != "only" {
+		t.Errorf("got %q, want only", ref.Name)
+	}
+}
+
+func TestResolveWorkstationRef_SelectForcesPickerOverDefault(t *testing.T) {
+	// The default-named workstation (p-user) exists and would win non-interactively,
+	// but --select must present the menu and honor the choice instead.
+	out := forceTerminal(t, "2\n")
+	runner := &testRunner{
+		checks: map[string]bool{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
+		},
+		outputs: map[string][]byte{
+			// sortCandidates puts p-user (default) first → menu [p-user, other];
+			// choice "2" selects "other".
+			listValueKey: []byte("other\tSTATE_RUNNING\t2024-01-15T10:00:00Z\np-user\tSTATE_RUNNING\t2024-01-10T08:00:00Z\n"),
+		},
+	}
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{Select: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Name != "other" {
+		t.Errorf("got %q, want other", ref.Name)
+	}
+	if !strings.Contains(out.String(), "p-user") {
+		t.Errorf("menu should list the default workstation: %q", out.String())
+	}
+}
+
+func TestResolveWorkstationRef_SelectNonTTYErrors(t *testing.T) {
+	// stdinIsTerminal defaults to false under `go test` (no terminal).
+	_, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(&testRunner{}), "", wsOverride{Select: true})
+	if err == nil || !strings.Contains(err.Error(), "requires an interactive terminal") {
+		t.Errorf("expected terminal-required error, got %v", err)
+	}
+}
+
+func TestResolveWorkstationRef_SelectWithNameErrors(t *testing.T) {
+	_, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(&testRunner{}), "foo", wsOverride{Select: true})
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined with an explicit workstation name") {
+		t.Errorf("expected select+name conflict error, got %v", err)
+	}
+}
+
+func TestReadLocationOverrides_ReadsSelect(t *testing.T) {
+	c := &cobra.Command{Use: "x", RunE: func(*cobra.Command, []string) error { return nil }}
+	addLocationOverrideFlags(c)
+	c.SetArgs([]string{"--select", "--cluster", "cl-x"})
+	if err := c.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	ov := readLocationOverrides(c)
+	if !ov.Select || ov.Cluster != "cl-x" {
+		t.Errorf("got %+v, want Select=true Cluster=cl-x", ov)
 	}
 }
 
