@@ -25,11 +25,11 @@ var connectCmd = &cobra.Command{
 	Long: `Open an SSH session to a workstation, starting it if stopped.
 
 Name the workstation with the [name] positional or --workstation/-w (both skip
-the picker). If neither is given and you're on a terminal, ra lists the
-workstations in the resolved cluster/config and lets you pick one (auto-using the
-sole entry). Off a terminal it falls back to the configured default, then the
-most recently created workstation. Pass --select/-s to force the picker even when
-a default exists.`,
+the picker). If neither is given, ra uses the configured default workstation when
+it exists; otherwise, on a terminal, it lists the resolved cluster/config and lets
+you pick one (auto-using the sole entry), or falls back to the most recently
+created workstation when not on a terminal. Pass --select/-s to force the picker
+even when a default exists.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var name string
@@ -40,7 +40,7 @@ a default exists.`,
 		// shell when set; empty opens a plain interactive login shell. Other
 		// transports (e.g. Eternal Terminal) live in plugins as
 		// `ra plugin <name> <command>`, not in core.
-		return runConnect(cfg, client, name, readLocationOverrides(cmd), cfg.Connect.LoginCommand, cmd.ErrOrStderr())
+		return runConnect(cfg, client, name, readSelectionOverrides(cmd), cfg.Connect.LoginCommand, cmd.ErrOrStderr())
 	},
 }
 
@@ -90,5 +90,6 @@ func waitSSHReady(client *gcloud.Client, ref gcloud.WorkstationRef, errOut io.Wr
 
 func init() {
 	addLocationOverrideFlags(connectCmd)
+	addSelectionFlags(connectCmd)
 	rootCmd.AddCommand(connectCmd)
 }

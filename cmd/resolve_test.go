@@ -144,8 +144,9 @@ func TestPickWorkstation(t *testing.T) {
 	}{
 		{"selects second", "2\n", "beta"},
 		{"empty defaults to first", "\n", "alpha"},
-		{"out of range defaults to first", "9\n", "alpha"},
-		{"garbage defaults to first", "xyz\n", "alpha"},
+		{"reprompts then selects", "9\n2\n", "beta"},
+		{"out of range eof defaults to first", "9\n", "alpha"},
+		{"garbage eof defaults to first", "xyz\n", "alpha"},
 		{"eof defaults to first", "", "alpha"},
 	}
 	for _, tc := range cases {
@@ -169,6 +170,33 @@ func TestPickWorkstation(t *testing.T) {
 	}
 }
 
+func TestPickWorkstation_Reprompts(t *testing.T) {
+	cands := []gcloud.WorkstationInfo{{Name: "a", State: "STATE_RUNNING"}, {Name: "b", State: "STATE_RUNNING"}}
+	out := &bytes.Buffer{}
+	got, err := pickWorkstation(strings.NewReader("bogus\n2\n"), out, cands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "b" {
+		t.Errorf("got %q, want b", got.Name)
+	}
+	if !strings.Contains(out.String(), "please enter a number") {
+		t.Errorf("expected a re-prompt message on invalid input, got %q", out.String())
+	}
+}
+
+func TestPickWorkstation_EmptyStateShowsUnknown(t *testing.T) {
+	out := &bytes.Buffer{}
+	_, err := pickWorkstation(strings.NewReader("1\n"), out,
+		[]gcloud.WorkstationInfo{{Name: "a", State: ""}, {Name: "b", State: "STATE_RUNNING"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "UNKNOWN") {
+		t.Errorf("empty state should render as UNKNOWN, got %q", out.String())
+	}
+}
+
 func TestResolveWorkstationRef_InteractivePicksSelection(t *testing.T) {
 	out := forceTerminal(t, "2\n")
 	runner := &testRunner{
@@ -178,7 +206,7 @@ func TestResolveWorkstationRef_InteractivePicksSelection(t *testing.T) {
 			listValueKey: []byte("older\tSTATE_STOPPED\t2024-01-10T08:00:00Z\nnewest\tSTATE_RUNNING\t2024-01-15T10:00:00Z\n"),
 		},
 	}
-	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{})
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{Interactive: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,12 +225,70 @@ func TestResolveWorkstationRef_InteractiveSingleAutoUses(t *testing.T) {
 			listValueKey: []byte("only\tSTATE_RUNNING\t2024-01-10T08:00:00Z\n"),
 		},
 	}
-	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{})
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{Interactive: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ref.Name != "only" {
 		t.Errorf("got %q, want only", ref.Name)
+	}
+}
+
+func TestResolveWorkstationRef_InteractiveClearDefaultNoPrompt(t *testing.T) {
+	// Softened behavior: on a terminal, when the default-named workstation
+	// exists, use it without prompting even though other workstations exist.
+	out := forceTerminal(t, "2\n")
+	runner := &testRunner{
+		checks: map[string]bool{
+			"workstations describe p-user --cluster cl --config cfg --region r --project p": true,
+		},
+		outputs: map[string][]byte{
+			listValueKey: []byte("other\tSTATE_RUNNING\t2024-01-15T10:00:00Z\np-user\tSTATE_RUNNING\t2024-01-10T08:00:00Z\n"),
+		},
+	}
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{Interactive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Name != "p-user" {
+		t.Errorf("got %q, want p-user (clear default, no prompt)", ref.Name)
+	}
+	if strings.Contains(out.String(), "Multiple workstations found") {
+		t.Errorf("clear default should not prompt, got menu: %q", out.String())
+	}
+}
+
+func TestResolveWorkstationRef_NonInteractiveOnTTYNeverPicks(t *testing.T) {
+	// A management command (Interactive=false) must not pop a picker even on a
+	// terminal — it falls back to the most recently created workstation.
+	out := forceTerminal(t, "2\n")
+	runner := &testRunner{
+		checks: map[string]bool{"workstations describe p-user --cluster cl --config cfg --region r --project p": false},
+		outputs: map[string][]byte{
+			listValueKey: []byte("older\tSTATE_STOPPED\t2024-01-10T08:00:00Z\nnewest\tSTATE_RUNNING\t2024-01-15T10:00:00Z\n"),
+		},
+	}
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{}) // Interactive: false
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Name != "newest" {
+		t.Errorf("got %q, want newest", ref.Name)
+	}
+	if strings.Contains(out.String(), "Multiple workstations found") {
+		t.Errorf("non-interactive caller must not prompt, got menu: %q", out.String())
+	}
+}
+
+func TestResolveWorkstationRef_InteractiveNoWorkstationsErrors(t *testing.T) {
+	forceTerminal(t, "")
+	runner := &testRunner{
+		checks:  map[string]bool{"workstations describe p-user --cluster cl --config cfg --region r --project p": false},
+		outputs: map[string][]byte{listValueKey: []byte("")},
+	}
+	_, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "", wsOverride{Interactive: true})
+	if err == nil || !strings.Contains(err.Error(), "no workstations found") {
+		t.Errorf("expected no-workstations error, got %v", err)
 	}
 }
 
@@ -247,28 +333,42 @@ func TestResolveWorkstationRef_SelectWithNameErrors(t *testing.T) {
 	}
 }
 
-func TestReadLocationOverrides_ReadsSelect(t *testing.T) {
+func TestReadSelectionOverrides_ReadsSelectAndWorkstation(t *testing.T) {
 	c := &cobra.Command{Use: "x", RunE: func(*cobra.Command, []string) error { return nil }}
 	addLocationOverrideFlags(c)
-	c.SetArgs([]string{"--select", "--cluster", "cl-x"})
+	addSelectionFlags(c)
+	c.SetArgs([]string{"--select", "--cluster", "cl-x", "-w", "mybox"})
 	if err := c.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	ov := readLocationOverrides(c)
-	if !ov.Select || ov.Cluster != "cl-x" {
-		t.Errorf("got %+v, want Select=true Cluster=cl-x", ov)
+	ov := readSelectionOverrides(c)
+	if !ov.Select || ov.Cluster != "cl-x" || ov.Workstation != "mybox" || !ov.Interactive {
+		t.Errorf("got %+v, want Select=true Cluster=cl-x Workstation=mybox Interactive=true", ov)
 	}
 }
 
-func TestReadLocationOverrides_ReadsWorkstation(t *testing.T) {
+func TestReadLocationOverrides_NotInteractiveNoSelectionFlags(t *testing.T) {
+	// Management commands register only addLocationOverrideFlags: no -w/-s, and
+	// the resulting override is non-interactive.
 	c := &cobra.Command{Use: "x", RunE: func(*cobra.Command, []string) error { return nil }}
 	addLocationOverrideFlags(c)
-	c.SetArgs([]string{"-w", "mybox"})
+	if c.Flags().Lookup("select") != nil || c.Flags().Lookup("workstation") != nil {
+		t.Fatal("addLocationOverrideFlags must not register -s/-w")
+	}
+	c.SetArgs([]string{"--cluster", "cl-x"})
 	if err := c.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if ov := readLocationOverrides(c); ov.Workstation != "mybox" {
-		t.Errorf("got %+v, want Workstation=mybox", ov)
+	if ov := readLocationOverrides(c); ov.Interactive || ov.Cluster != "cl-x" {
+		t.Errorf("got %+v, want Interactive=false Cluster=cl-x", ov)
+	}
+}
+
+func TestResolveWorkstationRef_WorkstationFlagWithSelectErrors(t *testing.T) {
+	_, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(&testRunner{}), "",
+		wsOverride{Workstation: "foo", Select: true, Interactive: true})
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined with an explicit workstation name") {
+		t.Errorf("expected select+workstation conflict error, got %v", err)
 	}
 }
 

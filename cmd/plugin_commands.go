@@ -85,15 +85,18 @@ func newPluginCommand(p *plugins.FilePlugin, spec plugins.CommandSpec) *cobra.Co
 	}
 	if spec.NeedsWorkstation {
 		addLocationOverrideFlags(c)
+		addSelectionFlags(c)
 	}
 	return c
 }
 
 // runPluginCommand execs a plugin command's local script with the RA_* env
 // contract. When the command needs a workstation, ra resolves it (optional
-// [name] + --project/--cluster/--config overrides) and ensures it is running
-// first, exporting its coordinates. The `ra` binary's directory is prepended to
-// PATH so the script can call back into `ra` (e.g. `ra tunnel`).
+// [name] + --project/--cluster/--config, plus --workstation/--select) and ensures
+// it is running first, exporting its coordinates. Because it uses
+// readSelectionOverrides, the workstation picker is available (like `ra connect`).
+// The `ra` binary's directory is prepended to PATH so the script can call back
+// into `ra` (e.g. `ra tunnel`).
 func runPluginCommand(cmd *cobra.Command, p *plugins.FilePlugin, spec plugins.CommandSpec, args []string) error {
 	if p.Dir() == "" {
 		return fmt.Errorf("plugin %q: cannot locate its directory to run command %q", p.Name(), spec.Name)
@@ -113,7 +116,7 @@ func runPluginCommand(cmd *cobra.Command, p *plugins.FilePlugin, spec plugins.Co
 		if len(args) == 1 {
 			name = args[0]
 		}
-		ref, err := resolveWorkstationRef(cfg, client, name, readLocationOverrides(cmd))
+		ref, err := resolveWorkstationRef(cfg, client, name, readSelectionOverrides(cmd))
 		if err != nil {
 			return err
 		}

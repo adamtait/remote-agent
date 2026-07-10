@@ -57,40 +57,61 @@ var (
 	promptOut       io.Writer = os.Stderr
 )
 
-// addLocationOverrideFlags registers --project/--cluster/--config and --select on
-// a command. Read them at RunE time via readLocationOverrides(cmd). Shared by the
-// core workstation commands (connect, tunnel) and every needs_workstation plugin
-// command, so they all get the same selection surface.
+// addLocationOverrideFlags registers --project/--cluster/--config on a command.
+// Read them at RunE time via readLocationOverrides(cmd). Shared by every command
+// that targets a workstation (connect, tunnel, delete, stop, url, logs, teardown,
+// plugin commands).
 func addLocationOverrideFlags(c *cobra.Command) {
 	c.Flags().String("project", "", "GCP project (overrides config)")
 	c.Flags().String("cluster", "", "Workstation cluster (overrides config)")
 	c.Flags().String("config", "", "Workstation config (overrides config)")
+}
+
+// addSelectionFlags registers the selection flags --workstation/-w and
+// --select/-s. Only commands that opt into interactive selection (connect,
+// tunnel, and needs_workstation plugin commands) register these; the workstation
+// *management* commands (delete/stop/url/logs/teardown) deliberately do not, so
+// they never pop a picker. Pair with readSelectionOverrides.
+func addSelectionFlags(c *cobra.Command) {
 	c.Flags().StringP("workstation", "w", "", "workstation name to use (skips the interactive picker)")
 	c.Flags().BoolP("select", "s", false, "interactively pick the workstation from a menu (requires a terminal)")
 }
 
-// readLocationOverrides extracts the override flag values registered by
-// addLocationOverrideFlags. Unset flags yield empty strings / false.
+// readLocationOverrides extracts the project/cluster/config override flags. The
+// returned wsOverride is non-interactive (Interactive=false), so resolution stays
+// on the scripted path. Used by the workstation-management commands.
 func readLocationOverrides(c *cobra.Command) wsOverride {
 	p, _ := c.Flags().GetString("project")
 	cl, _ := c.Flags().GetString("cluster")
 	cf, _ := c.Flags().GetString("config")
-	w, _ := c.Flags().GetString("workstation")
-	sel, _ := c.Flags().GetBool("select")
-	return wsOverride{Project: p, Cluster: cl, Config: cf, Workstation: w, Select: sel}
+	return wsOverride{Project: p, Cluster: cl, Config: cf}
+}
+
+// readSelectionOverrides is readLocationOverrides plus the selection flags added
+// by addSelectionFlags, and marks the call interactive so resolveWorkstationRef
+// may offer the picker. Used by connect, tunnel, and plugin commands.
+func readSelectionOverrides(c *cobra.Command) wsOverride {
+	o := readLocationOverrides(c)
+	o.Workstation, _ = c.Flags().GetString("workstation")
+	o.Select, _ = c.Flags().GetBool("select")
+	o.Interactive = true
+	return o
 }
 
 // wsOverride is the per-command override of the project/cluster/config that
 // would otherwise come from the merged config. Empty fields fall back to the
 // config defaults; explicit values take precedence. Workstation names the
 // target explicitly (equivalent to the positional name; skips the picker);
-// Select forces the interactive picker for the resolved cluster/config.
+// Select forces the interactive picker for the resolved cluster/config;
+// Interactive lets resolveWorkstationRef offer the picker when there's no clear
+// default (only set by commands that opt in via readSelectionOverrides).
 type wsOverride struct {
 	Project     string
 	Cluster     string
 	Config      string
 	Workstation string
 	Select      bool
+	Interactive bool
 }
 
 // resolveWorkstationRef returns a fully-qualified WorkstationRef for the given
@@ -98,12 +119,13 @@ type wsOverride struct {
 // here (and must agree with any positional name); everything below treats them
 // identically.
 //
-//   - When name is empty: on a terminal (or when override.Select is set) list
-//     the resolved cluster/config and interactively pick — auto-using the sole
-//     entry, or prompting when more than one exists. Off a terminal (piped /
-//     scripted) it stays non-interactive: try cfg.WorkstationName, then fall
-//     back to the most recently created workstation in the resolved
-//     cluster/config.
+//   - When name is empty: prefer the conventionally-named workstation
+//     (cfg.WorkstationName) when it exists — the "clear default". Otherwise, for
+//     an interactive caller on a terminal (override.Interactive), list the
+//     resolved cluster/config and pick — auto-using the sole entry, prompting
+//     when several exist. override.Select forces that picker even when a default
+//     exists. Non-interactive callers (management commands, piped input) fall
+//     back to the most recently created workstation.
 //
 //   - When name is a full resource URI
 //     (projects/.../workstationClusters/X/workstationConfigs/Y/workstations/Z):
@@ -164,12 +186,21 @@ func resolveWorkstationRef(cfg *config.Config, client *gcloud.Client, name strin
 		if ref.Cluster == "" || ref.Config == "" {
 			return gcloud.WorkstationRef{}, fmt.Errorf("workstation name required (cluster/config not set)")
 		}
-		// Interactive selection: forced by --select, or offered automatically
-		// when attached to a terminal. --select without a terminal can't prompt.
+		// --select forces the picker, which needs a terminal to prompt.
 		if override.Select && !stdinIsTerminal() {
 			return gcloud.WorkstationRef{}, fmt.Errorf("--select requires an interactive terminal")
 		}
-		if override.Select || stdinIsTerminal() {
+		// A "clear default" is the conventionally-named workstation. When it
+		// exists and the user didn't force a picker, prefer it without prompting
+		// (--select skips this shortcut so it always lists).
+		hasDefault := !override.Select &&
+			client.Exists(ref.Project, ref.Region, ref.Cluster, ref.Config, cfg.WorkstationName)
+
+		// Offer the picker only when forced (--select) or, for a command that
+		// opted into interactivity, when on a terminal with no clear default to
+		// fall back to. This keeps the common case (default box present) a
+		// zero-prompt connect, and keeps management commands non-interactive.
+		if override.Select || (override.Interactive && stdinIsTerminal() && !hasDefault) {
 			listed, err := client.List(ref.Project, ref.Region, ref.Cluster, ref.Config)
 			if err != nil {
 				return gcloud.WorkstationRef{}, fmt.Errorf("listing workstations: %w", err)
@@ -190,9 +221,10 @@ func resolveWorkstationRef(cfg *config.Config, client *gcloud.Client, name strin
 				return ref, nil
 			}
 		}
-		// Non-interactive (piped / scripted): prefer the default-named
-		// workstation, else the most recently created one.
-		if client.Exists(ref.Project, ref.Region, ref.Cluster, ref.Config, cfg.WorkstationName) {
+		// No picker: prefer the default-named workstation, else the most recently
+		// created one. This is the behavior for management commands, piped input,
+		// and (post-softening) an interactive connect when the default exists.
+		if hasDefault {
 			ref.Name = cfg.WorkstationName
 			return ref, nil
 		}
@@ -269,28 +301,45 @@ func sortCandidates(list []gcloud.WorkstationInfo, defaultName string) {
 }
 
 // pickWorkstation renders a numbered menu of candidates (NAME + STATE, aligned)
-// to out, reads one line from in, and returns the chosen entry. Empty or invalid
-// input selects entry 1 (the recommended default); callers pass a list already
-// ordered by sortCandidates. Modeled on promptOptions in internal/plugins.
+// to out and returns the entry the user picks by reading from in. Bare Enter (or
+// EOF with no input) accepts entry 1 — the recommended default, so callers pass a
+// list already ordered by sortCandidates. A non-empty but out-of-range/garbage
+// choice re-prompts rather than silently defaulting, since picking the wrong
+// workstation is consequential (cf. scaffold.Prompt, which also re-prompts on
+// invalid input).
 func pickWorkstation(in io.Reader, out io.Writer, candidates []gcloud.WorkstationInfo) (gcloud.WorkstationInfo, error) {
 	fmt.Fprintln(out, "Multiple workstations found:")
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	for i, c := range candidates {
-		fmt.Fprintf(tw, "  %d) %s\t%s\n", i+1, c.Name, strings.TrimPrefix(c.State, "STATE_"))
+		state := strings.TrimPrefix(c.State, "STATE_")
+		if state == "" {
+			state = "UNKNOWN"
+		}
+		fmt.Fprintf(tw, "  %d) %s\t%s\n", i+1, c.Name, state)
 	}
 	if err := tw.Flush(); err != nil {
 		return gcloud.WorkstationInfo{}, err
 	}
-	fmt.Fprintf(out, "choice [1-%d] [1]: ", len(candidates))
-	line, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && err != io.EOF {
-		return gcloud.WorkstationInfo{}, err
+	r := bufio.NewReader(in)
+	for {
+		fmt.Fprintf(out, "choice [1-%d] [1]: ", len(candidates))
+		line, err := r.ReadString('\n')
+		choice := strings.TrimSpace(line)
+		if choice == "" {
+			// Bare Enter, or EOF with nothing typed: accept the default.
+			return candidates[0], nil
+		}
+		var idx int
+		if _, e := fmt.Sscan(choice, &idx); e == nil && idx >= 1 && idx <= len(candidates) {
+			return candidates[idx-1], nil
+		}
+		if err != nil {
+			// Invalid entry with no more input to re-prompt (EOF): fall back to
+			// the default rather than looping forever.
+			return candidates[0], nil
+		}
+		fmt.Fprintf(out, "  please enter a number between 1 and %d.\n", len(candidates))
 	}
-	var idx int
-	if _, e := fmt.Sscan(strings.TrimSpace(line), &idx); e != nil || idx < 1 || idx > len(candidates) {
-		idx = 1
-	}
-	return candidates[idx-1], nil
 }
 
 // parseWorkstationURI parses a full workstation resource URI of the form
