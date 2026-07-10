@@ -95,9 +95,9 @@ common options for keeping one around and reusing it:
    **Private repos work** — `ra` clones with your local git credentials, so any
    repo your `git`/`gh` setup can already reach is installable.
 
-Whichever you choose, `ra plugin list` records where each plugin was installed
-from (written into `<plugin-dir>/.ra-install.yaml`), and re-running the same
-`ra plugin install` command (add `--force`) re-syncs from the source.
+Whichever you choose, `ra plugin install` records where each plugin came from
+(written into `<plugin-dir>/.ra-install.yaml`), `ra plugin list` shows it, and
+re-running the same install command (add `--force`) re-syncs from the source.
 
 
 ## Directory structure
