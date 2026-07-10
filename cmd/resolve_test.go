@@ -260,6 +260,65 @@ func TestReadLocationOverrides_ReadsSelect(t *testing.T) {
 	}
 }
 
+func TestReadLocationOverrides_ReadsWorkstation(t *testing.T) {
+	c := &cobra.Command{Use: "x", RunE: func(*cobra.Command, []string) error { return nil }}
+	addLocationOverrideFlags(c)
+	c.SetArgs([]string{"-w", "mybox"})
+	if err := c.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if ov := readLocationOverrides(c); ov.Workstation != "mybox" {
+		t.Errorf("got %+v, want Workstation=mybox", ov)
+	}
+}
+
+func TestResolveWorkstationRef_WorkstationFlagSkipsPicker(t *testing.T) {
+	// On a terminal (picker would otherwise trigger), --workstation names the
+	// target directly and must bypass the menu entirely.
+	out := forceTerminal(t, "2\n")
+	runner := &testRunner{
+		checks: map[string]bool{
+			"workstations describe foo --cluster ovr-cl --config ovr-cfg --region r --project p": true,
+		},
+	}
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "",
+		wsOverride{Workstation: "foo", Cluster: "ovr-cl", Config: "ovr-cfg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Name != "foo" || ref.Cluster != "ovr-cl" {
+		t.Errorf("got %+v, want Name=foo Cluster=ovr-cl", ref)
+	}
+	if strings.Contains(out.String(), "Multiple workstations found") {
+		t.Errorf("picker should be skipped, got menu output: %q", out.String())
+	}
+}
+
+func TestResolveWorkstationRef_WorkstationFlagConflictsWithPositional(t *testing.T) {
+	_, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(&testRunner{}), "bar",
+		wsOverride{Workstation: "foo"})
+	if err == nil || !strings.Contains(err.Error(), "conflicts with the positional name") {
+		t.Errorf("expected conflict error, got %v", err)
+	}
+}
+
+func TestResolveWorkstationRef_WorkstationFlagAgreesWithPositional(t *testing.T) {
+	// Same name from both sources is fine (resolves via the short-id path).
+	runner := &testRunner{
+		checks: map[string]bool{
+			"workstations describe foo --cluster ovr-cl --config ovr-cfg --region r --project p": true,
+		},
+	}
+	ref, err := resolveWorkstationRef(resolveTestCfg(), gcloud.NewClient(runner), "foo",
+		wsOverride{Workstation: "foo", Cluster: "ovr-cl", Config: "ovr-cfg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Name != "foo" {
+		t.Errorf("got %+v, want Name=foo", ref)
+	}
+}
+
 func TestResolveWorkstationRef_FindsAcrossConfigs(t *testing.T) {
 	// six-pages lives in cluster cl-z/cfg-z, but local config points at cl/cfg.
 	// Resolver should find it via ListAll and adjust cluster/config.

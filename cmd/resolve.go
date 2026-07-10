@@ -65,6 +65,7 @@ func addLocationOverrideFlags(c *cobra.Command) {
 	c.Flags().String("project", "", "GCP project (overrides config)")
 	c.Flags().String("cluster", "", "Workstation cluster (overrides config)")
 	c.Flags().String("config", "", "Workstation config (overrides config)")
+	c.Flags().StringP("workstation", "w", "", "workstation name to use (skips the interactive picker)")
 	c.Flags().BoolP("select", "s", false, "interactively pick the workstation from a menu (requires a terminal)")
 }
 
@@ -74,23 +75,28 @@ func readLocationOverrides(c *cobra.Command) wsOverride {
 	p, _ := c.Flags().GetString("project")
 	cl, _ := c.Flags().GetString("cluster")
 	cf, _ := c.Flags().GetString("config")
+	w, _ := c.Flags().GetString("workstation")
 	sel, _ := c.Flags().GetBool("select")
-	return wsOverride{Project: p, Cluster: cl, Config: cf, Select: sel}
+	return wsOverride{Project: p, Cluster: cl, Config: cf, Workstation: w, Select: sel}
 }
 
 // wsOverride is the per-command override of the project/cluster/config that
 // would otherwise come from the merged config. Empty fields fall back to the
-// config defaults; explicit values take precedence. Select forces the
-// interactive picker for the resolved cluster/config.
+// config defaults; explicit values take precedence. Workstation names the
+// target explicitly (equivalent to the positional name; skips the picker);
+// Select forces the interactive picker for the resolved cluster/config.
 type wsOverride struct {
-	Project string
-	Cluster string
-	Config  string
-	Select  bool
+	Project     string
+	Cluster     string
+	Config      string
+	Workstation string
+	Select      bool
 }
 
 // resolveWorkstationRef returns a fully-qualified WorkstationRef for the given
-// name and overrides.
+// name and overrides. A name supplied via --workstation is merged into name
+// here (and must agree with any positional name); everything below treats them
+// identically.
 //
 //   - When name is empty: on a terminal (or when override.Select is set) list
 //     the resolved cluster/config and interactively pick — auto-using the sole
@@ -112,6 +118,16 @@ type wsOverride struct {
 //     the user to disambiguate via --cluster/--config.
 func resolveWorkstationRef(cfg *config.Config, client *gcloud.Client, name string, override wsOverride) (gcloud.WorkstationRef, error) {
 	ws := cfg.Gcloud.Workstation
+
+	// A workstation name may be given positionally or via --workstation; when both
+	// are present they must agree. Either one (being non-empty) skips the picker.
+	if override.Workstation != "" {
+		if name != "" && name != override.Workstation {
+			return gcloud.WorkstationRef{}, fmt.Errorf("--workstation %q conflicts with the positional name %q", override.Workstation, name)
+		}
+		name = override.Workstation
+	}
+
 	ref := gcloud.WorkstationRef{
 		Project: pickStr(override.Project, cfg.Gcloud.Project),
 		Region:  ws.Region,
@@ -120,7 +136,7 @@ func resolveWorkstationRef(cfg *config.Config, client *gcloud.Client, name strin
 		Name:    name,
 	}
 
-	// --select picks from a menu, so a name (positional/URI) is contradictory.
+	// --select picks from a menu, so a name (positional/URI/--workstation) is contradictory.
 	if override.Select && name != "" {
 		return gcloud.WorkstationRef{}, fmt.Errorf("--select cannot be combined with an explicit workstation name")
 	}

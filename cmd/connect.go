@@ -24,10 +24,12 @@ var connectCmd = &cobra.Command{
 	Short: "Open an SSH session to a workstation (starts it if stopped)",
 	Long: `Open an SSH session to a workstation, starting it if stopped.
 
-If [name] is omitted and you're on a terminal, ra lists the workstations in the
-resolved cluster/config and lets you pick one (auto-using the sole entry). Off a
-terminal it falls back to the configured default, then the most recently created
-workstation. Pass --select/-s to force the picker even when a default exists.`,
+Name the workstation with the [name] positional or --workstation/-w (both skip
+the picker). If neither is given and you're on a terminal, ra lists the
+workstations in the resolved cluster/config and lets you pick one (auto-using the
+sole entry). Off a terminal it falls back to the configured default, then the
+most recently created workstation. Pass --select/-s to force the picker even when
+a default exists.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var name string
