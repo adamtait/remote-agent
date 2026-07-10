@@ -91,6 +91,43 @@ Each targeted command accepts an optional name argument; otherwise the default w
 - `docs/adr/` — architecture decision records ([index](docs/adr/README.md))
 
 
+## Extension points
+
+There are three ways to customize a workstation, in increasing order of
+persistence and reusability. Reach for the lightest one that fits.
+
+| | Where | Persists across rebuilds? | Reusable across |
+|---|---|---|---|
+| **1. Live changes** | on the running workstation | no | nothing |
+| **2. Local config** | `~/.config/ra/` (user) or `.ra/` (project) | yes | all your machines (user) / all machines in the project (project) |
+| **3. Plugins** | `ra plugin install <source>` | yes | any user or project with access to the source |
+
+**1. Live changes.** SSH in (`ra connect`) and install or tweak whatever you
+like. This is the fastest way to experiment, but the container is ephemeral:
+anything outside the persistent home disk is baked from the image, so live
+changes are **lost when the workstation is rebuilt** (`ra create`) or deleted.
+Use it to try something out, then promote what works into option 2 or 3.
+
+**2. Local configuration extensions.** `~/.config/ra/` (user-level) and `.ra/`
+(project-level) mirror the workstation image's `/etc/` layout — drop files into
+`Dockerfile.d/`, `workstation-startup.d/`, or `profile.d/`, or override the
+`Dockerfile` itself, and they merge into every image build (project shadows user
+shadows embedded core). User-level config applies to **every** workstation you
+create; project-level config applies to every workstation created from that
+project directory (and is committed to source control, so your teammates get it
+too). For example, install your personal dotfiles with a user-level
+`Dockerfile.d/` hook and every machine you spin up has them. These extensions are
+reusable across machines but stay local to you or the project — they aren't
+packaged for sharing.
+
+**3. Plugins.** When an extension is worth sharing — it bundles scripts, needs
+secrets, or provisions GCP resources — package it as a plugin. Plugins are
+installed with `ra plugin install <source>` from a local path or a git repo, so
+they're generically reusable by any user or project with access to the source.
+See the [`ra plugin` reference](#ra-plugin-reference) below and the
+[plugin authoring guide](docs/authoring-plugins.md).
+
+
 ## `ra plugin` reference
 
 ```bash
