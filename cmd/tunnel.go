@@ -24,9 +24,11 @@ The target argument can be:
   - A single port (e.g. "8080")            — both local and remote port equal.
   - A "local:remote" pair (e.g. "9000:80") — explicit local/remote ports.
 
-If [workstation] is omitted, the active workstation from config is used (same
-selection rules as ` + "`ra connect`" + `). Auto-starts the workstation if stopped.
-Blocks until Ctrl-C.`,
+If [workstation] is omitted, the workstation is resolved with the same rules as
+` + "`ra connect`" + `: the configured default when it exists, otherwise (on a terminal)
+a menu to pick from, else the most recently created one. Name it explicitly with
+[workstation] or --workstation/-w, or pass --select/-s to force the menu.
+Auto-starts the workstation if stopped. Blocks until Ctrl-C.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		localOverride, _ := cmd.Flags().GetInt("local-port")
@@ -38,7 +40,7 @@ Blocks until Ctrl-C.`,
 		if len(args) == 2 {
 			wsName = args[1]
 		}
-		return runTunnel(cfg, client, wsName, readLocationOverrides(cmd), localPort, remotePort, cmd.ErrOrStderr())
+		return runTunnel(cfg, client, wsName, readSelectionOverrides(cmd), localPort, remotePort, cmd.ErrOrStderr())
 	},
 }
 
@@ -133,5 +135,6 @@ func runTunnel(cfg *config.Config, client *gcloud.Client, name string, override 
 func init() {
 	tunnelCmd.Flags().Int("local-port", 0, "Override local port (named or single-port targets only)")
 	addLocationOverrideFlags(tunnelCmd)
+	addSelectionFlags(tunnelCmd)
 	rootCmd.AddCommand(tunnelCmd)
 }
