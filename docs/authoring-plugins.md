@@ -14,6 +14,7 @@ Author one locally and install it with `ra plugin install ./path/to/plugin`.
 - [Where to store plugins](#where-to-store-plugins)
 - [Directory structure](#directory-structure)
 - [Script naming conventions](#script-naming-conventions)
+- [Putting a CLI on PATH](#putting-a-cli-on-path)
 - [`plugin.yaml` schema](#pluginyaml-schema)
 - [Runtime environment contract](#runtime-environment-contract)
 - [Standard startup script preamble](#standard-startup-script-preamble)
@@ -119,7 +120,7 @@ Plugin scripts mirror where they land in the image (`/etc/...`):
 |---|---|---|
 | `Dockerfile.d/` | Docker image build time | Installing packages, downloading binaries |
 | `workstation-startup.d/` | Every container boot, after `200_remote-agent-setup.sh` | Auth setup, credential helpers, first-boot data clones |
-| `profile.d/` | Every login shell | PATH additions, shell aliases |
+| `profile.d/` | Every **bash / POSIX-`sh`** login shell | Shell aliases, login-shell setup. **Not sourced by zsh** — don't put PATH here; see [Putting a CLI on PATH](#putting-a-cli-on-path) |
 
 
 ## Script naming conventions
@@ -136,6 +137,23 @@ directory per stage and run in sorted order.
 - **`profile.d/`** — use `10`+ for plugin additions (`00`–`09` is reserved for the
   core `00-ra-wait.sh`, which blocks the login shell until the entrypoint has
   finished). Lower numbers run first.
+
+
+## Putting a CLI on PATH
+
+Install executables into **`/usr/local/bin`** — it's on the baseline PATH of every
+shell (bash, zsh, …) and every invocation type, so nothing needs to touch shell
+config. Do **not** add a directory to PATH via `profile.d/`: those files are not
+sourced by zsh, so the entry silently disappears whenever the login shell is zsh.
+
+If a plugin installs a binary somewhere else at runtime (e.g. a first-boot
+`npm install -g` into `~/.npm-global`, or an installer that drops into
+`~/.local/bin`), bake a build-time symlink from `/usr/local/bin` into the image in
+a `Dockerfile.d/` hook rather than editing PATH. The `claude` and `codex` plugins
+in [`ra-plugins`](https://github.com/adamtait/ra-plugins) do exactly this — see
+[`claude/Dockerfile.d/110_claude-path-link.sh`](https://github.com/adamtait/ra-plugins/blob/main/claude/Dockerfile.d/110_claude-path-link.sh)
+and the rationale in
+[ra-plugins ADR 0002](https://github.com/adamtait/ra-plugins/blob/main/docs/adr/0002-plugin-clis-on-path-across-login-shells.md).
 
 
 ## `plugin.yaml` schema
