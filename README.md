@@ -107,6 +107,41 @@ See the [`ra plugin` reference](#ra-plugin-reference) below and the
 [plugin authoring guide](docs/authoring-plugins.md).
 
 
+## Configuration
+
+Workstation settings live under `gcloud.workstation` in your config
+(`~/.config/ra/config.yaml` for user-level defaults, `.ra/config.yaml` to
+override per project — project wins). `ra setup` writes sensible defaults; the
+knobs you'll reach for most often:
+
+| Key | Default | What it does |
+|---|---|---|
+| `auto_sleep_hours` | `2` | Idle time (no activity) before the workstation auto-stops to save money. `0` = never sleep; range `1`–`24`. |
+| `auto_shutdown_hours` | `12` | Max wall-clock time the workstation may run before it's force-stopped, even if busy. Range `1`–`168`. A backstop against a machine left running for days. |
+| `machine_type` | `e2-standard-2` | VM size (2 vCPU / 8 GiB). Bump to `e2-standard-4`/`-8` for heavier builds — billed per minute while running. |
+| `disk_size_gb` | `50` | Persistent home-disk size. Survives stops; billed even while stopped. |
+| `region` | `us-central1` | GCP region the workstation runs in. |
+
+```yaml
+gcloud:
+  workstation:
+    auto_sleep_hours: 1        # stop after 1h idle
+    auto_shutdown_hours: 8     # never run longer than 8h at a stretch
+    machine_type: e2-standard-4
+    disk_size_gb: 100
+```
+
+Idle and running timeouts can also be set per-provision on the command line,
+overriding config for that `ra create`:
+
+```bash
+ra create --auto-sleep 1        # stop after 1h idle (0 = never)
+ra create --auto-shutdown 8     # force-stop after 8h running
+```
+
+`ra validate` prints the merged config so you can confirm what a `ra create`
+will actually use.
+
 ## `ra plugin` reference
 
 ```bash
