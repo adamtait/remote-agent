@@ -139,8 +139,8 @@ ra create --auto-sleep 1        # stop after 1h idle (0 = never)
 ra create --auto-shutdown 8     # force-stop after 8h running
 ```
 
-`ra validate` prints the merged config so you can confirm what a `ra create`
-will actually use.
+`ra validate --show` prints the merged config so you can confirm what a
+`ra create` will actually use.
 
 ## `ra plugin` reference
 
