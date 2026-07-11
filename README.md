@@ -43,15 +43,6 @@ ra plugin install https://github.com/adamtait/ra-plugins claude --user
 ra create                                    # provisions the workstation
 ```
 
-`ra setup` prompts for the minimum ra needs:
-1. **GCP project ID** — the project where the workstation cluster lives
-2. **Git identity** — name and email for commits inside the workstation
-
-It writes:
-- **`~/.config/ra/config.yaml`** — your personal baseline
-- **`.ra/config.yaml`** — project-specific settings (committed to source control)
-- The core build assets (`Dockerfile`, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`) into `~/.config/ra/`
-
 
 ## Day-to-day
 
