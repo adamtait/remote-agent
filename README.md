@@ -8,17 +8,17 @@
 
 ## Design
 
-**Zero secrets in the workstation config.** All credentials live only in GCP Secret Manager. The container resolves them at boot via its attached service account.
+**Git Repo Aware.** `ra` makes it easy to create and connect to remote workstations by project.
 
-**Plugin contributions mirror the image.** A plugin's directory contains
-`Dockerfile.d/`, `workstation-startup.d/`, and `profile.d/` subtrees whose
-contents land at the matching paths in the final image (`/etc/...`).
+**Zero secrets in the workstation config.** All credentials live only in GCP Secret Manager. The container resolves them at boot via its attached service account.
 
 **Generic core, fat plugins.** The core ra Dockerfile and entrypoint are
 plugin-agnostic. Anything tool-specific (Node.js install, custom PATH entries,
 auth flows) lives in the relevant plugin.
 
-**Git Repo Aware.** `ra` makes it easy to create and connect to remote workstations by project.
+**Configuration and Plugins mirror the image.** Your configuration and installed plugins contain
+`Dockerfile.d/`, `workstation-startup.d/`, and `profile.d/` subtrees whose
+contents land at the matching paths in the final image (`/etc/...`).
 
 
 ## Prerequisites
@@ -34,15 +34,19 @@ auth flows) lives in the relevant plugin.
 make install                                 # installs ra to ~/.local/bin
 ra setup                                     # writes config.yaml + core assets
 
-# Plugins live in the ra-plugins repo; install a plugin by repo + subdirectory:
-ra plugin install https://github.com/adamtait/ra-plugins github --user
-                                             #   installs gh CLI + PAT credential helper,
-                                             #   prompts for repo_urls and PAT
-ra plugin install https://github.com/adamtait/ra-plugins claude --user
-                                             #   installs the claude plugin
-ra create                                    # provisions the workstation
+# install github plugin
+#  - gh CLI
+#  - PAT credential helper
+#  - auto-cloning of your repos
+ra plugin install https://github.com/adamtait/ra-plugins github
+
+# install claude code plugin
+# - claude CLI
+# - claude OAuth or API key credential helper
+ra plugin install https://github.com/adamtait/ra-plugins claude
 ```
 
+Find more plugins in [ra-plugins](https://github.com/adamtait/ra-plugins)!
 
 ## Day-to-day
 
@@ -64,17 +68,6 @@ Each targeted command accepts an optional name argument; otherwise the default w
 **`ra connect`** runs `connect.login_command` from your config in place of the login shell when set (e.g. to attach tmux); unset, it opens a plain interactive login shell. `ra setup` scaffolds it with a commented example.
 
 **Plugin-defined commands.** A plugin can contribute CLI commands, invoked as `ra plugin <name> <command>`. The [`et` ra-plugin](https://github.com/adamtait/ra-plugins) provides `ra plugin et connect`, which connects through the local [Eternal Terminal](https://eternalterminal.dev/) client instead of plain SSH so a dropped connection auto-reconnects and resumes the session. It requires the `et` client locally (`brew install et`) and the `et` plugin installed on the workstation (which runs `etserver`). See [ADR 0014](docs/adr/0014-connection-config-and-plugin-commands.md).
-
-
-## Files
-
-- `main.go` / `cmd/` / `internal/` — `ra` CLI (idempotent provisioning)
-- `Makefile` — `make install` builds and drops the binary into `~/.local/bin`
-- `internal/scaffold/assets/` — embedded core build assets (Dockerfile, `workstation-startup.d/200_remote-agent-setup.sh`, `profile.d/00-ra-wait.sh`)
-- [`ra-plugins`](https://github.com/adamtait/ra-plugins) — the maintained plugins (Claude Code, GitHub, AWS, …), each in its own subdirectory; installed via `ra plugin install <repo> <name>`
-- `~/.config/ra/` — your user-global ra config + materialized core assets + installed plugins
-- `.ra/` — project-local ra config + (optional) overrides + installed plugins
-- `docs/adr/` — architecture decision records ([index](docs/adr/README.md))
 
 
 ## Extension points
