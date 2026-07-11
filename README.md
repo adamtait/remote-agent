@@ -75,11 +75,6 @@ Each targeted command accepts an optional name argument; otherwise the default w
 **Plugin-defined commands.** A plugin can contribute CLI commands, invoked as `ra plugin <name> <command>`. The [`et` ra-plugin](https://github.com/adamtait/ra-plugins) provides `ra plugin et connect`, which connects through the local [Eternal Terminal](https://eternalterminal.dev/) client instead of plain SSH so a dropped connection auto-reconnects and resumes the session. It requires the `et` client locally (`brew install et`) and the `et` plugin installed on the workstation (which runs `etserver`). See [ADR 0014](docs/adr/0014-connection-config-and-plugin-commands.md).
 
 
-## Troubleshooting
-
-**`ERROR: Connection to Cloud Workstation lost.`** — the Cloud Workstations IAP tunnel reaps idle SSH connections after ~30s. The workstation image bakes a server-side sshd keepalive (`ClientAliveInterval 15`) to keep the tunnel warm. If drops persist: rebuild the workstation (`ra create`) so the image picks up the current keepalive, and make sure no stale `~/.config/ra/Dockerfile` or `.ra/Dockerfile` override is shadowing the embedded one (`ra create` warns when it diverges). Full analysis: [ADR 0003](docs/adr/0003-ssh-keepalive-iap-idle-reap.md).
-
-
 ## Files
 
 - `main.go` / `cmd/` / `internal/` — `ra` CLI (idempotent provisioning)
