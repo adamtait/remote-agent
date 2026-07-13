@@ -1,124 +1,102 @@
 # ra — Remote Agent
 
-`ra` is a simple CLI tool for moving CLI coding agents to the cloud. It's built on the rock-solid Google Cloud Workstations to keep your agents safely contained in a work-friendly environment.
+**Run your CLI coding agents on a throwaway Google Cloud Workstation, not your laptop.**
 
-`ra` is a Go CLI that provisions a browser-accessible Google Cloud Workstation with the development tooling of your choice, plus a GitHub repo cloned and ready to go. Tooling is plugin-based: `ra` itself ships with no built-in plugins; you add Claude Code, GitHub-specific helpers, or any other integration via `ra plugin install`. Plugins live in their own repositories — see [`ra-plugins`](https://github.com/adamtait/ra-plugins) for the maintained set (Claude Code, GitHub, AWS, and more).
+`ra` provisions a browser- and SSH-accessible [Google Cloud Workstation](https://cloud.google.com/workstations), attaches your credentials through GCP Secret Manager, and drops you into a persistent dev environment where an agent can read untrusted issues and run shell commands without ever touching your `~/.aws/credentials` or your email session. It's a single Go binary that wraps `gcloud` — bring the terminal agent you already use.
 
+```console
+$ ra create
+# → enables APIs, builds & pushes the image, creates the cluster/config, boots the VM
+================================================================
+  Workstation is ready
+================================================================
+  Browser IDE  : https://80-abc123.cluster-def.cloudworkstations.dev
+  Workstation  : swift-otter
+  Cluster      : ra-cluster
+  Config       : ra-config
+  Region       : us-central1
 
+  SSH:
+    ra connect swift-otter
 
-## Design
+  Stop (save cost):
+    ra stop swift-otter
+================================================================
 
-**Git Repo Aware.** `ra` makes it easy to create and connect to remote workstations by project.
-
-**Zero secrets in the workstation config.** All credentials live only in GCP Secret Manager. The container resolves them at boot via its attached service account.
-
-**Generic core, fat plugins.** The core ra Dockerfile and entrypoint are
-plugin-agnostic. Anything tool-specific (Node.js install, custom PATH entries,
-auth flows) lives in the relevant plugin.
-
-**Configuration and Plugins mirror the image.** Your configuration and installed plugins contain
-`Dockerfile.d/`, `workstation-startup.d/`, and `profile.d/` subtrees whose
-contents land at the matching paths in the final image (`/etc/...`).
-
-
-## Prerequisites
-
-- `gcloud` CLI authenticated (`gcloud auth login`)
-- GCP project with billing enabled
-- `docker` with buildx (for cross-arch builds on macOS)
-
-
-## Getting started
-
-```bash
-make install                                 # installs ra to ~/.local/bin
-ra setup                                     # writes config.yaml + core assets
-
-# install github plugin
-#  - gh CLI
-#  - PAT credential helper
-#  - auto-cloning of your repos
-ra plugin install https://github.com/adamtait/ra-plugins github
-
-# install claude code plugin
-# - claude CLI
-# - claude OAuth or API key credential helper
-ra plugin install https://github.com/adamtait/ra-plugins claude
+$ ra connect swift-otter          # SSH in, start your agent, close your laptop
 ```
 
-Find more plugins in [ra-plugins](https://github.com/adamtait/ra-plugins)!
+## Why ra?
 
-## Day-to-day
+- **Blast radius is a rented VM, not your machine.** A prompt injection in a branch name or GitHub issue can make an agent exfiltrate tokens or `rm -rf` — on a Cloud Workstation that's a disposable box holding none of your personal accounts, not the laptop where you do your banking.
+- **Sessions outlive your laptop.** The workstation keeps running in the cloud while you close the lid. Reconnect from anywhere over SSH or the browser IDE; add the `et` plugin for connections that auto-resume after a drop.
+- **Bring your own agent, no lock-in.** `ra` ships with *no* built-in tooling. Claude Code, Codex, the GitHub CLI, tmux — each is an external plugin you `ra plugin install`, so nothing is baked in that you didn't choose.
+- **Zero secrets in config.** Config files carry only secret *names*; the values live in GCP Secret Manager and are fetched at boot by the workstation's own service account. Nothing sensitive is committed or baked into the image.
+- **You own the environment.** It's a real Dockerfile, real IAM, and a real VPC you can shape — not a locked-down hosted sandbox with an on/off network toggle.
+
+## Install
+
+**macOS / Linux (from source)** — the supported path today:
 
 ```bash
-ra list             # list workstations
-ra validate         # Validate ra config files (user, project, and merged)
-ra create           # Provision a Google Cloud Workstation
-ra url              # print the browser IDE URL
-ra connect          # SSH into the workstation
-ra tunnel           # Open a local TCP tunnel to a workstation port
-ra logs             # tail workstation logs
-ra stop             # stop (save $)
-ra delete           # delete the workstation
-ra teardown         # delete all gcloud resources
+git clone https://github.com/adamtait/remote-agent
+cd remote-agent
+make install          # builds ./ra and installs to ~/.local/bin/ra
 ```
 
-Each targeted command accepts an optional name argument; otherwise the default workstation is used.
+<!-- TODO: publish prebuilt binaries / Homebrew tap / Windows (WSL) instructions -->
 
-**`ra connect`** runs `connect.login_command` from your config in place of the login shell when set (e.g. to attach tmux); unset, it opens a plain interactive login shell. `ra setup` scaffolds it with a commented example.
+**Prerequisites** (all shelled out to, so they must be on your `PATH`):
 
-**Plugin-defined commands.** A plugin can contribute CLI commands, invoked as `ra plugin <name> <command>`. The [`et` ra-plugin](https://github.com/adamtait/ra-plugins) provides `ra plugin et connect`, which connects through the local [Eternal Terminal](https://eternalterminal.dev/) client instead of plain SSH so a dropped connection auto-reconnects and resumes the session. It requires the `et` client locally (`brew install et`) and the `et` plugin installed on the workstation (which runs `etserver`). See [ADR 0014](docs/adr/0014-connection-config-and-plugin-commands.md).
+```bash
+gcloud auth login     # authenticated gcloud CLI, on a project with billing enabled
+docker --version      # docker with buildx (cross-arch image builds)
+git --version         # used to clone plugins
+```
 
+## Usage
 
-## Extension points
+Scaffold your config once, then create and connect:
 
-There are three ways to customize a workstation, in increasing order of
-persistence and reusability. Reach for the lightest one that fits.
+```bash
+ra setup              # writes ~/.config/ra/config.yaml + core build assets
+ra create             # provision a workstation (name auto-generated if omitted)
+ra connect            # SSH in — starts the workstation first if it's stopped
+```
 
-| | Where | Persists across rebuilds? | Reusable across |
-|---|---|---|---|
-| **1. Live changes** | on the running workstation | no | nothing |
-| **2. Local config** | `~/.config/ra/` (user) or `.ra/` (project) | yes | all your machines (user) / all machines in the project (project) |
-| **3. Plugins** | `ra plugin install <source>` | yes | any user or project with access to the source |
+Add the tools you want — plugins live in their own repo, [`ra-plugins`](https://github.com/adamtait/ra-plugins):
 
-**1. Live changes.** SSH in (`ra connect`) and install or tweak whatever you
-like. This is the fastest way to experiment, but the container is ephemeral:
-anything outside the persistent home disk is baked from the image, so live
-changes are **lost when the workstation is rebuilt** (`ra create`) or deleted.
-Use it to try something out, then promote what works into option 2 or 3.
+```bash
+ra plugin install https://github.com/adamtait/ra-plugins github   # gh CLI + PAT helper + auto-clone
+ra plugin install https://github.com/adamtait/ra-plugins claude   # claude CLI + credential helper
+ra plugin list                                                    # what's installed, at which level
+```
 
-**2. Local configuration extensions.** `~/.config/ra/` (user-level) and `.ra/`
-(project-level) mirror the workstation image's `/etc/` layout — drop files into
-`Dockerfile.d/`, `workstation-startup.d/`, or `profile.d/`, or override the
-`Dockerfile` itself, and they merge into every image build (project shadows user
-shadows embedded core). User-level config applies to **every** workstation you
-create; project-level config applies to every workstation created from that
-project directory (and is committed to source control, so your teammates get it
-too). For example, install your personal dotfiles with a user-level
-`Dockerfile.d/` hook and every machine you spin up has them. These extensions are
-reusable across machines but stay local to you or the project — they aren't
-packaged for sharing.
+Drive the lifecycle. Every targeted command takes an optional `[name]`; without one it uses the default (or prompts):
 
-**3. Plugins.** When an extension is worth sharing — it bundles scripts, needs
-secrets, or provisions GCP resources — package it as a plugin. Plugins are
-installed with `ra plugin install <source>` from a local path or a git repo, so
-they're generically reusable by any user or project with access to the source.
-See the [`ra plugin` reference](#ra-plugin-reference) below and the
-[plugin authoring guide](docs/authoring-plugins.md).
+```bash
+ra list               # NAME / STATE for the cluster's workstations
+ra url                # print the browser IDE URL
+ra stop               # stop to halt per-minute charges (home disk persists)
+ra tunnel 8080        # forward a workstation port to localhost:8080
+```
 
+Kill the standing cost when you're done for a while — the cluster control plane bills 24/7 until it's deleted:
+
+```bash
+ra teardown --dry-run # preview exactly what gets deleted
+ra teardown           # delete workstation → config → cluster → SA/IAM → secrets → registry
+```
 
 ## Configuration
 
-Workstation settings live under `gcloud.workstation` in your config
-(`~/.config/ra/config.yaml` for user-level defaults, `.ra/config.yaml` to
-override per project — project wins). `ra setup` writes sensible defaults; the
-knobs you'll reach for most often:
+Two files are merged at startup, project overriding user: `~/.config/ra/config.yaml` (user baseline) and an optional `.ra/config.yaml` (per-project, committed to source control). Workstation knobs live under `gcloud.workstation`:
 
 | Key | Default | What it does |
 |---|---|---|
-| `auto_sleep_hours` | `2` | Idle time (no activity) before the workstation auto-stops to save money. `0` = never sleep; range `1`–`24`. |
-| `auto_shutdown_hours` | `12` | Max wall-clock time the workstation may run before it's force-stopped, even if busy. Range `1`–`168`. A backstop against a machine left running for days. |
-| `machine_type` | `e2-standard-2` | VM size (2 vCPU / 8 GiB). Bump to `e2-standard-4`/`-8` for heavier builds — billed per minute while running. |
+| `auto_sleep_hours` | `2` | Idle time before the workstation auto-stops to save money. `0` = never sleep; range `1`–`24`. |
+| `auto_shutdown_hours` | `12` | Max continuous run time before a force-stop, even if busy. Range `1`–`168`. |
+| `machine_type` | `e2-standard-2` | VM size (2 vCPU / 8 GiB). Bump to `e2-standard-4`/`-8` for heavier builds. |
 | `disk_size_gb` | `50` | Persistent home-disk size. Survives stops; billed even while stopped. |
 | `region` | `us-central1` | GCP region the workstation runs in. |
 
@@ -131,100 +109,29 @@ gcloud:
     disk_size_gb: 100
 ```
 
-Idle and running timeouts can also be set per-provision on the command line,
-overriding config for that `ra create`:
+Both timeouts can be overridden per-provision: `ra create --auto-sleep 1 --auto-shutdown 8`. Run `ra validate --show` to print the merged config a `ra create` will actually use.
 
-```bash
-ra create --auto-sleep 1        # stop after 1h idle (0 = never)
-ra create --auto-shutdown 8     # force-stop after 8h running
-```
+## What it costs
 
-`ra validate --show` prints the merged config so you can confirm what a
-`ra create` will actually use.
+The workstation is cheap; the **cluster control plane** is the real line item — it bills a flat ~$0.20/cluster-hour 24/7 whether or not any workstation is awake, and auto-sleep does nothing for it. Consolidate to one shared cluster (it holds many configs and workstations), and `ra teardown` to stop the charge during long idle stretches.
 
-## `ra plugin` reference
+| What | Rate | When billed |
+|---|---|---|
+| Cluster control plane | ~$4.80 / day (~$144/mo) | continuously, per cluster, until deleted |
+| Workstation (`e2-standard-2`) | ~$0.17 / running hour | per minute while running; $0 asleep |
+| Persistent home disk (50 GB) | ~$0.16 / day | continuously, even while stopped |
 
-```bash
-ra plugin install <git-url-or-path>          # plugin.yaml at the repo/dir root
-ra plugin install <git-url-or-path> <name>   # plugin in subdirectory <name> of a repo/dir
-ra plugin install <source> [<name>] --ref X  # install from git ref X (branch/tag/commit)
-ra plugin install <source> [<name>] --user   # force user-level
-ra plugin install <source> [<name>] --local  # force project-level
-ra plugin install <source> [<name>] --force  # overwrite existing at chosen level
+A typical 8-hour coding day on one cluster runs **~$6/day** (~$5 base + ~$1.34 running). The single biggest lever is cluster count — see the [cost appendix in the intro post](https://github.com/adamtait/remote-agent) for the full breakdown and sources.
 
-ra plugin list                               # show installed plugins, level, source
-ra plugin remove <name>                      # remove a plugin + its config + secret entries
-                                             #   (GCP Secret Manager values are NOT auto-deleted;
-                                             #    `ra plugin remove` prints the gcloud commands)
-```
+## How it fits together
 
-The two-argument form is how you install one plugin out of a multi-plugin repo
-like [`ra-plugins`](https://github.com/adamtait/ra-plugins):
-
-```bash
-ra plugin install https://github.com/adamtait/ra-plugins github
-ra plugin install https://github.com/adamtait/ra-plugins claude --ref v1.2.0
-```
-
-## Creating plugins
-
-`ra` ships with no built-in plugins — every tool and integration is one you
-install. Writing your own is straightforward: a plugin is a directory with a
-`plugin.yaml` manifest and optional shell scripts that hook into image build,
-workstation boot, and login shells.
-
-See **[docs/authoring-plugins.md](docs/authoring-plugins.md)** for the full guide:
-what makes a good plugin, where to store one for reuse, the directory layout, the
-`plugin.yaml` schema, the runtime env contract, and how to install and test
-locally.
-
-## Rotating secrets
-
-All rotations happen via Secret Manager — no need to re-run `ra create`.
-
-For plugins with command-generated credentials, re-run the plugin install command (same source you installed from) to capture and upload a new secret version:
-
-```bash
-ra plugin install https://github.com/adamtait/ra-plugins codex --force
-```
-
-```bash
-echo -n 'newvalue' | gcloud secrets versions add <secret-name> \
-    --data-file=- --project=$PROJECT_ID
-```
-
-Rotation behavior depends on how each secret is consumed:
-- **`github_pat`** is fetched per-git-operation via a credential helper; rotation is picked up on the next push/pull/clone, no restart.
-- **API key plugins** (e.g. claude apikey mode) typically use a helper that re-reads the secret periodically; rotation is transparent within minutes.
-- **Other secrets** are fetched at boot and exported to `/etc/environment` + `/run/ra/env`. Rotation requires `ra stop` + `ra create` (or `gcloud workstations start`) to take effect.
-
-## How auth works at runtime
-
-At every workstation boot:
-
-1. The base image's startup machinery runs `/etc/workstation-startup.d/200_remote-agent-setup.sh`.
-2. That script iterates `RA_SECRETS` (passed via container env from `ra create`), fetches each from Secret Manager, and writes them to `/etc/environment` + `/run/ra/env`. Plugin scripts in `/etc/workstation-startup.d/` (numbered ≥ 250) run after 200_; they fetch their own helpers and gate on `RA_PLUGIN_<NAME>_ENABLED`. The github plugin, for example, installs a per-git-op credential helper that fetches the PAT fresh from Secret Manager.
-3. Other `/etc/workstation-startup.d/` scripts (numbered ≥ 250, contributed by plugins) run independently. Each plugin script sources `/run/ra/env` and gates on `RA_PLUGIN_<NAME>_ENABLED`.
-4. The script writes `/run/ra/ready`, unblocking login shells via `/etc/profile.d/00-ra-wait.sh`.
-
-## Cost notes
-
-- Cluster: no standby cost when no workstations are running
-- Workstation: billed per minute while running. Default `e2-standard-2` ≈ $0.07/hr; bump to `e2-standard-4` (~$0.13/hr) or larger per-project for heavier workloads.
-- Auto-stops after 2h idle by default
-- Persistent home disk: billed even when stopped (~$0.04/GB-month for pd-standard)
-
-## Security notes
-
-The workstation config carries zero secret values — only secret names and non-sensitive metadata. Anyone with `workstations.configs.get` can read the config and learn *which* secrets are in use, but cannot read the secret values themselves; that requires `secretmanager.secretAccessor`, granted only to the workstation's service account.
-
-To audit credential access, look at Secret Manager's data access audit logs — every fetch (boot-time, per-operation, periodic) appears there.
+- **Extension points, lightest first.** Experiment with **live changes** on the running box (lost on rebuild); promote what sticks to **local config** in `~/.config/ra/` or `.ra/` (`Dockerfile.d/`, `workstation-startup.d/`, `profile.d/` merged into every build); package the shareable stuff as a **plugin**. See the [plugin authoring guide](docs/authoring-plugins.md).
+- **Auth at runtime.** At boot, `200_remote-agent-setup.sh` fetches each secret named in `RA_SECRETS` from Secret Manager into `/etc/environment` + `/run/ra/env`; plugin startup scripts run after and gate on `RA_PLUGIN_<NAME>_ENABLED`. Config carries only secret names — reading values requires `secretmanager.secretAccessor`, held solely by the workstation's service account. Audit every fetch in Secret Manager's data-access logs.
+- **`ra plugin` reference.** `install <source> [<path>]` supports `--ref <branch|tag|commit>`, `--user` / `--local` (level), and `--force`; `list` and `remove <name>` round it out. The two-arg form installs one plugin from a multi-plugin repo: `ra plugin install https://github.com/adamtait/ra-plugins github`.
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
-build/test instructions and project conventions, and [SECURITY.md](SECURITY.md)
-to report a vulnerability.
+Issues and pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for build/test instructions and conventions, and [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## License
 
