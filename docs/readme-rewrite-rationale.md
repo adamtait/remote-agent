@@ -39,6 +39,17 @@ platform, and present costs/comparisons as scannable tables.
   runtime-auth walkthrough, plugin reference, and rotation docs into a tight
   "How it fits together" section with links out.
 
+## Post-review adjustments
+
+Applied after the PR #153 code review:
+
+- Restored `ra logs` and `ra delete` to the lifecycle usage block — `delete` is
+  distinct from `stop` and had no replacement.
+- De-linked the "intro post / cost appendix" reference (it pointed at the repo
+  root); left an inline `TODO` to link the real URL once published.
+- Recovered the two most useful bits from the removed sections in one bullet
+  each: secret rotation semantics, and the `ra plugin et connect` transport.
+
 ## Known gaps / follow-ups
 
 - The "intro post" / cost-appendix link points at the repo root as a

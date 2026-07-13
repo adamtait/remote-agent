@@ -77,8 +77,10 @@ Drive the lifecycle. Every targeted command takes an optional `[name]`; without 
 ```bash
 ra list               # NAME / STATE for the cluster's workstations
 ra url                # print the browser IDE URL
+ra logs               # stream the workstation's container logs
 ra stop               # stop to halt per-minute charges (home disk persists)
 ra tunnel 8080        # forward a workstation port to localhost:8080
+ra delete             # delete one workstation (leaves the shared cluster up)
 ```
 
 Kill the standing cost when you're done for a while — the cluster control plane bills 24/7 until it's deleted:
@@ -121,13 +123,15 @@ The workstation is cheap; the **cluster control plane** is the real line item �
 | Workstation (`e2-standard-2`) | ~$0.17 / running hour | per minute while running; $0 asleep |
 | Persistent home disk (50 GB) | ~$0.16 / day | continuously, even while stopped |
 
-A typical 8-hour coding day on one cluster runs **~$6/day** (~$5 base + ~$1.34 running). The single biggest lever is cluster count — see the [cost appendix in the intro post](https://github.com/adamtait/remote-agent) for the full breakdown and sources.
+A typical 8-hour coding day on one cluster runs **~$6/day** (~$5 base + ~$1.34 running). The single biggest lever is cluster count — the intro post's cost appendix has the full breakdown and sources.
+<!-- TODO: link the published intro post / cost appendix once it has a URL -->
 
 ## How it fits together
 
 - **Extension points, lightest first.** Experiment with **live changes** on the running box (lost on rebuild); promote what sticks to **local config** in `~/.config/ra/` or `.ra/` (`Dockerfile.d/`, `workstation-startup.d/`, `profile.d/` merged into every build); package the shareable stuff as a **plugin**. See the [plugin authoring guide](docs/authoring-plugins.md).
 - **Auth at runtime.** At boot, `200_remote-agent-setup.sh` fetches each secret named in `RA_SECRETS` from Secret Manager into `/etc/environment` + `/run/ra/env`; plugin startup scripts run after and gate on `RA_PLUGIN_<NAME>_ENABLED`. Config carries only secret names — reading values requires `secretmanager.secretAccessor`, held solely by the workstation's service account. Audit every fetch in Secret Manager's data-access logs.
-- **`ra plugin` reference.** `install <source> [<path>]` supports `--ref <branch|tag|commit>`, `--user` / `--local` (level), and `--force`; `list` and `remove <name>` round it out. The two-arg form installs one plugin from a multi-plugin repo: `ra plugin install https://github.com/adamtait/ra-plugins github`.
+- **`ra plugin` reference.** `install <source> [<path>]` supports `--ref <branch|tag|commit>`, `--user` / `--local` (level), and `--force`; `list` and `remove <name>` round it out. The two-arg form installs one plugin from a multi-plugin repo: `ra plugin install https://github.com/adamtait/ra-plugins github`. Plugins can also add their own subcommands — e.g. `ra plugin et connect` tunnels through [Eternal Terminal](https://eternalterminal.dev/) so a dropped SSH session auto-resumes.
+- **Rotating secrets.** Rotate a plugin credential by re-running its install with `--force` (`ra plugin install <source> <name> --force`) or `gcloud secrets versions add`. Per-operation helpers (e.g. the GitHub PAT) and periodic-refresh API keys pick up the new version without a restart; boot-time secrets need an `ra stop` + start to take effect.
 
 ## Contributing
 
