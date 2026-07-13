@@ -49,10 +49,25 @@ cat > /usr/local/lib/ra/ra-env.sh <<'RA_ENV_LIB'
 # ra-env helper library — installed by 200_remote-agent-setup.sh; sourced by the
 # core setup script and by plugin workstation-startup.d scripts.
 #
-#   ra_env_set KEY VALUE  — dedup + write KEY to BOTH /etc/environment and
-#                           /run/ra/env, single-quote escaped. Creates
-#                           /run/ra/env lazily, owned user:user 0600.
-#   ra_env_unset KEY      — remove KEY from BOTH files. Idempotent; set -e safe.
+#   ra_env_set KEY VALUE        — dedup + write KEY to BOTH /etc/environment and
+#                                 /run/ra/env. For NON-secret config (gates,
+#                                 identity, propagated RA_* vars).
+#   ra_env_set_secret KEY VALUE — dedup + write KEY to /run/ra/env ONLY (never
+#                                 /etc/environment), and strip any stale copy of
+#                                 KEY from /etc/environment. For fetched secret
+#                                 values (OAuth tokens, API keys).
+#   ra_env_unset KEY            — remove KEY from BOTH files. Idempotent; set -e safe.
+#
+# Why the split: /etc/environment is world-readable (0644, read by pam_env for
+# every login regardless of shell), so secrets must never land there.
+# /run/ra/env is 0600 user:user on tmpfs, sourced into interactive login shells
+# by profile.d/00-ra-wait.sh. Non-secret config stays in both files so gates and
+# shell-agnostic pam_env delivery keep working; secrets ride only the 0600 file.
+#
+# Shell coverage: /run/ra/env is delivered by POSIX-shell sourcing (`set -a; . FILE`
+# in profile.d), which covers bash/sh and Debian's zsh (its /etc/zsh/zprofile
+# sources /etc/profile). fish is NOT supported — it cannot source POSIX syntax
+# and does not read /etc/profile.d, so secrets are unavailable in fish sessions.
 #
 # Both files are single-quote-wrapped (with embedded-quote escaping `'\''`) so a
 # value containing spaces or shell metacharacters can't be re-parsed as extra
@@ -70,6 +85,23 @@ cat > /usr/local/lib/ra/ra-env.sh <<'RA_ENV_LIB'
 # safe without escaping. Plugins don't set RA_ENV_FILE, so default it here.
 : "${RA_ENV_FILE:=/run/ra/env}"
 
+# Append KEY='quoted' to /run/ra/env only, deduped. Creates the file 0600
+# user:user on first write. The umask is scoped to a subshell so it can't leak
+# into a sourcing plugin's shell and tighten files that plugin creates
+# afterward. Owned by `user` because the `user` login shell sources it via
+# profile.d/00-ra-wait.sh (root, the writer, can read it regardless).
+_ra_env_write_run() {
+    local key="$1"
+    local quoted="$2"
+    if [ ! -f "${RA_ENV_FILE}" ]; then
+        ( umask 077; : > "${RA_ENV_FILE}" )
+        chown user:user "${RA_ENV_FILE}"
+        chmod 0600 "${RA_ENV_FILE}"
+    fi
+    sed -i "/^${key}=/d" "${RA_ENV_FILE}"
+    printf "%s='%s'\n" "${key}" "${quoted}" >> "${RA_ENV_FILE}"
+}
+
 ra_env_set() {
     local key="$1"
     local val="$2"
@@ -79,19 +111,19 @@ ra_env_set() {
     sed -i "/^${key}=/d" /etc/environment
     printf "%s='%s'\n" "${key}" "${quoted}" >> /etc/environment
 
-    if [ ! -f "${RA_ENV_FILE}" ]; then
-        # Create 0600 from the start. The umask is scoped to a subshell so it
-        # can't leak into a sourcing plugin's shell and tighten files that
-        # plugin creates afterward. Holds fetched secret values (OAuth tokens,
-        # API keys); the `user` login shell sources it via
-        # profile.d/00-ra-wait.sh, so own it by `user` (root, the writer, can
-        # read it regardless).
-        ( umask 077; : > "${RA_ENV_FILE}" )
-        chown user:user "${RA_ENV_FILE}"
-        chmod 0600 "${RA_ENV_FILE}"
-    fi
-    sed -i "/^${key}=/d" "${RA_ENV_FILE}"
-    printf "%s='%s'\n" "${key}" "${quoted}" >> "${RA_ENV_FILE}"
+    _ra_env_write_run "${key}" "${quoted}"
+}
+
+ra_env_set_secret() {
+    local key="$1"
+    local val="$2"
+    local quoted="${val//\'/\'\\\'\'}"
+
+    # Secrets never touch the world-readable /etc/environment. Strip any stale
+    # copy defensively (e.g. left by an older core that wrote both files).
+    [ -f /etc/environment ] && sed -i "/^${key}=/d" /etc/environment
+
+    _ra_env_write_run "${key}" "${quoted}"
 }
 
 ra_env_unset() {
@@ -146,8 +178,8 @@ for logical in "${ra_secret_names[@]}"; do
         --secret="${secret_name}" --project="${GCP_PROJECT_ID}" \
         2> >(while read -r line; do log "gcloud: ${line}"; done) || true)
     if [[ -n "${val}" ]]; then
-        ra_env_set "${target_env_var}" "${val}"
-        log "Exported ${target_env_var} via /etc/environment and ${RA_ENV_FILE}."
+        ra_env_set_secret "${target_env_var}" "${val}"
+        log "Exported ${target_env_var} via ${RA_ENV_FILE} (secret; not written to /etc/environment)."
     else
         log "WARNING: ${secret_name} fetch returned empty."
     fi
