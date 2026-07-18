@@ -65,24 +65,31 @@ var idSafeRe = regexp.MustCompile(`[^a-z0-9_-]+`)
 
 // stableWorkstationID derives a deterministic identity token from inputs
 // that survive `ra create` rebuilds — the gcloud project, the workstation
-// config_name, and the git user email. Unlike the GCE instance name
-// (which is a fresh UUID every create), these are stable for a given
-// (project, config, user) triple, so a plugin keyed on this token reuses
-// ONE per-workstation identity across rebuilds instead of accumulating a
-// fresh one each time. Plugins opt in via `stable_id:` in plugin.yaml.
+// config_name, the workstation name, and the git user email. Unlike the
+// GCE instance name (which is a fresh UUID every create), these are stable
+// for a given workstation, so a plugin keyed on this token reuses ONE
+// per-workstation identity across rebuilds instead of accumulating a fresh
+// one each time. Plugins opt in via `stable_id:` in plugin.yaml.
+//
+// The workstation name is part of the identity because one config can
+// host several workstations (one per local username — see
+// config.WorkstationName). Without it they all shared a single id, so a
+// plugin like claude-sync had two live machines writing one namespace.
 //
 // The output is lowercased, restricted to [a-z0-9_-], slash-free, and
-// suffixed with an 8-hex digest of the raw triple so two triples that
+// suffixed with an 8-hex digest of the raw inputs so two input sets that
 // collapse to the same sanitized stem (e.g. emails differing only in
-// punctuation) still get distinct ids. Returns "" if all three inputs are
-// empty, so the caller can skip injection and let the plugin fall back to
-// its own default.
-func stableWorkstationID(project, configName, userEmail string) string {
+// punctuation) still get distinct ids. The human-readable stem stays
+// project + config; the digest carries the workstation name. Returns "" if
+// all inputs are empty, so the caller can skip injection and let the
+// plugin fall back to its own default.
+func stableWorkstationID(project, configName, workstationName, userEmail string) string {
 	p := strings.ToLower(strings.TrimSpace(project))
 	c := strings.ToLower(strings.TrimSpace(configName))
+	w := strings.ToLower(strings.TrimSpace(workstationName))
 	e := strings.ToLower(strings.TrimSpace(userEmail))
-	raw := p + "/" + c + "/" + e
-	if raw == "//" {
+	raw := p + "/" + c + "/" + w + "/" + e
+	if raw == "///" {
 		return ""
 	}
 	sum := sha1.Sum([]byte(raw))
@@ -244,7 +251,7 @@ func buildContainerEnv(cfg *config.Config) string {
 	// user) that the static plugin-config path cannot express, which is why
 	// it is computed here rather than flowing through reg.AllContainerEnvPairs.
 	if reg != nil {
-		if id := stableWorkstationID(cfg.Gcloud.Project, cfg.Gcloud.Workstation.ConfigName, cfg.Git.UserEmail); id != "" {
+		if id := stableWorkstationID(cfg.Gcloud.Project, cfg.Gcloud.Workstation.ConfigName, cfg.WorkstationName, cfg.Git.UserEmail); id != "" {
 			for _, p := range reg.All() {
 				spec := p.Schema().StableID
 				if spec == nil || spec.EnvVar == "" {

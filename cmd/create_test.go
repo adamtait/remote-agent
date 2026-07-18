@@ -546,14 +546,14 @@ func envMap(s string) map[string]string {
 }
 
 func TestStableWorkstationID_DeterministicAndStableAcrossRebuilds(t *testing.T) {
-	a := stableWorkstationID("my-proj", "ra-default", "Adam@Example.com")
-	b := stableWorkstationID("my-proj", "ra-default", "Adam@Example.com")
+	a := stableWorkstationID("my-proj", "ra-default", "ra-my-proj-adam", "Adam@Example.com")
+	b := stableWorkstationID("my-proj", "ra-default", "ra-my-proj-adam", "Adam@Example.com")
 	if a != b {
 		t.Fatalf("stableWorkstationID not deterministic: %q vs %q", a, b)
 	}
 	// Case/whitespace in inputs must not change the result — a rebuild
 	// reading the same config (possibly re-cased) must reuse the id.
-	c := stableWorkstationID("  MY-PROJ ", "RA-DEFAULT", "adam@example.com")
+	c := stableWorkstationID("  MY-PROJ ", "RA-DEFAULT", " RA-MY-PROJ-ADAM", "adam@example.com")
 	if a != c {
 		t.Errorf("stableWorkstationID not normalization-stable: %q vs %q", a, c)
 	}
@@ -570,15 +570,17 @@ func TestStableWorkstationID_DeterministicAndStableAcrossRebuilds(t *testing.T) 
 }
 
 func TestStableWorkstationID_DistinctInputsDistinctIDs(t *testing.T) {
-	cases := [][3]string{
-		{"proj-a", "cfg", "u@x.com"},
-		{"proj-b", "cfg", "u@x.com"},
-		{"proj-a", "cfg2", "u@x.com"},
-		{"proj-a", "cfg", "v@x.com"},
+	cases := [][4]string{
+		{"proj-a", "cfg", "ws-1", "u@x.com"},
+		{"proj-b", "cfg", "ws-1", "u@x.com"},
+		{"proj-a", "cfg2", "ws-1", "u@x.com"},
+		{"proj-a", "cfg", "ws-1", "v@x.com"},
+		// Two workstations on one config must not share an id.
+		{"proj-a", "cfg", "ws-2", "u@x.com"},
 	}
 	seen := map[string]bool{}
 	for _, c := range cases {
-		id := stableWorkstationID(c[0], c[1], c[2])
+		id := stableWorkstationID(c[0], c[1], c[2], c[3])
 		if seen[id] {
 			t.Errorf("collision for %v -> %q", c, id)
 		}
@@ -587,7 +589,7 @@ func TestStableWorkstationID_DistinctInputsDistinctIDs(t *testing.T) {
 }
 
 func TestStableWorkstationID_EmptyInputsYieldEmpty(t *testing.T) {
-	if id := stableWorkstationID("", "", ""); id != "" {
+	if id := stableWorkstationID("", "", "", ""); id != "" {
 		t.Errorf("expected empty id for empty inputs, got %q", id)
 	}
 }
@@ -614,12 +616,13 @@ func TestBuildContainerEnv_InjectsStableIDWhenPluginEnabled(t *testing.T) {
 		Gcloud: config.GcloudConfig{Project: "p", Workstation: config.WorkstationConfig{
 			ConfigName: "ra-default",
 		}},
+		WorkstationName: "ra-p-alice",
 		Plugins: map[string]map[string]interface{}{
 			"test-stable-plugin": {"enabled": true},
 		},
 	}
 	m := envMap(buildContainerEnv(cfg))
-	want := stableWorkstationID("p", "ra-default", "a@x.com")
+	want := stableWorkstationID("p", "ra-default", "ra-p-alice", "a@x.com")
 	// The env-var name comes from the plugin's own `stable_id.env_var`
 	// declaration — core hard-codes nothing.
 	if m["RA_PLUGIN_TEST_STABLE_PLUGIN_ID"] != want {
