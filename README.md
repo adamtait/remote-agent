@@ -2,7 +2,7 @@
 
 **Run your CLI coding agents securely on a throwaway Google Cloud Workstation, not your laptop.**
 
-`ra` provisions a browser- and SSH-accessible [Google Cloud Workstation](https://cloud.google.com/workstations), attaches your credentials through GCP Secret Manager, and drops you into a persistent dev environment where an agent can read untrusted issues and run shell commands without ever touching your `~/.aws/credentials` or your email session. It's a single Go binary that wraps `gcloud` — bring the terminal agent you already use.
+`ra` provisions a browser- and SSH-accessible [Google Cloud Workstation](https://cloud.google.com/workstations), attaches your credentials through GCP Secret Manager, and drops you into a persistent dev environment where an agent can read untrusted issues and run shell commands without ever touching your ~/.aws/credentials or your email session. It's a single Go binary that wraps gcloud — bring the terminal agent you already use.
 
 ```console
 $ ra create
