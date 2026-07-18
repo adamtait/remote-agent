@@ -54,6 +54,8 @@ gcloud auth login     # authenticated gcloud CLI, on a project with billing enab
 docker --version      # docker with buildx (cross-arch image builds)
 git --version         # used to clone plugins
 ```
+- [gcloud install](https://docs.cloud.google.com/sdk/docs/install-sdk)
+- docker install: [desktop](https://docs.docker.com/get-started/introduction/get-docker-desktop/) or [engine](https://docs.docker.com/engine/install/)
 
 ## Usage
 
