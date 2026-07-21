@@ -12,6 +12,7 @@ install: build
 	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)
 	@if [ "$$(uname -s)" = "Darwin" ]; then codesign --sign - --force $(INSTALL_DIR)/$(BINARY); fi
 	@echo "Installed to $(INSTALL_DIR)/$(BINARY)"
+	@sh scripts/ensure-path.sh "$(INSTALL_DIR)"
 
 test:
 	go test ./...
