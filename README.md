@@ -45,15 +45,23 @@ cd remote-agent
 make install          # builds ./ra and installs to ~/.local/bin/ra
 ```
 
-<!-- TODO: publish prebuilt binaries / Homebrew tap / Windows (WSL) instructions -->
-
-**Prerequisites** (all shelled out to, so they must be on your `PATH`):
+Make sure `~/.local/bin` is on your `PATH` (it isn't by default on macOS) so the `ra` command is found:
 
 ```bash
+export PATH="$HOME/.local/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc to persist
+```
+
+<!-- TODO: publish prebuilt binaries / Homebrew tap / Windows (WSL) instructions -->
+
+**Prerequisites** (all on your `PATH`):
+
+```bash
+go version            # Go toolchain to build ra (see the `go` directive in go.mod)
 gcloud auth login     # authenticated gcloud CLI, on a project with billing enabled
 docker --version      # docker with buildx (cross-arch image builds)
 git --version         # used to clone plugins
 ```
+- [Go install](https://go.dev/dl/)
 - [gcloud install](https://docs.cloud.google.com/sdk/docs/install-sdk)
 - docker install: [desktop](https://docs.docker.com/get-started/introduction/get-docker-desktop/) or [engine](https://docs.docker.com/engine/install/)
 
