@@ -709,3 +709,23 @@ func TestLifecycleRulesFor_ConvertsSpec(t *testing.T) {
 		t.Errorf("expected nil for spec with no lifecycle rules")
 	}
 }
+
+func TestSoftDeleteDaysByBucket_MaxAcrossSharedBucket(t *testing.T) {
+	seven, thirty := 7, 30
+	buckets := []resolvedBucket{
+		{Plugin: "p1", Name: "shared", Spec: plugins.BucketSpec{SoftDeleteDays: &thirty}},
+		{Plugin: "p2", Name: "shared", Spec: plugins.BucketSpec{SoftDeleteDays: &seven}},
+		{Plugin: "p3", Name: "solo", Spec: plugins.BucketSpec{SoftDeleteDays: &seven}},
+		{Plugin: "p4", Name: "undeclared", Spec: plugins.BucketSpec{}},
+	}
+	got := softDeleteDaysByBucket(buckets)
+	if got["shared"] != 30 {
+		t.Errorf("shared = %d, want 30 (max, not last-wins)", got["shared"])
+	}
+	if got["solo"] != 7 {
+		t.Errorf("solo = %d, want 7", got["solo"])
+	}
+	if _, ok := got["undeclared"]; ok {
+		t.Errorf("undeclared bucket should be absent so its policy is left alone")
+	}
+}

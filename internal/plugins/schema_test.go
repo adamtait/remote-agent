@@ -150,6 +150,7 @@ buckets:
     override_field: bucket_name_override
     role: roles/storage.objectAdmin
     env_var: RA_PLUGIN_EXAMPLE_BUCKET
+    soft_delete_days: 7
   - name: cache
     name_template: "ra-example-cache-{project_id}"
     role: roles/storage.objectViewer
@@ -170,6 +171,12 @@ buckets:
 	}
 	if s.Buckets[0].Role != "roles/storage.objectAdmin" || s.Buckets[0].EnvVar != "RA_PLUGIN_EXAMPLE_BUCKET" {
 		t.Errorf("Buckets[0] role/env_var wrong: %+v", s.Buckets[0])
+	}
+	if s.Buckets[0].SoftDeleteDays == nil || *s.Buckets[0].SoftDeleteDays != 7 {
+		t.Errorf("Buckets[0].SoftDeleteDays = %v, want 7", s.Buckets[0].SoftDeleteDays)
+	}
+	if s.Buckets[1].SoftDeleteDays != nil {
+		t.Errorf("Buckets[1].SoftDeleteDays should be nil when undeclared, got %d", *s.Buckets[1].SoftDeleteDays)
 	}
 	if s.Buckets[1].OverrideField != "" {
 		t.Errorf("Buckets[1].OverrideField should be empty, got %q", s.Buckets[1].OverrideField)

@@ -214,8 +214,16 @@ may not itself contain `|`.
   [ADR 0001](adr/0001-ra-tunnel-and-plugin-port-field.md).
 - **`buckets:`** — declares a GCS bucket that `ra` provisions at `ra create` time
   and exposes at runtime via env var. Fields: `name`, `name_template`,
-  `override_field`, `role`, `env_var`, plus optional `lifecycle` rules. Used by
-  `claude-sync`. See [ADR 0002](adr/0002-claude-state-sync.md).
+  `override_field`, `role`, `env_var`, plus optional `lifecycle` rules and
+  `soft_delete_days` (7–90: a floor on how long overwritten/deleted objects
+  stay restorable; `ra create` only ever raises a bucket's retention, and a
+  failure to set it is a warning). Used by `claude-sync`. See
+  [ADR 0002](adr/0002-claude-state-sync.md).
+- **`stable_id: { env_var: ... }`** — asks `ra create` to inject a deterministic
+  id derived from (project, config, git email) that survives rebuilds. It is set
+  on the workstation *config*, so every workstation on that config (including a
+  rebuild's new workstation while the old one still runs) sees the same value.
+  Used by `claude-sync` as its sync namespace.
 - **`commands:`** — declares CLI subcommands the plugin contributes, invoked as
   `ra plugin <plugin-name> <command-name>`. Each runs a local `run:` script with a
   workstation env contract. Used by `et` (`ra plugin et connect`). See

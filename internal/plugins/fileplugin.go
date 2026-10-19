@@ -77,6 +77,9 @@ func LoadPlugin(fsys fs.FS) (*FilePlugin, error) {
 		if b.EnvVar == "" {
 			return nil, fmt.Errorf("plugin.yaml: buckets[%d] (%q): env_var is required", i, b.Name)
 		}
+		if d := b.SoftDeleteDays; d != nil && (*d < 7 || *d > 90) {
+			return nil, fmt.Errorf("plugin.yaml: buckets[%d] (%q): soft_delete_days must be 7-90, got %d", i, b.Name, *d)
+		}
 		if seenBucketEnvVars[b.EnvVar] {
 			return nil, fmt.Errorf("plugin.yaml: buckets[%d] (%q): duplicate env_var %q", i, b.Name, b.EnvVar)
 		}

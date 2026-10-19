@@ -87,6 +87,14 @@ type BucketSpec struct {
 	// so they never touch another plugin's data in a shared bucket, and
 	// thereby keep the bucket's at-rest cost bounded.
 	Lifecycle []LifecycleRule `yaml:"lifecycle"`
+	// SoftDeleteDays, when set, is a floor on the bucket's GCS soft-delete
+	// retention: overwritten or deleted objects stay restorable (`gcloud
+	// storage restore`) for at least this many days. 7–90 (GCS's range;
+	// validated at plugin load). `ra create` only ever raises the bucket's
+	// retention to the largest value declared by plugins sharing it — never
+	// lowers or clears an existing longer policy, which may belong to other
+	// users of a shared bucket. Nil leaves the policy alone.
+	SoftDeleteDays *int `yaml:"soft_delete_days"`
 }
 
 // LifecycleRule is one GCS Object Lifecycle Management rule, mapped 1:1
