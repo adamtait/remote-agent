@@ -103,6 +103,16 @@ func TestLoadPlugin_BucketValidation(t *testing.T) {
 			yamlBody:  "buckets:\n  - { name: a, name_template: t, role: r, env_var: E }\n  - { name: b, name_template: u, role: r, env_var: E }\n",
 			wantError: "duplicate env_var",
 		},
+		{
+			name:      "soft_delete_days below GCS minimum",
+			yamlBody:  "buckets:\n  - { name: a, name_template: t, role: r, env_var: E, soft_delete_days: 3 }\n",
+			wantError: "soft_delete_days must be 7-90",
+		},
+		{
+			name:      "soft_delete_days above GCS maximum",
+			yamlBody:  "buckets:\n  - { name: a, name_template: t, role: r, env_var: E, soft_delete_days: 200 }\n",
+			wantError: "soft_delete_days must be 7-90",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

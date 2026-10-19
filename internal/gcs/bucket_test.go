@@ -18,6 +18,8 @@ type fakeRunner struct {
 	runErr   error
 	captures map[string]string // joined-args → stderr to return
 	captErr  map[string]error  // joined-args → error to return
+	outputs  map[string]string // joined-args → stdout for Output/OutputQuiet
+	outErr   error             // error for Output/OutputQuiet
 }
 
 func (f *fakeRunner) key(args []string) string { return strings.Join(args, " ") }
@@ -45,7 +47,10 @@ func (f *fakeRunner) RunCapture(args ...string) (string, error) {
 }
 func (f *fakeRunner) Output(args ...string) ([]byte, error) {
 	f.calls = append(f.calls, args)
-	return nil, nil
+	if f.outErr != nil {
+		return nil, f.outErr
+	}
+	return []byte(f.outputs[f.key(args)]), nil
 }
 func (f *fakeRunner) OutputQuiet(args ...string) ([]byte, error) {
 	return f.Output(args...)
@@ -351,35 +356,55 @@ func TestApplyLifecycle_RunsUpdateWithLifecycleFile(t *testing.T) {
 	}
 }
 
-func TestApplySoftDelete_SetsDuration(t *testing.T) {
-	f := &fakeRunner{}
-	if err := gcs.ApplySoftDelete(f, "my-proj", "my-bucket", 7); err != nil {
-		t.Fatalf("ApplySoftDelete: %v", err)
+const describeSoftDelete = "storage buckets describe gs://my-bucket --project my-proj --format=value(soft_delete_policy.retentionDurationSeconds)"
+
+func lastCall(f *fakeRunner) string { return strings.Join(f.calls[len(f.calls)-1], " ") }
+
+func TestApplySoftDelete_RaisesShorterRetention(t *testing.T) {
+	f := &fakeRunner{outputs: map[string]string{describeSoftDelete: "0\n"}}
+	changed, err := gcs.ApplySoftDelete(f, "my-proj", "my-bucket", 7)
+	if err != nil || !changed {
+		t.Fatalf("ApplySoftDelete = (%v, %v), want (true, nil)", changed, err)
 	}
-	if len(f.calls) != 1 {
-		t.Fatalf("expected 1 gcloud call, got %d: %v", len(f.calls), f.calls)
-	}
-	got := strings.Join(f.calls[0], " ")
 	want := "storage buckets update gs://my-bucket --project my-proj --soft-delete-duration=7d"
-	if got != want {
+	if got := lastCall(f); got != want {
 		t.Errorf("call = %q, want %q", got, want)
 	}
 }
 
-func TestApplySoftDelete_ZeroClears(t *testing.T) {
-	f := &fakeRunner{}
-	if err := gcs.ApplySoftDelete(f, "p", "b", 0); err != nil {
-		t.Fatalf("ApplySoftDelete: %v", err)
+func TestApplySoftDelete_NeverLowersLongerRetention(t *testing.T) {
+	// An admin set 30d on a shared bucket; a plugin's 7d must not cut it.
+	f := &fakeRunner{outputs: map[string]string{describeSoftDelete: "2592000"}}
+	changed, err := gcs.ApplySoftDelete(f, "my-proj", "my-bucket", 7)
+	if err != nil || changed {
+		t.Fatalf("ApplySoftDelete = (%v, %v), want (false, nil)", changed, err)
 	}
-	if got := strings.Join(f.calls[0], " "); !strings.HasSuffix(got, "--clear-soft-delete") {
-		t.Errorf("call = %q, want --clear-soft-delete", got)
+	if got := lastCall(f); got != describeSoftDelete {
+		t.Errorf("expected only the describe call, last call was %q", got)
+	}
+}
+
+func TestApplySoftDelete_UpdatesWhenPolicyUnreadable(t *testing.T) {
+	f := &fakeRunner{outErr: errors.New("403 storage.buckets.get denied")}
+	if changed, err := gcs.ApplySoftDelete(f, "my-proj", "my-bucket", 7); err != nil || !changed {
+		t.Fatalf("ApplySoftDelete = (%v, %v), want (true, nil)", changed, err)
+	}
+	if got := lastCall(f); !strings.Contains(got, "--soft-delete-duration=7d") {
+		t.Errorf("expected an update attempt, got %q", got)
+	}
+}
+
+func TestApplySoftDelete_ReturnsUpdateError(t *testing.T) {
+	f := &fakeRunner{outputs: map[string]string{describeSoftDelete: "0"}, runErr: errors.New("403")}
+	if _, err := gcs.ApplySoftDelete(f, "my-proj", "my-bucket", 7); err == nil {
+		t.Fatal("expected the update error to be returned for the caller to WARN")
 	}
 }
 
 func TestApplySoftDelete_RejectsOutOfRange(t *testing.T) {
-	for _, days := range []int{-1, 1, 6, 91} {
+	for _, days := range []int{-1, 0, 6, 91} {
 		f := &fakeRunner{}
-		if err := gcs.ApplySoftDelete(f, "p", "b", days); err == nil {
+		if _, err := gcs.ApplySoftDelete(f, "p", "b", days); err == nil {
 			t.Errorf("days=%d: expected error", days)
 		}
 		if len(f.calls) != 0 {

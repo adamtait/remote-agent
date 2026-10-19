@@ -555,17 +555,20 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 				return fmt.Errorf("applying lifecycle to bucket %s: %w", name, err)
 			}
 		}
-		// Assert declared soft-delete retention once per bucket (largest
-		// value across sharing plugins). Skipped for undeclared buckets.
+		// Raise soft-delete retention to the largest value sharing plugins
+		// declare (never lowered). Skipped for undeclared buckets. A
+		// failure (e.g. no storage.buckets.update on a shared bucket) is a
+		// WARN, not fatal: it's a recovery net, not a dependency.
 		softDelete := softDeleteDaysByBucket(pluginBucketList)
 		for _, name := range bucketOrder {
 			days, ok := softDelete[name]
 			if !ok {
 				continue
 			}
-			if err := gcs.ApplySoftDelete(r, cfg.Gcloud.Project, name, days); err != nil {
-				done(err)
-				return fmt.Errorf("applying soft delete to bucket %s: %w", name, err)
+			if _, err := gcs.ApplySoftDelete(r, cfg.Gcloud.Project, name, days); err != nil {
+				logging.WarnPrintf(cmd.OutOrStdout(),
+					"could not set %dd soft-delete retention on bucket %s (needs storage.buckets.update): %v; continuing",
+					days, name, err)
 			}
 		}
 		done(nil)

@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -204,22 +205,32 @@ func BuildLifecycleJSON(rules []LifecycleRule) ([]byte, error) {
 	return json.MarshalIndent(payload, "", "  ")
 }
 
-// ApplySoftDelete sets the bucket's soft-delete retention via `gcloud
-// storage buckets update`. days == 0 disables soft delete
-// (--clear-soft-delete); otherwise GCS requires 7–90 days, validated here
-// so a typo in plugin.yaml fails at `ra create` with a clear message.
-// Idempotent: re-asserting the same duration is a no-op on the GCS side.
-func ApplySoftDelete(r gcloud.Runner, project, name string, days int) error {
-	args := []string{"storage", "buckets", "update", "gs://" + name, "--project", project}
-	switch {
-	case days == 0:
-		args = append(args, "--clear-soft-delete")
-	case days >= 7 && days <= 90:
-		args = append(args, fmt.Sprintf("--soft-delete-duration=%dd", days))
-	default:
-		return fmt.Errorf("soft_delete_days must be 0 or 7-90, got %d", days)
+// ApplySoftDelete raises the bucket's soft-delete retention to at least
+// `days` (7–90, GCS's range). It never lowers or clears it: the current
+// policy is read first and a retention already >= days is left alone, so
+// a shared bucket an admin set to 30d isn't cut to a plugin's 7d. If the
+// current policy can't be read (no storage.buckets.get), the update is
+// attempted anyway. Returns (true, nil) when it changed the policy.
+// Uses RunSoft: soft delete is a safety net, so callers WARN and carry on
+// rather than failing `ra create`.
+func ApplySoftDelete(r gcloud.Runner, project, name string, days int) (bool, error) {
+	if days < 7 || days > 90 {
+		return false, fmt.Errorf("soft_delete_days must be 7-90, got %d", days)
 	}
-	return r.Run(args...)
+	out, err := r.OutputQuiet("storage", "buckets", "describe", "gs://"+name,
+		"--project", project,
+		"--format=value(soft_delete_policy.retentionDurationSeconds)")
+	if err == nil {
+		if cur, perr := strconv.Atoi(strings.TrimSpace(string(out))); perr == nil && cur >= days*86400 {
+			return false, nil
+		}
+	}
+	if err := r.RunSoft("storage", "buckets", "update", "gs://"+name,
+		"--project", project,
+		fmt.Sprintf("--soft-delete-duration=%dd", days)); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ApplyLifecycle writes the rules to a temp lifecycle-file and runs
