@@ -37,8 +37,9 @@ type PluginSchema struct {
 	Buckets []BucketSpec `yaml:"buckets"`
 	// StableID, when set, asks `ra create` to inject a deterministic
 	// workstation-identity token into the named env var. The token is
-	// derived from (gcloud project, workstation config_name, git user
-	// email), so it is stable across `ra create` rebuilds — unlike the GCE
+	// derived from (gcloud project, workstation config_name, workstation
+	// name, git user email), so it is stable across `ra create` rebuilds
+	// and distinct per workstation on a shared config — unlike the GCE
 	// instance name, which is a fresh UUID each create. Generic, like
 	// `buckets:` and `port-for-tunnel:`: core hard-codes no plugin name;
 	// the env-var name comes from this declaration, and injection is gated
@@ -87,6 +88,13 @@ type BucketSpec struct {
 	// so they never touch another plugin's data in a shared bucket, and
 	// thereby keep the bucket's at-rest cost bounded.
 	Lifecycle []LifecycleRule `yaml:"lifecycle"`
+	// SoftDeleteDays, when set, asserts the bucket's GCS soft-delete
+	// retention: overwritten or deleted objects stay restorable (`gcloud
+	// storage restore`) for this many days. GCS accepts 0 (disabled) or
+	// 7–90. When several plugins share a bucket, `ra create` applies the
+	// largest declared value so no plugin's recovery window shrinks. Nil
+	// leaves the bucket's existing policy alone.
+	SoftDeleteDays *int `yaml:"soft_delete_days"`
 }
 
 // LifecycleRule is one GCS Object Lifecycle Management rule, mapped 1:1

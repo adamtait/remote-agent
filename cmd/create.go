@@ -210,6 +210,24 @@ func uniqueBucketsWithLifecycle(buckets []resolvedBucket) (order []string, lifec
 	return order, lifecycle
 }
 
+// softDeleteDaysByBucket returns, per unique bucket name, the largest
+// soft_delete_days any plugin sharing that bucket declares. Buckets whose
+// plugins declare none are absent, so their existing policy is left alone.
+// Max (not last-wins) so one plugin can never shrink another's recovery
+// window on a shared bucket.
+func softDeleteDaysByBucket(buckets []resolvedBucket) map[string]int {
+	out := map[string]int{}
+	for _, b := range buckets {
+		if b.Spec.SoftDeleteDays == nil {
+			continue
+		}
+		if cur, ok := out[b.Name]; !ok || *b.Spec.SoftDeleteDays > cur {
+			out[b.Name] = *b.Spec.SoftDeleteDays
+		}
+	}
+	return out
+}
+
 func buildContainerEnv(cfg *config.Config) string {
 	var pairs []string
 	// propagate is the explicit allowlist of keys that 200_remote-agent-setup.sh
@@ -542,6 +560,19 @@ func runCreate(cmd *cobra.Command, args []string) (retErr error) {
 			if err := gcs.ApplyLifecycle(r, cfg.Gcloud.Project, name, rules); err != nil {
 				done(err)
 				return fmt.Errorf("applying lifecycle to bucket %s: %w", name, err)
+			}
+		}
+		// Assert declared soft-delete retention once per bucket (largest
+		// value across sharing plugins). Skipped for undeclared buckets.
+		softDelete := softDeleteDaysByBucket(pluginBucketList)
+		for _, name := range bucketOrder {
+			days, ok := softDelete[name]
+			if !ok {
+				continue
+			}
+			if err := gcs.ApplySoftDelete(r, cfg.Gcloud.Project, name, days); err != nil {
+				done(err)
+				return fmt.Errorf("applying soft delete to bucket %s: %w", name, err)
 			}
 		}
 		done(nil)

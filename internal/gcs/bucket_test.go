@@ -350,3 +350,40 @@ func TestApplyLifecycle_RunsUpdateWithLifecycleFile(t *testing.T) {
 		}
 	}
 }
+
+func TestApplySoftDelete_SetsDuration(t *testing.T) {
+	f := &fakeRunner{}
+	if err := gcs.ApplySoftDelete(f, "my-proj", "my-bucket", 7); err != nil {
+		t.Fatalf("ApplySoftDelete: %v", err)
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("expected 1 gcloud call, got %d: %v", len(f.calls), f.calls)
+	}
+	got := strings.Join(f.calls[0], " ")
+	want := "storage buckets update gs://my-bucket --project my-proj --soft-delete-duration=7d"
+	if got != want {
+		t.Errorf("call = %q, want %q", got, want)
+	}
+}
+
+func TestApplySoftDelete_ZeroClears(t *testing.T) {
+	f := &fakeRunner{}
+	if err := gcs.ApplySoftDelete(f, "p", "b", 0); err != nil {
+		t.Fatalf("ApplySoftDelete: %v", err)
+	}
+	if got := strings.Join(f.calls[0], " "); !strings.HasSuffix(got, "--clear-soft-delete") {
+		t.Errorf("call = %q, want --clear-soft-delete", got)
+	}
+}
+
+func TestApplySoftDelete_RejectsOutOfRange(t *testing.T) {
+	for _, days := range []int{-1, 1, 6, 91} {
+		f := &fakeRunner{}
+		if err := gcs.ApplySoftDelete(f, "p", "b", days); err == nil {
+			t.Errorf("days=%d: expected error", days)
+		}
+		if len(f.calls) != 0 {
+			t.Errorf("days=%d: expected no gcloud call, got %v", days, f.calls)
+		}
+	}
+}

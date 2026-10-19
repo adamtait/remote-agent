@@ -204,6 +204,24 @@ func BuildLifecycleJSON(rules []LifecycleRule) ([]byte, error) {
 	return json.MarshalIndent(payload, "", "  ")
 }
 
+// ApplySoftDelete sets the bucket's soft-delete retention via `gcloud
+// storage buckets update`. days == 0 disables soft delete
+// (--clear-soft-delete); otherwise GCS requires 7–90 days, validated here
+// so a typo in plugin.yaml fails at `ra create` with a clear message.
+// Idempotent: re-asserting the same duration is a no-op on the GCS side.
+func ApplySoftDelete(r gcloud.Runner, project, name string, days int) error {
+	args := []string{"storage", "buckets", "update", "gs://" + name, "--project", project}
+	switch {
+	case days == 0:
+		args = append(args, "--clear-soft-delete")
+	case days >= 7 && days <= 90:
+		args = append(args, fmt.Sprintf("--soft-delete-duration=%dd", days))
+	default:
+		return fmt.Errorf("soft_delete_days must be 0 or 7-90, got %d", days)
+	}
+	return r.Run(args...)
+}
+
 // ApplyLifecycle writes the rules to a temp lifecycle-file and runs
 // `gcloud storage buckets update gs://<name> --lifecycle-file=<path>`.
 // Idempotent: GCS replaces the whole lifecycle config with whatever the
